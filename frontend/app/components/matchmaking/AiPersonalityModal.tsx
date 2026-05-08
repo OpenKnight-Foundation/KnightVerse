@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useMatchmakingContext, AiPersonality } from "@/context/matchmakingContext";
+import { getChessVariantById } from "@/lib/chessVariants";
 
 interface AiPersonalityModalProps {
   isOpen: boolean;
@@ -102,7 +103,9 @@ export function AiPersonalityModal({
   onClose,
   onConfirm,
 }: AiPersonalityModalProps) {
-  const { aiPersonality, setAiPersonality } = useMatchmakingContext();
+  const { aiPersonality, setAiPersonality, chessVariant } =
+    useMatchmakingContext();
+  const selectedVariant = getChessVariantById(chessVariant);
 
   if (!isOpen) return null;
 
@@ -141,11 +144,30 @@ export function AiPersonalityModal({
         {/* Header */}
         <div className="text-center space-y-1">
           <h2 className="text-2xl font-bold text-white tracking-wide">
-            Choose Your AI Co-Pilot
+            Finalize Match Setup
           </h2>
           <p className="text-gray-400 text-sm">
-            Select a personality style for your AI co-pilot before the match begins.
+            Lock in your preferred chess format and AI co-pilot before matchmaking starts.
           </p>
+        </div>
+
+        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-300/80">
+                Selected Variant
+              </p>
+              <h3 className="mt-1 text-lg font-semibold text-white">
+                {selectedVariant.label}
+              </h3>
+              <p className="mt-1 text-sm text-gray-300">
+                {selectedVariant.description}
+              </p>
+            </div>
+            <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100">
+              {selectedVariant.averageGameTime}
+            </span>
+          </div>
         </div>
 
         {/* Personality cards */}

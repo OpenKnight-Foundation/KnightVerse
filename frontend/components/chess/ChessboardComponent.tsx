@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
 
 import WhiteKing from "./chesspieces/white-king.svg";
@@ -74,6 +74,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [mounted, setMounted] = useState(false);
   const [boardWidth, setBoardWidth] = useState(width || 560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
+  const touchStartSquare = useRef<string | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
 
   // Memoize board state parsing - prevents re-parsing on every render
   const boardState = useMemo(() => parseFen(position), [position]);
@@ -271,6 +274,51 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
   }, []);
+
+  const getSquareFromTouch = useCallback((touch: React.Touch): [number, number] | null => {
+    if (!boardRef.current) return null;
+    const rect = boardRef.current.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    const col = Math.floor((x / rect.width) * 8);
+    const row = Math.floor((y / rect.height) * 8);
+    if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+    return [row, col];
+  }, []);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent, row: number, col: number) => {
+      if (!boardState[row][col]) return;
+      touchStartSquare.current = `${row},${col}`;
+      setSelectedSquare(`${row},${col}`);
+    },
+    [boardState],
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!touchStartSquare.current) return;
+      const sq = getSquareFromTouch(e.touches[0]);
+      if (sq) setHoveredSquare(`${sq[0]},${sq[1]}`);
+    },
+    [getSquareFromTouch],
+  );
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (!touchStartSquare.current) return;
+      const sq = getSquareFromTouch(e.changedTouches[0]);
+      if (sq) {
+        const [srcRow, srcCol] = touchStartSquare.current.split(",").map(Number);
+        attemptMove(srcRow, srcCol, sq[0], sq[1]);
+      }
+      touchStartSquare.current = null;
+      setHoveredSquare(null);
+      setSelectedSquare(null);
+    },
+    [getSquareFromTouch, attemptMove],
+  );
+
   if (!mounted) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-800 rounded-md">
@@ -280,9 +328,12 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   }
   return (
     <div
+      ref={boardRef}
       className="chessboard-container w-full mx-auto relative"
       role="grid"
       aria-label="Chess Board"
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       style={{
         width: "100%",
         maxWidth: `${boardWidth}px`,
@@ -306,7 +357,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       {boardState.map((row, rowIndex) =>
         row.map((piece, colIndex) => {
           const isLight = (rowIndex + colIndex) % 2 === 1;
-          const isSelected = selectedSquare === `${rowIndex},${colIndex}`;
+          const squareKey = `${rowIndex},${colIndex}`;
+          const isSelected = selectedSquare === squareKey;
+          const isHovered = hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
           return (
             <div
               key={`${rowIndex}-${colIndex}`}
@@ -331,10 +384,13 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 position: "relative",
                 boxShadow: isSelected
                   ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
+                  : isHovered
+                  ? "inset 0 0 0 3px rgba(0, 200, 170, 0.7)"
                   : "none",
-                transition: "background-color 0.2s ease",
+                transition: "background-color 0.2s ease, box-shadow 0.1s ease",
               }}
               onClick={() => handleSquareClick(rowIndex, colIndex)}
+              onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
               draggable={!!piece}
               onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
               onDragEnd={handleDragEnd}

@@ -18,6 +18,10 @@ Thank you for your interest in contributing to XLMate! We are building the futur
 - **Frontend**: Located in `/frontend`. Next.js web application.
 - **AI Infrastructure**: Located in `/agent-engines`. Focus on engine integration and analysis tools.
 
+## Security
+
+If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md). Do NOT open a public issue for security bugs.
+
 ## Community & Support
 
 Join our Discord (link coming soon) or open a discussion on GitHub if you have questions!

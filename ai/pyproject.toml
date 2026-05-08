@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "xlmate-ai"
+version = "0.1.0"
+description = "XLMate AI engine integration: Stockfish WASM, GPU worker, resource monitor, NL agent"
+requires-python = ">=3.11"
+dependencies = [
+    "chess>=1.10.0",
+    "psutil>=5.9.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+gpu = ["pynvml>=11.5.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

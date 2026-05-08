@@ -1,4 +1,4 @@
-use sea_orm::{DatabaseConnection, DatabaseTransaction, TransactionTrait, EntityTrait, ActiveModelTrait, Set};
+use sea_orm::{DatabaseConnection, DatabaseTransaction, DbErr, TransactionTrait, EntityTrait, ActiveModelTrait, Set};
 use uuid::Uuid;
 use db_entity::{player, game};
 use error::error::ApiError;
@@ -64,7 +64,7 @@ impl RatingService {
     ) -> Result<(i32, i32), ApiError> {
         // Start a database transaction to ensure atomicity
         let txn = db.begin().await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to start transaction: {}", e))))?;
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to start transaction: {}", e))))?;
 
         let result = Self::update_ratings_in_transaction(&txn, game_id, config).await;
 
@@ -72,7 +72,7 @@ impl RatingService {
             Ok(ratings) => {
                 // Commit the transaction if everything succeeded
                 txn.commit().await
-                    .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to commit transaction: {}", e))))?;
+                    .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to commit transaction: {}", e))))?;
                 Ok(ratings)
             }
             Err(e) => {
@@ -101,7 +101,7 @@ impl RatingService {
             .ok_or_else(|| ApiError::BadRequest("Game is not completed yet".to_string()))?;
 
         // 3. Determine game outcome
-        let (white_outcome, black_outcome) = match game_result {
+        let (white_outcome, _black_outcome) = match game_result {
             db_entity::game::ResultSide::WhiteWins => (GameOutcome::Win, GameOutcome::Loss),
             db_entity::game::ResultSide::BlackWins => (GameOutcome::Loss, GameOutcome::Win),
             db_entity::game::ResultSide::Draw => (GameOutcome::Draw, GameOutcome::Draw),
@@ -118,13 +118,13 @@ impl RatingService {
         let white_player = player::Entity::find_by_id(game_model.white_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to fetch white player: {}", e))))?
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch white player: {}", e))))?
             .ok_or_else(|| ApiError::NotFound("White player not found".to_string()))?;
 
         let black_player = player::Entity::find_by_id(game_model.black_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to fetch black player: {}", e))))?
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch black player: {}", e))))?
             .ok_or_else(|| ApiError::NotFound("Black player not found".to_string()))?;
 
         // 5. Calculate new ratings based on game outcome
@@ -150,10 +150,10 @@ impl RatingService {
 
         // Execute both updates in the same transaction
         white_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to update white player rating: {}", e))))?;
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update white player rating: {}", e))))?;
 
         black_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to update black player rating: {}", e))))?;
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update black player rating: {}", e))))?;
 
         Ok((new_white_rating, new_black_rating))
     }
@@ -216,7 +216,7 @@ impl RatingService {
         let player = player::Entity::find_by_id(player_id)
             .one(db)
             .await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to fetch player: {}", e))))?
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch player: {}", e))))?
             .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
 
         Ok(player.elo_rating)
@@ -238,7 +238,7 @@ impl RatingService {
         };
 
         active_model.update(db).await
-            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to update player rating: {}", e))))?;
+            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update player rating: {}", e))))?;
 
         Ok(())
     }

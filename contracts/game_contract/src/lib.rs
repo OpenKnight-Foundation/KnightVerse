@@ -15,6 +15,7 @@ pub enum GameState {
     Created,
     InProgress,
     Completed,
+    Settled,
     Drawn,
     Forfeited,
 }
@@ -107,6 +108,50 @@ const ARBITRATOR: Symbol = symbol_short!("ARBIT"); // Address - dispute arbitrat
 // Game timeout mechanism
 const TIMEOUT_DURATION: Symbol = symbol_short!("T_OUT"); // u64 - ledger sequences before timeout
 
+// SEP-10 challenge verification (#529)
+const SEP10_CHALLENGES: Symbol = symbol_short!("S10_CHAL"); // Map<BytesN<32>, u64> nonce → expiry
+const SEP10_VERIFIED: Symbol = symbol_short!("S10_VER"); // Map<Address, bool>
+
+// Multi-sig fee control (#535)
+const MULTISIG_SIGNERS: Symbol = symbol_short!("MS_SIGN"); // Vec<Address>
+const MULTISIG_THRESHOLD: Symbol = symbol_short!("MS_THRES"); // u32
+const PENDING_FEE_PROPOSAL: Symbol = symbol_short!("MS_PROP"); // Option<FeeProposal>
+const FEE_PROPOSAL_APPROVALS: Symbol = symbol_short!("MS_APPR"); // Map<Address, bool>
+
+// SEP-40 Oracle clock sync (#533)
+const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle contract
+
+// Time-lock escrow for tournament prizes (#532)
+const TOURNAMENT_TIMELOCK: Symbol = symbol_short!("TL_DUR"); // u64 - lock duration in ledger sequences
+const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, TournamentEscrow>
+
+// ────────────────────────────────────────────────────────────────────────────
+// Multi-sig fee proposal type (#535)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FeeProposal {
+    pub new_fee_bips: u32,
+    pub new_treasury_address: Address,
+    pub proposed_at: u64, // ledger sequence
+    pub proposer: Address,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tournament escrow type (#532)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TournamentEscrow {
+    pub escrow_id: u64,
+    pub game_id: u64,
+    pub total_amount: i128,
+    pub locked_until: u64, // ledger sequence when funds can be released
+    pub released: bool,
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Errors
 // ────────────────────────────────────────────────────────────────────────────
@@ -144,6 +189,32 @@ pub enum ContractError {
     InsufficientDisputeFee = 21,
     /// Only the waiting player can claim a timeout win
     InvalidTimeoutClaimant = 22,
+    /// Settlement or payout has already been processed
+    AlreadySettled = 23,
+    /// Amount value must be positive and within supported bounds
+    InvalidAmount = 24,
+    /// SEP-10 challenge has expired or is invalid (#529)
+    ChallengeExpired = 25,
+    /// SEP-10 challenge nonce already used (#529)
+    ChallengeAlreadyUsed = 26,
+    /// Address has not completed SEP-10 verification (#529)
+    NotVerified = 27,
+    /// Multi-sig: signer is not in the signers list (#535)
+    NotASigner = 28,
+    /// Multi-sig: no pending fee proposal to approve (#535)
+    NoProposal = 29,
+    /// Multi-sig: signer already approved this proposal (#535)
+    AlreadyApproved = 30,
+    /// Multi-sig: threshold must be ≥ 1 and ≤ number of signers (#535)
+    InvalidThreshold = 31,
+    /// Oracle contract not configured (#533)
+    OracleNotConfigured = 32,
+    /// Tournament escrow not found (#532)
+    EscrowNotFound = 33,
+    /// Tournament escrow is still locked (#532)
+    EscrowStillLocked = 34,
+    /// Tournament escrow already released (#532)
+    EscrowAlreadyReleased = 35,
 }
 
 #[contract]
@@ -236,7 +307,9 @@ impl GameContract {
             token_client.transfer(&contract_address, &winner, &amount);
         }
 
-        games.set(game_id, game);
+        let mut settled_game = game;
+        settled_game.state = GameState::Settled;
+        games.set(game_id, settled_game);
         env.storage().instance().set(&GAMES, &games);
 
         Ok(())
@@ -407,7 +480,7 @@ impl GameContract {
         Ok(())
     }
 
-    pub fn claim_draw(env: Env, game_id: u64, player: Address) -> Result<(), ContractError> {
+    pub fn claim_draw(env: Env, game_id: u64, player: Address, signature: BytesN<64>) -> Result<(), ContractError> {
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -423,11 +496,130 @@ impl GameContract {
             return Err(ContractError::NotPlayer);
         }
 
-        player.require_auth();
+        // Verify backend admin signature for a draw to prevent unilateral draws
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        let mut payload_bytes = Bytes::new(&env);
+        let game_id_le: [u8; 8] = game_id.to_le_bytes();
+        payload_bytes.append(&Bytes::from_slice(&env, &game_id_le));
+        // Append "DRAW" to differentiate from claim_win payload
+        payload_bytes.append(&Bytes::from_slice(&env, b"DRAW"));
+
+        let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload_bytes).into();
+        let digest_bytes: Bytes = digest_bytesn.into();
+        env.crypto()
+            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
 
         game.state = GameState::Drawn;
         Self::process_draw_payout(&env, &game)?;
 
+        games.set(game_id, game);
+        env.storage().instance().set(&GAMES, &games);
+
+        Ok(())
+    }
+
+    pub fn claim_win(
+        env: Env,
+        game_id: u64,
+        winner: Address,
+        signature: BytesN<64>,
+    ) -> Result<(), ContractError> {
+        let mut games: Map<u64, Game> = env
+            .storage()
+            .instance()
+            .get(&GAMES)
+            .ok_or(ContractError::GameNotFound)?;
+
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+        if game.state != GameState::InProgress {
+            return Err(ContractError::GameNotInProgress);
+        }
+
+        if game.player1 != winner && Some(winner.clone()) != game.player2 {
+            return Err(ContractError::NotPlayer);
+        }
+
+        // Verify admin signature to confirm the win
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        let mut payload_bytes = Bytes::new(&env);
+        let game_id_le: [u8; 8] = game_id.to_le_bytes();
+        payload_bytes.append(&Bytes::from_slice(&env, &game_id_le));
+
+        let winner_str = winner.clone().to_string();
+        let str_len = winner_str.len() as usize;
+        let mut addr_buf = [0u8; 64];
+        winner_str.copy_into_slice(&mut addr_buf[..str_len]);
+        payload_bytes.append(&Bytes::from_slice(&env, &addr_buf[..str_len]));
+
+        let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload_bytes).into();
+        let digest_bytes: Bytes = digest_bytesn.into();
+        env.crypto()
+            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+
+        game.winner = Some(winner.clone());
+        Self::process_payout(&env, &game, &winner)?;
+        game.state = GameState::Settled;
+
+        games.set(game_id, game);
+        env.storage().instance().set(&GAMES, &games);
+
+        Ok(())
+    }
+
+    pub fn cancel_game(env: Env, game_id: u64, player: Address) -> Result<(), ContractError> {
+        let mut games: Map<u64, Game> = env
+            .storage()
+            .instance()
+            .get(&GAMES)
+            .ok_or(ContractError::GameNotFound)?;
+
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+        if game.state != GameState::Created {
+            return Err(ContractError::GameAlreadyCompleted);
+        }
+
+        if game.player1 != player {
+            return Err(ContractError::NotPlayer);
+        }
+
+        player.require_auth();
+
+        // Refund player1's staked wager
+        let mut escrow: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&ESCROW)
+            .unwrap_or(Map::new(&env));
+
+        let current_escrow = escrow.get(player.clone()).unwrap_or(0);
+        escrow.set(player.clone(), current_escrow - game.wager_amount);
+        env.storage().instance().set(&ESCROW, &escrow);
+
+        let token_client = Self::token_client(&env);
+        let contract_address = env.current_contract_address();
+        token_client.transfer(&contract_address, &player, &game.wager_amount);
+
+        game.state = GameState::Completed; // Mark as completed to prevent joining
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
@@ -461,9 +653,9 @@ impl GameContract {
             game.player1.clone()
         };
 
-        game.state = GameState::Forfeited;
         game.winner = Some(winner.clone());
         Self::process_payout(&env, &game, &winner)?;
+        game.state = GameState::Settled;
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -478,9 +670,12 @@ impl GameContract {
             .get(&GAMES)
             .ok_or(ContractError::GameNotFound)?;
 
-        let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
 
         if game.state != GameState::Completed {
+            if game.state == GameState::Settled {
+                return Err(ContractError::AlreadySettled);
+            }
             return Err(ContractError::GameNotInProgress);
         }
         if game.winner.as_ref() != Some(&winner) {
@@ -490,6 +685,7 @@ impl GameContract {
         winner.require_auth();
 
         Self::process_payout(&env, &game, &winner)?;
+        game.state = GameState::Settled;
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -574,8 +770,10 @@ impl GameContract {
             escrow.set(first_winner.clone(), winner_escrow + remainder);
         }
 
+        let mut settled_game = game;
+        settled_game.state = GameState::Settled;
         env.storage().instance().set(&ESCROW, &escrow);
-        games.set(game_id, game);
+        games.set(game_id, settled_game);
         env.storage().instance().set(&GAMES, &games);
 
         Ok(())
@@ -738,7 +936,19 @@ impl GameContract {
         env.storage().instance().set(&MAX_STAKE, &1_000i128);
     }
 
-    pub fn set_max_stake(env: Env, new_limit: i128) {
+    pub fn set_max_stake(env: Env, admin: Address, new_limit: i128) {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            panic!("Unauthorized admin address");
+        }
+        if new_limit <= 0 {
+            panic!("Max stake must be positive");
+        }
         env.storage().instance().set(&MAX_STAKE, &new_limit);
     }
 
@@ -793,6 +1003,10 @@ impl GameContract {
         nonce: u64,
         signature: BytesN<64>,
     ) -> Result<(), ContractError> {
+        if reward_amount <= 0 || reward_amount > i64::MAX as i128 {
+            return Err(ContractError::InvalidAmount);
+        }
+
         // 1. Load admin ED25519 public key
         let admin_key_bytes: Bytes = env
             .storage()
@@ -1057,15 +1271,15 @@ impl GameContract {
             .ok_or(ContractError::TimeoutNotConfigured)?;
 
         let current_ledger = env.ledger().sequence() as u64;
-        let elapsed = current_ledger - game.last_move_at;
+        let elapsed = current_ledger.saturating_sub(game.last_move_at);
 
         if elapsed < timeout_duration {
             return Err(ContractError::TimeoutNotReached);
         }
 
-        game.state = GameState::Completed;
         game.winner = Some(claimant.clone());
         Self::process_payout(&env, &game, &claimant)?;
+        game.state = GameState::Settled;
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -1089,7 +1303,7 @@ impl GameContract {
 
         let timeout_duration: u64 = env.storage().instance().get(&TIMEOUT_DURATION)?;
         let current_ledger = env.ledger().sequence() as u64;
-        let elapsed = current_ledger - game.last_move_at;
+        let elapsed = current_ledger.saturating_sub(game.last_move_at);
 
         if elapsed >= timeout_duration {
             return Some(0);
@@ -1151,6 +1365,7 @@ impl GameContract {
                 game.state = GameState::Completed;
                 game.winner = Some(winner_addr.clone());
                 Self::process_payout(&env, &game, winner_addr)?;
+                game.state = GameState::Settled;
             }
             None => {
                 game.state = GameState::Drawn;
@@ -1246,6 +1461,597 @@ impl GameContract {
         disputes
             .get(dispute_id)
             .ok_or(ContractError::DisputeNotFound)
+    }
+
+    // ── SEP-10 Challenge Verification (#529) ──────────────────────────────────
+    //
+    // SEP-10 is the Stellar Web Authentication standard. The flow:
+    //   1. Backend calls `issue_sep10_challenge` to store a nonce with an expiry.
+    //   2. The user signs the challenge with their Stellar keypair off-chain.
+    //   3. The user calls `verify_sep10_challenge` with the nonce + ED25519 sig.
+    //   4. On success the address is marked as verified in contract storage.
+    //
+    // The challenge payload is: SHA256( address_bytes || nonce_le8 || expiry_le8 )
+    // This matches the backend signing convention used in claim_puzzle_reward.
+
+    /// Issue a SEP-10 challenge for `account`.
+    ///
+    /// * `nonce`  – 32-byte random value (must be unique per challenge)
+    /// * `expiry` – ledger sequence after which the challenge is invalid
+    ///
+    /// Only the contract admin may issue challenges (prevents spam).
+    pub fn issue_sep10_challenge(
+        env: Env,
+        admin: Address,
+        account: Address,
+        nonce: BytesN<32>,
+        expiry: u64,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if expiry <= current_ledger {
+            return Err(ContractError::ChallengeExpired);
+        }
+
+        let mut challenges: Map<BytesN<32>, u64> = env
+            .storage()
+            .instance()
+            .get(&SEP10_CHALLENGES)
+            .unwrap_or(Map::new(&env));
+
+        // Reject if nonce already exists (replay protection)
+        if challenges.get(nonce.clone()).is_some() {
+            return Err(ContractError::ChallengeAlreadyUsed);
+        }
+
+        challenges.set(nonce.clone(), expiry);
+        env.storage().instance().set(&SEP10_CHALLENGES, &challenges);
+
+        env.events().publish(
+            (symbol_short!("sep10"), symbol_short!("issued")),
+            (account, nonce),
+        );
+
+        Ok(())
+    }
+
+    /// Verify a SEP-10 challenge.
+    ///
+    /// The caller provides the `nonce` and an ED25519 `signature` over
+    /// SHA256( address_bytes || nonce_bytes || expiry_le8 ).
+    ///
+    /// On success the challenge is consumed and `account` is marked verified.
+    pub fn verify_sep10_challenge(
+        env: Env,
+        account: Address,
+        nonce: BytesN<32>,
+        signature: BytesN<64>,
+    ) -> Result<(), ContractError> {
+        // 1. Load and validate the challenge
+        let mut challenges: Map<BytesN<32>, u64> = env
+            .storage()
+            .instance()
+            .get(&SEP10_CHALLENGES)
+            .unwrap_or(Map::new(&env));
+
+        let expiry = challenges
+            .get(nonce.clone())
+            .ok_or(ContractError::ChallengeAlreadyUsed)?;
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger > expiry {
+            return Err(ContractError::ChallengeExpired);
+        }
+
+        // 2. Load admin ED25519 public key (same key used for puzzle rewards)
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        // 3. Build canonical payload: address_bytes || nonce_bytes || expiry_le8
+        let mut payload = Bytes::new(&env);
+
+        let account_str = account.clone().to_string();
+        let str_len = account_str.len() as usize;
+        let mut addr_buf = [0u8; 64];
+        account_str.copy_into_slice(&mut addr_buf[..str_len]);
+        payload.append(&Bytes::from_slice(&env, &addr_buf[..str_len]));
+
+        let nonce_bytes: Bytes = nonce.clone().into();
+        payload.append(&nonce_bytes);
+
+        let expiry_le: [u8; 8] = expiry.to_le_bytes();
+        payload.append(&Bytes::from_slice(&env, &expiry_le));
+
+        // 4. Verify — panics on invalid signature (Soroban convention)
+        let digest: BytesN<32> = env.crypto().sha256(&payload).into();
+        let digest_bytes: Bytes = digest.into();
+        env.crypto()
+            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+
+        // 5. Consume the challenge (prevent replay)
+        challenges.remove(nonce.clone());
+        env.storage().instance().set(&SEP10_CHALLENGES, &challenges);
+
+        // 6. Mark account as verified
+        let mut verified: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&SEP10_VERIFIED)
+            .unwrap_or(Map::new(&env));
+        verified.set(account.clone(), true);
+        env.storage().instance().set(&SEP10_VERIFIED, &verified);
+
+        env.events().publish(
+            (symbol_short!("sep10"), symbol_short!("verified")),
+            account,
+        );
+
+        Ok(())
+    }
+
+    /// Returns true if `account` has completed SEP-10 verification.
+    pub fn is_sep10_verified(env: Env, account: Address) -> bool {
+        let verified: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&SEP10_VERIFIED)
+            .unwrap_or(Map::new(&env));
+        verified.get(account).unwrap_or(false)
+    }
+
+    // ── Multi-Sig Fee Control (#535) ──────────────────────────────────────────
+    //
+    // Protocol fee parameters (fee_bips + treasury_address) are sensitive.
+    // This module requires M-of-N approval from a configured signer set before
+    // any fee change takes effect.
+    //
+    // Flow:
+    //   1. Admin calls `configure_multisig` to set signers + threshold.
+    //   2. Any signer calls `propose_fee_change` to create a pending proposal.
+    //   3. Each signer calls `approve_fee_proposal` to vote.
+    //   4. Once approvals ≥ threshold the fee change is applied automatically.
+    //   5. Any signer can call `cancel_fee_proposal` to discard the proposal.
+
+    /// Configure the multi-sig signer set and approval threshold.
+    ///
+    /// Can only be called by the contract admin.
+    /// `threshold` must be ≥ 1 and ≤ `signers.len()`.
+    pub fn configure_multisig(
+        env: Env,
+        admin: Address,
+        signers: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let n = signers.len();
+        if threshold == 0 || threshold > n {
+            return Err(ContractError::InvalidThreshold);
+        }
+
+        env.storage().instance().set(&MULTISIG_SIGNERS, &signers);
+        env.storage().instance().set(&MULTISIG_THRESHOLD, &threshold);
+
+        Ok(())
+    }
+
+    /// Propose a new fee configuration.
+    ///
+    /// Replaces any existing pending proposal. The proposer's approval is
+    /// counted automatically.
+    pub fn propose_fee_change(
+        env: Env,
+        proposer: Address,
+        new_fee_bips: u32,
+        new_treasury_address: Address,
+    ) -> Result<(), ContractError> {
+        if new_fee_bips > 1000 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let signers: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&MULTISIG_SIGNERS)
+            .ok_or(ContractError::Unauthorized)?;
+
+        // Verify proposer is a signer
+        if !signers.contains(&proposer) {
+            return Err(ContractError::NotASigner);
+        }
+
+        proposer.require_auth();
+
+        let proposal = FeeProposal {
+            new_fee_bips,
+            new_treasury_address,
+            proposed_at: env.ledger().sequence() as u64,
+            proposer: proposer.clone(),
+        };
+
+        env.storage()
+            .instance()
+            .set(&PENDING_FEE_PROPOSAL, &proposal);
+
+        // Reset approvals and auto-approve for proposer
+        let mut approvals: Map<Address, bool> = Map::new(&env);
+        approvals.set(proposer.clone(), true);
+        env.storage()
+            .instance()
+            .set(&FEE_PROPOSAL_APPROVALS, &approvals);
+
+        env.events().publish(
+            (symbol_short!("multisig"), symbol_short!("proposed")),
+            proposer,
+        );
+
+        Ok(())
+    }
+
+    /// Approve the pending fee proposal.
+    ///
+    /// When approvals reach the threshold the fee change is applied immediately.
+    pub fn approve_fee_proposal(env: Env, signer: Address) -> Result<bool, ContractError> {
+        let signers: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&MULTISIG_SIGNERS)
+            .ok_or(ContractError::Unauthorized)?;
+
+        if !signers.contains(&signer) {
+            return Err(ContractError::NotASigner);
+        }
+
+        let proposal: FeeProposal = env
+            .storage()
+            .instance()
+            .get(&PENDING_FEE_PROPOSAL)
+            .ok_or(ContractError::NoProposal)?;
+
+        signer.require_auth();
+
+        let mut approvals: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&FEE_PROPOSAL_APPROVALS)
+            .unwrap_or(Map::new(&env));
+
+        if approvals.get(signer.clone()).unwrap_or(false) {
+            return Err(ContractError::AlreadyApproved);
+        }
+
+        approvals.set(signer.clone(), true);
+        env.storage()
+            .instance()
+            .set(&FEE_PROPOSAL_APPROVALS, &approvals);
+
+        // Count approvals
+        let approval_count = approvals.len();
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&MULTISIG_THRESHOLD)
+            .unwrap_or(u32::MAX);
+
+        if approval_count >= threshold {
+            // Apply the fee change
+            env.storage()
+                .instance()
+                .set(&FEE_BIPS, &proposal.new_fee_bips);
+            env.storage()
+                .instance()
+                .set(&TREASURY_ADDR, &proposal.new_treasury_address);
+
+            // Clear proposal and approvals
+            env.storage().instance().remove(&PENDING_FEE_PROPOSAL);
+            env.storage().instance().remove(&FEE_PROPOSAL_APPROVALS);
+
+            env.events().publish(
+                (symbol_short!("multisig"), symbol_short!("executed")),
+                proposal.new_fee_bips,
+            );
+
+            return Ok(true); // proposal executed
+        }
+
+        env.events().publish(
+            (symbol_short!("multisig"), symbol_short!("approved")),
+            signer,
+        );
+
+        Ok(false) // still waiting for more approvals
+    }
+
+    /// Cancel the pending fee proposal (any signer may cancel).
+    pub fn cancel_fee_proposal(env: Env, signer: Address) -> Result<(), ContractError> {
+        let signers: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&MULTISIG_SIGNERS)
+            .ok_or(ContractError::Unauthorized)?;
+
+        if !signers.contains(&signer) {
+            return Err(ContractError::NotASigner);
+        }
+
+        if !env
+            .storage()
+            .instance()
+            .has(&PENDING_FEE_PROPOSAL)
+        {
+            return Err(ContractError::NoProposal);
+        }
+
+        signer.require_auth();
+
+        env.storage().instance().remove(&PENDING_FEE_PROPOSAL);
+        env.storage().instance().remove(&FEE_PROPOSAL_APPROVALS);
+
+        env.events().publish(
+            (symbol_short!("multisig"), symbol_short!("cancel")),
+            signer,
+        );
+
+        Ok(())
+    }
+
+    /// Query the pending fee proposal (if any).
+    pub fn get_fee_proposal(env: Env) -> Option<FeeProposal> {
+        env.storage().instance().get(&PENDING_FEE_PROPOSAL)
+    }
+
+    /// Query how many signers have approved the pending proposal.
+    pub fn get_approval_count(env: Env) -> u32 {
+        let approvals: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&FEE_PROPOSAL_APPROVALS)
+            .unwrap_or(Map::new(&env));
+        approvals.len()
+    }
+
+    // ── SEP-40 Oracle Clock Sync (#533) ───────────────────────────────────────
+    //
+    // SEP-40 defines a standard oracle interface on Stellar/Soroban.
+    // We store the oracle contract address and call its `lastprice` function
+    // to get a trusted timestamp for game clock synchronization.
+
+    /// Configure the SEP-40 oracle contract address for clock sync.
+    pub fn configure_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+        env.storage().instance().set(&ORACLE_CONTRACT, &oracle);
+        Ok(())
+    }
+
+    /// Get the current oracle contract address.
+    pub fn get_oracle(env: Env) -> Result<Address, ContractError> {
+        env.storage()
+            .instance()
+            .get(&ORACLE_CONTRACT)
+            .ok_or(ContractError::OracleNotConfigured)
+    }
+
+    /// Get the oracle-synced timestamp (ledger sequence from oracle).
+    /// Falls back to the current ledger sequence if oracle is not configured.
+    /// The oracle is called via cross-contract invocation using the SEP-40
+    /// `lastprice` interface which returns a price record with a timestamp.
+    ///
+    /// Note: This is a minimal implementation. In production, you would invoke
+    /// the oracle contract's `lastprice` method and extract the timestamp.
+    pub fn get_oracle_time(env: Env) -> u64 {
+        let oracle_opt: Option<Address> = env.storage().instance().get(&ORACLE_CONTRACT);
+        match oracle_opt {
+            Some(_oracle) => {
+                // TODO: Implement cross-contract call to oracle.lastprice()
+                // For now, fall back to ledger sequence
+                env.ledger().sequence() as u64
+            }
+            None => env.ledger().sequence() as u64,
+        }
+    }
+
+    // ── Time-lock Escrow for Tournament Grand Prizes (#532) ───────────────────
+    //
+    // Tournament grand prizes are locked in escrow for a configurable duration
+    // before they can be released to winners. This prevents immediate withdrawal
+    // and allows time for dispute resolution.
+
+    /// Configure the tournament time-lock duration (in ledger sequences).
+    pub fn configure_tournament_timelock(
+        env: Env,
+        admin: Address,
+        duration: u64,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+        if duration == 0 {
+            panic!("Timelock duration must be greater than 0");
+        }
+        env.storage().instance().set(&TOURNAMENT_TIMELOCK, &duration);
+        Ok(())
+    }
+
+    /// Create a time-locked escrow for a completed tournament game.
+    ///
+    /// Locks the total prize pool until `current_ledger + timelock_duration`.
+    /// Returns the escrow ID.
+    pub fn create_tournament_escrow(
+        env: Env,
+        game_id: u64,
+    ) -> Result<u64, ContractError> {
+        let games: Map<u64, Game> = env
+            .storage()
+            .instance()
+            .get(&GAMES)
+            .ok_or(ContractError::GameNotFound)?;
+
+        let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+        if game.state != GameState::Completed {
+            return Err(ContractError::GameNotInProgress);
+        }
+
+        game.player1.require_auth();
+
+        let duration: u64 = env
+            .storage()
+            .instance()
+            .get(&TOURNAMENT_TIMELOCK)
+            .ok_or(ContractError::TimeoutNotConfigured)?;
+
+        let total_amount = match &game.player2 {
+            Some(_) => game.wager_amount * 2,
+            None => game.wager_amount,
+        };
+
+        let locked_until = env.ledger().sequence() as u64 + duration;
+
+        let mut escrows: Map<u64, TournamentEscrow> = env
+            .storage()
+            .instance()
+            .get(&TOURNAMENT_ESCROWS)
+            .unwrap_or(Map::new(&env));
+
+        let escrow_id = escrows.len() as u64 + 1;
+        let escrow = TournamentEscrow {
+            escrow_id,
+            game_id,
+            total_amount,
+            locked_until,
+            released: false,
+        };
+
+        escrows.set(escrow_id, escrow);
+        env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        env.events().publish(
+            (symbol_short!("tl_escrow"), symbol_short!("created")),
+            (escrow_id, game_id, locked_until),
+        );
+
+        Ok(escrow_id)
+    }
+
+    /// Release a time-locked tournament escrow to the specified winners.
+    ///
+    /// Can only be called after the lock period has expired.
+    pub fn release_tournament_escrow(
+        env: Env,
+        escrow_id: u64,
+        winners: Vec<Address>,
+        percentages: Vec<u32>,
+    ) -> Result<(), ContractError> {
+        let mut escrows: Map<u64, TournamentEscrow> = env
+            .storage()
+            .instance()
+            .get(&TOURNAMENT_ESCROWS)
+            .ok_or(ContractError::EscrowNotFound)?;
+
+        let escrow = escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)?;
+
+        if escrow.released {
+            return Err(ContractError::EscrowAlreadyReleased);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger < escrow.locked_until {
+            return Err(ContractError::EscrowStillLocked);
+        }
+
+        if winners.len() != percentages.len() {
+            return Err(ContractError::MismatchedLengths);
+        }
+
+        let mut total_pct: u32 = 0;
+        for i in 0..percentages.len() {
+            total_pct += percentages.get(i).unwrap();
+            if total_pct > 100 {
+                return Err(ContractError::InvalidPercentage);
+            }
+        }
+        if total_pct != 100 {
+            return Err(ContractError::InvalidPercentage);
+        }
+
+        let token_client = Self::token_client(&env);
+        let contract_address = env.current_contract_address();
+        let total = escrow.total_amount;
+        let mut distributed: i128 = 0;
+
+        for i in 0..winners.len() {
+            let winner = winners.get(i).unwrap();
+            let pct = percentages.get(i).unwrap();
+            let amount = (total * pct as i128) / 100;
+            distributed += amount;
+            token_client.transfer(&contract_address, &winner, &amount);
+        }
+
+        // Dust goes to first winner
+        let remainder = total - distributed;
+        if remainder > 0 && !winners.is_empty() {
+            let first_winner = winners.get(0).unwrap();
+            token_client.transfer(&contract_address, &first_winner, &remainder);
+        }
+
+        let mut released_escrow = escrow;
+        released_escrow.released = true;
+        escrows.set(escrow_id, released_escrow);
+        env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        env.events().publish(
+            (symbol_short!("tl_escrow"), symbol_short!("released")),
+            escrow_id,
+        );
+
+        Ok(())
+    }
+
+    /// Query a tournament escrow by ID.
+    pub fn get_tournament_escrow(env: Env, escrow_id: u64) -> Result<TournamentEscrow, ContractError> {
+        let escrows: Map<u64, TournamentEscrow> = env
+            .storage()
+            .instance()
+            .get(&TOURNAMENT_ESCROWS)
+            .ok_or(ContractError::EscrowNotFound)?;
+        escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
     }
 }
 
@@ -1417,7 +2223,7 @@ mod tests {
         );
 
         // Raise stake limit first so wager=500 is permitted
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 500; // pool = 1000
         let game_id = client.create_game(&player1, &wager);
@@ -1523,6 +2329,19 @@ mod tests {
         assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
     }
 
+    #[test]
+    fn test_claim_puzzle_reward_invalid_amount_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient = Address::generate(&env);
+
+        let sig = sign_payload(&env, &signing_key, &recipient, -1, 7);
+        let result = client.try_claim_puzzle_reward(&recipient, &-1, &7, &sig);
+        assert_eq!(result, Err(Ok(ContractError::InvalidAmount)));
+    }
+
     // ── Timeout Tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -1572,7 +2391,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_timeout(&admin, &100u64);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1623,7 +2442,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_timeout(&admin, &1000u64);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1663,7 +2482,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_timeout(&admin, &1000u64);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1715,7 +2534,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_dispute_system(&admin, &arbitrator, &25i128);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1764,7 +2583,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_dispute_system(&admin, &arbitrator, &0i128);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1816,7 +2635,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_dispute_system(&admin, &arbitrator, &25i128);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1859,7 +2678,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_dispute_system(&admin, &arbitrator, &0i128);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1910,7 +2729,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_timeout(&admin, &100u64);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -1943,6 +2762,7 @@ mod tests {
         let admin = Address::generate(&env);
         let player1 = Address::generate(&env);
         let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
 
         stellar_asset_client.mint(&player1, &1_000i128);
         stellar_asset_client.mint(&player2, &1_000i128);
@@ -1951,7 +2771,14 @@ mod tests {
         let client = GameContractClient::new(&env, &contract_id);
 
         client.initialize_token(&admin, &token_address);
-        client.set_max_stake(&1_000i128);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -2001,6 +2828,7 @@ mod tests {
         let admin = Address::generate(&env);
         let player1 = Address::generate(&env);
         let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
 
         stellar_asset_client.mint(&player1, &1_000i128);
         stellar_asset_client.mint(&player2, &1_000i128);
@@ -2009,7 +2837,14 @@ mod tests {
         let client = GameContractClient::new(&env, &contract_id);
 
         client.initialize_token(&admin, &token_address);
-        client.set_max_stake(&1_000i128);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -2056,7 +2891,7 @@ mod tests {
             &treasury_addr,
         );
         client.configure_dispute_system(&admin, &arbitrator, &25i128);
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
         let game_id = client.create_game(&player1, &wager);
@@ -2108,7 +2943,7 @@ mod tests {
             &0u32,
             &treasury_addr,
         );
-        client.set_max_stake(&1_000i128);
+        client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 500;
         let game_id = client.create_game(&player1, &wager);
@@ -2130,5 +2965,46 @@ mod tests {
         // pool = 1000: player1 gets 600, player2 gets 400
         assert_eq!(token_client.balance(&player1), 1100); // started 1000, put in 500, gets 600
         assert_eq!(token_client.balance(&player2), 900); // started 1000, put in 500, gets 400
+    }
+
+    #[test]
+    fn test_payout_cannot_be_called_twice() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let issuer = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer);
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        client.initialize_token(&admin, &token_address);
+        let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
+        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &treasury_addr);
+
+        let wager = 500;
+        stellar_asset_client.mint(&player1, &wager);
+        stellar_asset_client.mint(&player2, &wager);
+        let game_id = client.create_game(&player1, &wager);
+        client.join_game(&game_id, &player2);
+
+        env.as_contract(&contract_id, || {
+            let mut games: Map<u64, Game> = env.storage().instance().get(&GAMES).unwrap();
+            let mut game = games.get(game_id).unwrap();
+            game.state = GameState::Completed;
+            game.winner = Some(player1.clone());
+            games.set(game_id, game);
+            env.storage().instance().set(&GAMES, &games);
+        });
+
+        client.payout(&game_id, &player1);
+        let second = client.try_payout(&game_id, &player1);
+        assert_eq!(second, Err(Ok(ContractError::AlreadySettled)));
     }
 }

@@ -10,6 +10,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_index_post_no_body() {
+            std::env::set_var("TEST_NO_DB", "1");
         let app =
             test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
                 .await;
@@ -20,6 +21,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_index_post_with_body() {
+            std::env::set_var("TEST_NO_DB", "1");
         let app =
             test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
                 .await;
@@ -61,6 +63,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_index_post_with_invalid_username() {
+            std::env::set_var("TEST_NO_DB", "1");
         let app =
             test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
                 .await;
@@ -91,6 +94,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_index_post_with_invalid_email() {
+            std::env::set_var("TEST_NO_DB", "1");
         let app =
             test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
                 .await;
@@ -122,6 +126,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_index_post_with_invalid_password() {
+            std::env::set_var("TEST_NO_DB", "1");
         let app =
             test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
                 .await;

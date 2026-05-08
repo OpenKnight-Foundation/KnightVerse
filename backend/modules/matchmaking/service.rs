@@ -2,7 +2,6 @@ use actix_web::web;
 use chrono::Utc;
 use deadpool_redis::Pool;
 use redis::AsyncCommands;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

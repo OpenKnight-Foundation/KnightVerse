@@ -1,7 +1,7 @@
 use utoipa::OpenApi;
 use crate::{players, games, auth, ai};
 use st_core::endpoint::{mint_nft, format_ai_metadata, generate_stellar_toml};
-use st_core::models::{AIMetadata, MintNFTRequest, MintNFTResponse};
+use st_core::models::{AIMetadata, NFTMintRequest, NFTMintResponse};
 use utoipa::openapi::security::{SecurityScheme, HttpAuthScheme, HttpBuilder};
 use utoipa::Modify;
 
@@ -86,12 +86,7 @@ impl Modify for SecurityAddon {
             dto::ai::PositionAnalysisResponse,
             dto::ai::AlternativeMove,
             
-            // NFT schemas
-            st_core::models::AIMetadata,
-            st_core::models::NFTMintRequest,
-            st_core::models::NFTMintResponse,
-            st_core::models::MintNFTRequest,
-            st_core::models::MintNFTResponse,
+            // NFT schemas (st_core models excluded to avoid utoipa version mismatch)
             
             // Response schemas
             dto::responses::PlayerAdded,

@@ -60,7 +60,7 @@ jobs:
 
       - name: Check API integration
         working-directory: backend
-        run: cargo check -p api --features api
+        run: cargo check -p api
 
       - name: Run backend tests
         working-directory: backend
@@ -71,7 +71,7 @@ jobs:
 
       - name: Build backend
         working-directory: backend
-        run: cargo build --release --exclude chess
+        run: cargo build --workspace --release --exclude chess
 
   security-scan:
     name: Security Scan

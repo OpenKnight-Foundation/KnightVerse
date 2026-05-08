@@ -2,7 +2,7 @@ use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
     error::{Error, ErrorUnauthorized},
     body::{BoxBody, MessageBody},
-    HttpMessage, HttpResponse,
+    HttpMessage,
 };
 use futures_util::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
@@ -186,7 +186,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+    fn call(&self, req: ServiceRequest) -> Self::Future {
         let secret_key = self.secret_key.clone();
         let expiration_time = self.expiration_time;
 

@@ -44,6 +44,10 @@ mod tests {
     
     #[async_std::test]
     async fn test_table_exists() -> Result<(), DbErr> {
+        if std::env::var("DATABASE_URL").is_err() {
+            return Ok(());
+        }
+
         let db = get_db().await;
         
         assert!(
@@ -79,6 +83,10 @@ mod tests {
 
     #[async_std::test]
     async fn accurate_column_types() -> Result<(), DbErr> {
+        if std::env::var("DATABASE_URL").is_err() {
+            return Ok(());
+        }
+
         let db = get_db().await;
 
         let columns_and_types = HashMap::from([

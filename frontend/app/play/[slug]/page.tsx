@@ -9,6 +9,7 @@ import { FaUser, FaClock, FaSignal } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
+import { useIsMobile } from "@/hook/use-mobile";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -48,6 +49,8 @@ export default function PlayOnlinePage() {
   const [playerColor] = useState<"white" | "black">("white");
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
+  const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const {
     status: socketStatus,
@@ -283,6 +286,31 @@ export default function PlayOnlinePage() {
                 </span>
               </div>
             </div>
+
+            {/* Mobile controls — visible only on mobile, directly below board */}
+            <div className="flex items-center gap-2 mt-3 lg:hidden">
+              <button
+                onClick={() => {}}
+                aria-label="Flip board orientation"
+                className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
+              >
+                Flip Board
+              </button>
+              <button
+                onClick={handleResign}
+                disabled={gameStatus !== "playing"}
+                aria-label="Resign game"
+                className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Resign
+              </button>
+              <div className="flex items-center gap-1.5 px-2 shrink-0">
+                <FaSignal className={`text-xs ${socketStatusColor()}`} />
+                <span className={`text-xs ${socketStatusColor()}`}>
+                  {socketStatusLabel()}
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Game Sidebar - Move History & Controls */}
@@ -293,7 +321,7 @@ export default function PlayOnlinePage() {
                 <h3 className="text-sm font-semibold text-gray-300">
                   Game Status
                 </h3>
-                <div className="flex items-center gap-1.5">
+                <div className="hidden lg:flex items-center gap-1.5">
                   <FaSignal className={`text-xs ${socketStatusColor()}`} />
                   <span className={`text-xs ${socketStatusColor()}`}>
                     {socketStatusLabel()}
@@ -325,10 +353,17 @@ export default function PlayOnlinePage() {
 
             {/* Move History */}
             <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4" role="region" aria-label="Move history">
-              <h3 className="text-sm font-semibold text-gray-300 mb-3">
-                Moves
-              </h3>
-              <div className="max-h-64 overflow-y-auto space-y-0.5">
+              <button
+                className="flex items-center justify-between w-full text-left"
+                onClick={() => isMobile && setIsMoveHistoryOpen((prev) => !prev)}
+                aria-expanded={isMobile ? isMoveHistoryOpen : true}
+              >
+                <h3 className="text-sm font-semibold text-gray-300">Moves</h3>
+                <span className="text-gray-500 text-xs lg:hidden">
+                  {isMoveHistoryOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              <div className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}>
                 {movePairs.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">
                     No moves yet.{" "}
@@ -364,8 +399,8 @@ export default function PlayOnlinePage() {
               onToggle={() => setIsCheatPanelExpanded((prev: boolean) => !prev)}
             />
 
-            {/* Controls */}
-            <div className="flex gap-2">
+            {/* Controls — desktop only, mobile controls are above the sidebar */}
+            <div className="hidden lg:flex gap-2">
               <button
                 onClick={() => {}}
                 aria-label="Flip board orientation"

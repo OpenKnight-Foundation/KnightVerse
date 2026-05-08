@@ -5,6 +5,18 @@
     "lib": ["es2020"],
     "module": "commonjs",
     "target": "es2020",
-    "esModuleInterop": true
-  }
+    "esModuleInterop": true,
+    "rootDir": "./agent-engines",
+    "outDir": "./dist",
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "agent-engines/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

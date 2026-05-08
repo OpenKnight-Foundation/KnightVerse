@@ -85,8 +85,7 @@ mod tests {
     fn underflow_is_safely_clamped() {
         // If delta exceeds loser rating (possible with very low loser rating and high K),
         // saturating_sub clamps to 0.
-        let (w, l) = calculate_new_ratings(0, 1, u32::MAX);
-        assert!(w >= 0);
+        let (_, l) = calculate_new_ratings(0, 1, u32::MAX);
         assert_eq!(l, 0);
     }
 }

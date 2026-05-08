@@ -29,6 +29,21 @@ export function WatchIcon() {
   return <Eye size={20} />
 }
 
+export function DashboardIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className="h-5 w-5"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" />
+    </svg>
+  );
+}
+
 export function NewsIcon() {
   return <Newspaper size={20} />
 }

@@ -34,19 +34,35 @@ mod tests {
     #[test]
     fn test_player_sorting_by_score_then_rating() {
         let mut tournament = TournamentState::new(create_test_players(), 5);
-        
-        // Modify scores to test sorting
-        let player_ids: Vec<Uuid> = tournament.players.keys().cloned().collect();
-        
-        // Set different scores
-        if let Some(player) = tournament.players.get_mut(&player_ids[0]) {
+
+        // Modify scores by player name to avoid HashMap iteration-order nondeterminism.
+        let alice_id = tournament
+            .players
+            .values()
+            .find(|p| p.name == "Alice")
+            .map(|p| p.id)
+            .unwrap();
+        let bob_id = tournament
+            .players
+            .values()
+            .find(|p| p.name == "Bob")
+            .map(|p| p.id)
+            .unwrap();
+        let charlie_id = tournament
+            .players
+            .values()
+            .find(|p| p.name == "Charlie")
+            .map(|p| p.id)
+            .unwrap();
+
+        if let Some(player) = tournament.players.get_mut(&alice_id) {
             player.score = 2.0;
         }
-        if let Some(player) = tournament.players.get_mut(&player_ids[1]) {
+        if let Some(player) = tournament.players.get_mut(&bob_id) {
             player.score = 2.0;
-            player.rating = 2100; // Higher rating than player 0
+            player.rating = 2100; // Higher rating than Alice
         }
-        if let Some(player) = tournament.players.get_mut(&player_ids[2]) {
+        if let Some(player) = tournament.players.get_mut(&charlie_id) {
             player.score = 1.5;
         }
         

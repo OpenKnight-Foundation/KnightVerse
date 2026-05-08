@@ -589,4 +589,3 @@ pub async fn complete_game(
         }
     }
 }
-}

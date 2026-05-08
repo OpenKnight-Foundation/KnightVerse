@@ -21,14 +21,25 @@ impl SwissPairer {
         });
         
         // Handle odd number of players - assign bye to lowest ranked
-        if player_refs.len() % 2 == 1 {
+        let pairings = if player_refs.len() % 2 == 1 {
             let bye_player_id = self.assign_bye(&mut player_refs, tournament)?;
             let pairings = self.pair_even_players(player_refs, tournament)?;
-            Ok(pairings.into_iter().chain(vec![PairingResult::Bye(bye_player_id)]).collect())
+            pairings
+                .into_iter()
+                .chain(vec![PairingResult::Bye(bye_player_id)])
+                .collect()
         } else {
-            let pairings = self.pair_even_players(player_refs, tournament)?;
-            Ok(pairings)
+            self.pair_even_players(player_refs, tournament)?
+        };
+
+        // Persist generated pairings so round results can be applied deterministically.
+        for result in &pairings {
+            if let PairingResult::Paired(pairing) = result {
+                tournament.pairings.push(pairing.clone());
+            }
         }
+
+        Ok(pairings)
     }
 
     fn assign_bye(&self, players: &mut Vec<&Player>, tournament: &mut TournamentState) -> Result<Uuid, PairingError> {

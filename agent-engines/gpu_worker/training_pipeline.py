@@ -63,21 +63,21 @@ class PersonalityTrainingPipeline:
             # For now, we simulate the time taken for conversion
             for p in range(0, 31, 10):
                 job.progress = float(p)
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.1)
 
             # Step 2: Training
             job.status = TrainingStatus.TRAINING
             logger.info(f"Job {job_id}: Training started on node {job.node_id}")
             for p in range(30, 81, 10):
                 job.progress = float(p)
-                await asyncio.sleep(0.5)  # Simulate GPU computation
+                await asyncio.sleep(0.1)  # Simulate GPU computation
 
             # Step 2: Validation
             job.status = TrainingStatus.VALIDATING
             logger.info(f"Job {job_id}: Validating personality traits...")
             for p in range(70, 101, 10):
                 job.progress = float(p)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.1)
 
             # Step 3: Completion
             job.status = TrainingStatus.COMPLETED

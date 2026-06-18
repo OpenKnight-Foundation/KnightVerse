@@ -105,6 +105,7 @@ class TrainingStatus(str, Enum):
     """Status of a personality training job."""
 
     QUEUED = "queued"
+    PROVISIONING = "provisioning"
     TRAINING = "training"
     VALIDATING = "validating"
     COMPLETED = "completed"

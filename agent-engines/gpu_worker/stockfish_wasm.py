@@ -241,7 +241,7 @@ class StockfishWASMEngine:
         depth: Optional[int] = None,
         time_limit_ms: Optional[int] = None,
     ) -> list[WASMAnalysisResult]:
-        """Analyze multiple positions concurrently.
+        """Analyze multiple positions.
         
         Args:
             positions: List of FEN strings.
@@ -251,22 +251,15 @@ class StockfishWASMEngine:
         Returns:
             List of analysis results.
         """
-        tasks = [
-            self.analyze_position(fen, depth, time_limit_ms)
-            for fen in positions
-        ]
+        results = []
+        for i, fen in enumerate(positions):
+            try:
+                result = await self.analyze_position(fen, depth, time_limit_ms)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Analysis failed for position {i}: {e}")
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Filter out exceptions
-        valid_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Analysis failed for position {i}: {result}")
-            else:
-                valid_results.append(result)
-        
-        return valid_results
+        return results
     
     async def stop_analysis(self) -> None:
         """Stop current analysis."""

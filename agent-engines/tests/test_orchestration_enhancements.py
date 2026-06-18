@@ -143,6 +143,11 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
 
     def setUp(self):
         self.orchestrator = DeploymentPipelineOrchestrator()
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+    def tearDown(self):
+        self.loop.close()
 
     def test_execute_pipeline_success(self):
         """Test successful pipeline execution."""
@@ -163,7 +168,7 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
             self.assertTrue(result.rollback_available)
             self.assertGreater(result.duration_ms, 0)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_execute_pipeline_with_hooks(self):
         """Test pipeline execution with pre and post deploy hooks."""
@@ -192,7 +197,7 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
             self.assertTrue(pre_hook_called)
             self.assertTrue(post_hook_called)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_execute_pipeline_no_tests(self):
         """Test pipeline execution without tests."""
@@ -207,7 +212,7 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
             
             self.assertEqual(result.status.value, "completed")
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_deployment_history(self):
         """Test deployment history tracking."""
@@ -230,7 +235,7 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
             filtered = self.orchestrator.get_deployment_history("engine-1")
             self.assertEqual(len(filtered["engine-1"]), 2)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_get_active_pipelines(self):
         """Test active pipeline tracking."""
@@ -243,7 +248,7 @@ class TestDeploymentPipelineOrchestrator(unittest.TestCase):
             
             self.assertNotIn(result.pipeline_id, active)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
 
 class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
@@ -251,6 +256,11 @@ class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
 
     def setUp(self):
         self.orchestrator = AgentEngineOrchestrator(node_id="test-node")
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+    def tearDown(self):
+        self.loop.close()
 
     def test_provision_engine_with_resource_tier(self):
         """Test engine provisioning with resource tier."""
@@ -273,7 +283,7 @@ class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
             self.assertEqual(state["pipeline_status"], "ready")
             self.assertIn("resource_allocation", state)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_get_resource_metrics(self):
         """Test resource metrics collection."""
@@ -289,7 +299,7 @@ class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
             self.assertIn("allocations", metrics)
             self.assertIn("test-engine-metrics", metrics["allocations"])
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_deploy_engine_with_pipeline(self):
         """Test full pipeline deployment."""
@@ -310,7 +320,7 @@ class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
             self.assertEqual(result.status.value, "completed")
             self.assertIsNotNone(result.deployment_id)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
     def test_concurrent_provisioning_with_different_tiers(self):
         """Test concurrent engine provisioning with different resource tiers."""
@@ -333,7 +343,7 @@ class TestAgentEngineOrchestratorIntegration(unittest.TestCase):
             self.assertIn("light-engine", light_alloc)
             self.assertIn("high-engine", light_alloc)
         
-        asyncio.get_event_loop().run_until_complete(run_test())
+        self.loop.run_until_complete(run_test())
 
 
 if __name__ == "__main__":

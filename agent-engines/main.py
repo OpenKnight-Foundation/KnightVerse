@@ -156,7 +156,7 @@ class AgentEngineOrchestrator:
                 "pipeline_status": self._pipelines.get(agent_id, "unknown").value if agent_id in self._pipelines else "unknown",
                 "engine_data": self._active_engines.get(agent_id),
                 "resource_allocation": self._resource_allocations.get(agent_id),
-                "cluster_info": [asdict(n) for n in cluster_state]
+                "cluster_info": [n.model_dump() for n in cluster_state]
             }
         
         return {

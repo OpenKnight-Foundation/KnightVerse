@@ -15,34 +15,35 @@ from gpu_worker.nl_models import ComplexityLevel, IntentRecognition, IntentType
 # Pattern definitions for intent recognition
 INTENT_PATTERNS = {
     IntentType.ANALYZE_POSITION: [
-        r'\b(analyz|evaluat|assess|review)\b.*\b(position|board|situation|game)\b',
-        r'\b(what|how)\b.*\b(position|board)\b',
-        r'\b(analysis|evaluation)\b',
+        r'\b(analyz\w*|evaluat\w*|assess\w*|review\w*)\b.*\b(position|board|situation|game)\b',
+        r'\b(what|how)\b.*\b(is the\s+)?(assessment|evaluation|status)\b.*\b(position|board)\b',
+        r'\b(analysis|evaluation|assessment)\b',
     ],
     IntentType.SUGGEST_MOVE: [
         r'\b(suggest|recommend|advise|propose)\b.*\b(move|play)\b',
-        r'\b(what|which)\b.*\b(move|play)\b.*\b(best|good|should)\b',
-        r'\b(what should i\b.*\b(play|do)\b',
+        r'\b(what|which)\b.*\b(best|good|should)\b.*\b(move|play)\b',
+        r'\bwhat should i\b.*\b(play|do)\b',
+        r'\bbest move\b',
     ],
     IntentType.EXPLAIN_MOVE: [
         r'\b(explain|why|reason)\b.*\b(move|played|chosen)\b',
-        r'\b(why\b.*\b(is|was)\b.*\b(good|bad|best|strong|weak)\b',
-        r'\b(what makes\b.*\b(move|position)\b',
+        r'\bwhy\b.*\b(is|was)\b.*\b(good|bad|best|strong|weak)\b',
+        r'\bwhat makes\b.*\b(move|position)\b',
     ],
     IntentType.GET_HINT: [
-        r'\b(hint|help|clue|tip)\b',
-        r'\b(give me\b.*\b(hint|help)\b',
+        r'\b(hint|help|clue|tip)s?\b',
+        r'\bgive me\b.*\b(hint|help)\b',
         r'\b(stuck|don.*t know|unsure)\b',
     ],
     IntentType.COMPARE_MOVES: [
-        r'\b(compare|difference|versus|vs)\b.*\b(move|option)\b',
-        r'\b(which is better\b',
-        r'\b(move a\b.*\b(move b\b',
+        r'\b(compare|difference|versus|vs)\b',
+        r'\bwhich is better\b',
     ],
     IntentType.LEARN_CONCEPT: [
-        r'\b(what is|explain|teach me|how does)\b.*\b(tactic|strategy|opening|endgame)\b',
+        r'\b(what is|explain|teach me|how does|tell me about)\b.*\b(tactic|strategy|opening|endgame|fork|pin|skewer|concept|mate|checkmate)\b',
         r'\b(learn|understand)\b.*\b(chess|position|move)\b',
-        r'\b(tell me about\b',
+        r'\b(what is a|what is an)\b',
+        r'\btell me about\b',
     ],
 }
 
@@ -81,11 +82,11 @@ def recognize_intent(user_input: str) -> IntentRecognition:
             match = re.search(pattern, user_input_lower)
             if match:
                 # Calculate confidence based on match quality
-                confidence = _calculate_confidence(match, user_input_lower)
+                confidence = _calculate_confidence(match, user_input_lower, intent)
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_intent = intent
-                    best_reasoning = f"Matched pattern: {pattern}"
+                    best_reasoning = f"Matched pattern: {pattern} with confidence {confidence}"
     
     return IntentRecognition(
         intent=best_intent,
@@ -146,7 +147,7 @@ def extract_moves_from_input(user_input: str) -> list[str]:
         List of chess moves in algebraic notation.
     """
     # Simple pattern for algebraic notation (e.g., e4, Nf3, O-O, Qxd5)
-    move_pattern = r'\b([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)\b'
+    move_pattern = r'\b([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)(?!\w)'
     moves = re.findall(move_pattern, user_input)
     
     # Filter out common false positives
@@ -158,12 +159,13 @@ def extract_moves_from_input(user_input: str) -> list[str]:
     return chess_moves
 
 
-def _calculate_confidence(match: re.Match, text: str) -> float:
+def _calculate_confidence(match: re.Match, text: str, intent: IntentType) -> float:
     """Calculate confidence score for an intent match.
     
     Args:
         match: The regex match object.
         text: The full user input text.
+        intent: The recognized intent type.
         
     Returns:
         Confidence score between 0.0 and 1.0.
@@ -172,12 +174,31 @@ def _calculate_confidence(match: re.Match, text: str) -> float:
     match_length = match.end() - match.start()
     text_length = len(text)
     
-    # Longer matches in shorter texts are more confident
-    base_confidence = min(1.0, match_length / max(text_length * 0.3, 1))
+    # Use proportion of match relative to text length
+    base_confidence = match_length / max(text_length, 1)
     
     # Boost confidence for exact keyword matches
     matched_text = match.group(0).lower()
-    if any(keyword in matched_text for keyword in ['best move', 'analyze', 'explain']):
-        base_confidence = min(1.0, base_confidence + 0.2)
     
-    return round(base_confidence, 2)
+    boost_keywords = []
+    if intent == IntentType.ANALYZE_POSITION:
+        boost_keywords = ['analyze', 'evaluate', 'assessment', 'evaluation']
+    elif intent == IntentType.SUGGEST_MOVE:
+        boost_keywords = ['best move', 'suggest', 'recommend']
+    elif intent == IntentType.EXPLAIN_MOVE:
+        boost_keywords = ['explain why', 'why is', 'what makes']
+    elif intent == IntentType.GET_HINT:
+        boost_keywords = ['hint', 'stuck', 'help', 'tips']
+    elif intent == IntentType.COMPARE_MOVES:
+        boost_keywords = ['compare', 'difference', 'which is better']
+    elif intent == IntentType.LEARN_CONCEPT:
+        boost_keywords = ['what is a', 'what is', 'teach me', 'tell me about']
+        
+    if any(keyword in matched_text for keyword in boost_keywords):
+        base_confidence += 0.25
+        
+    # Extra boost for GET_HINT if strong keywords are present anywhere in the text
+    if intent == IntentType.GET_HINT and any(kw in text.lower() for kw in ['stuck', 'hint', 'help', 'tips']):
+        base_confidence += 0.3
+        
+    return round(min(1.0, base_confidence), 2)

@@ -18,7 +18,7 @@ Requires-Dist: pytest-cov>=4.0; extra == "dev"
 
 # agent-engines
 
-GPU-oriented engine infrastructure for the XLMate chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, and **Stockfish 16.1 WASM integration**.
+GPU-oriented engine infrastructure for the XLMate chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
 
 ## Overview
 
@@ -28,6 +28,9 @@ The GPU worker subsystem is designed for long-running analysis services where ne
 - 🤖 **Natural Language Agent**: Interact with chess engines using plain English
 - 🌐 **Stockfish WASM**: Browser-compatible chess engine via WebAssembly
 - 🚀 **Soroban CI/CD**: Automated blockchain contract deployment pipeline
+- ⚡ **Resource Optimizer**: Intelligent CPU/memory allocation with gas cost estimation
+- 🔄 **Deployment Pipeline**: Automated validation, testing, optimization, and rollback
+- 📊 **Performance Monitoring**: Real-time metrics and system capacity tracking
 
 ```text
 Client/API
@@ -55,11 +58,14 @@ WorkerPool ------------------> ResourceMonitor
 - `gpu_worker/pool.py`: least-loaded worker dispatch.
 - `gpu_worker/batch.py`: time- and size-based batching layer.
 - `gpu_worker/resource_monitor.py`: CPU/GPU monitoring with graceful fallback.
+- `gpu_worker/resource_optimizer.py`: **NEW** Intelligent resource allocation and optimization.
+- `gpu_worker/deployment_pipeline.py`: **NEW** Automated deployment pipeline orchestrator.
 - `gpu_worker/nl_models.py`: Natural language agent request/response models.
 - `gpu_worker/nl_intent_parser.py`: Intent recognition and entity extraction.
 - `gpu_worker/nl_agent.py`: Natural language agent service layer.
 - `gpu_worker/stockfish_wasm.py`: Stockfish 16.1 WASM integration module.
 - `gpu_worker/stockfish_wasm_bridge.py`: TypeScript bridge code generator.
+- `main.py`: **ENHANCED** Agent engine orchestrator with resource optimization.
 
 ## Requirements
 
@@ -413,3 +419,177 @@ Configure GitHub environments:
 - The UCI bridge works with any UCI-compatible engine and only applies `setoption` calls for engine options reported during the `uci` handshake.
 - GPU monitoring gracefully degrades to empty metrics when NVML or `nvidia-smi` are unavailable.
 - `BatchAnalyzer` improves throughput for bursty workloads such as review pipelines or offline game processing.
+
+## Resource Optimization & Orchestration
+
+The agent-engines module now includes intelligent resource orchestration for efficient CPU/GPU utilization and automated deployment pipelines.
+
+### Resource Optimizer
+
+The `ResourceOptimizer` automatically calculates optimal resource allocation based on:
+- System capacity (CPU cores, memory)
+- Current system load
+- Engine resource tier requirements
+- Computational cost estimation (gas model)
+
+```python
+import asyncio
+from main import AgentEngineOrchestrator, EngineConfig, EngineType
+from gpu_worker.resource_optimizer import ResourceTier
+
+
+async def run() -> None:
+    orchestrator = AgentEngineOrchestrator()
+    await orchestrator.start()
+    
+    try:
+        # Provision engine with automatic resource optimization
+        config = EngineConfig(
+            engine_type=EngineType.STOCKFISH,
+            threads=4,
+            memory_mb=1024
+        )
+        
+        # Choose resource tier: LIGHT, STANDARD, HIGH, or UNLIMITED
+        success = await orchestrator.provision_engine(
+            "copilot-alpha",
+            config,
+            resource_tier=ResourceTier.HIGH
+        )
+        
+        # View resource metrics
+        metrics = orchestrator.get_resource_metrics()
+        print(f"CPU Usage: {metrics['current']['cpu_percent']}%")
+        print(f"Memory Available: {metrics['current']['memory_available_mb']}MB")
+        
+    finally:
+        await orchestrator.shutdown()
+
+
+asyncio.run(run())
+```
+
+#### Resource Tiers
+
+- **LIGHT**: 25% of available resources, quick responses
+- **STANDARD**: 50% of available resources, balanced performance
+- **HIGH**: 75% of available resources, maximum performance
+- **UNLIMITED**: 100% of available resources (testing/development)
+
+### Deployment Pipeline Orchestrator
+
+The `DeploymentPipelineOrchestrator` manages the complete engine lifecycle:
+1. **Validation**: Verify configuration and dependencies
+2. **Building**: Compile engine artifacts
+3. **Testing**: Run automated tests
+4. **Optimization**: Optimize resource allocation
+5. **Deployment**: Deploy to target environment
+6. **Verification**: Confirm successful deployment
+7. **Rollback**: Automatic rollback on failure (if enabled)
+
+```python
+import asyncio
+from main import AgentEngineOrchestrator, EngineConfig, EngineType
+from gpu_worker.resource_optimizer import ResourceTier
+from gpu_worker.deployment_pipeline import DeploymentTarget
+
+
+async def run() -> None:
+    orchestrator = AgentEngineOrchestrator()
+    await orchestrator.start()
+    
+    try:
+        config = EngineConfig(
+            engine_type=EngineType.MAIA,
+            threads=2,
+            memory_mb=512
+        )
+        
+        # Deploy using full pipeline with automatic rollback
+        result = await orchestrator.deploy_engine_with_pipeline(
+            agent_id="copilot-beta",
+            config=config,
+            resource_tier=ResourceTier.STANDARD,
+            target=DeploymentTarget.LOCAL
+        )
+        
+        print(f"Pipeline status: {result.status.value}")
+        print(f"Deployment ID: {result.deployment_id}")
+        print(f"Duration: {result.duration_ms}ms")
+        print(f"Rollback available: {result.rollback_available}")
+        
+    finally:
+        await orchestrator.shutdown()
+```
+
+### Performance Monitoring
+
+Monitor real-time system metrics and engine performance:
+
+```python
+import asyncio
+from main import AgentEngineOrchestrator
+
+
+async def run() -> None:
+    orchestrator = AgentEngineOrchestrator()
+    await orchestrator.start()
+    
+    try:
+        # Get comprehensive orchestration state
+        state = orchestrator.get_orchestration_state()
+        
+        print(f"Active engines: {state['active_count']}")
+        print(f"Cluster nodes: {state['cluster_nodes']}")
+        print(f"System resources:")
+        print(f"  CPU: {state['system_resources']['cpu_percent']}%")
+        print(f"  Memory: {state['system_resources']['memory_used_mb']}MB used")
+        
+        # Get detailed resource metrics
+        metrics = orchestrator.get_resource_metrics()
+        print(f"\nResource allocations:")
+        for agent_id, alloc in metrics['allocations'].items():
+            print(f"  {agent_id}: {alloc['threads']} threads, {alloc['memory_mb']}MB")
+        
+    finally:
+        await orchestrator.shutdown()
+```
+
+### Gas Cost Estimation
+
+The resource optimizer includes a gas cost model to estimate computational expenses:
+
+```python
+from gpu_worker.resource_optimizer import ResourceOptimizer
+
+optimizer = ResourceOptimizer()
+
+# Estimate cost for different engines and depths
+stockfish_cost = optimizer.estimate_gas_cost("stockfish", complexity=20)
+lc0_cost = optimizer.estimate_gas_cost("lc0", complexity=20)
+
+print(f"Stockfish depth 20: {stockfish_cost:.2f} gas units")
+print(f"LC0 depth 20: {lc0_cost:.2f} gas units")
+```
+
+### Auto-Scaling & Throttling
+
+The orchestrator automatically adjusts resource allocation based on system load:
+
+- **Under heavy load** (>80%): Reduces allocation by 50%
+- **Under light load** (<30%): Increases allocation by up to 2x
+- **Throttling**: Automatically triggers when CPU/memory exceeds 90%
+
+```python
+from gpu_worker.resource_optimizer import ResourceOptimizer
+
+optimizer = ResourceOptimizer()
+
+# Check if throttling should be applied
+metrics = optimizer.get_current_metrics()
+should_throttle = optimizer.should_throttle(metrics, threshold=90.0)
+
+if should_throttle:
+    print("System under heavy load - throttling new requests")
+else:
+    print("System operating normally")

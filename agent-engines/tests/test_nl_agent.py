@@ -376,7 +376,7 @@ class TestNaturalLanguageAgent(unittest.TestCase):
             
             # Test advanced
             advanced_response = await self.agent.process_request(
-                user_input="Give me advanced analysis with detailed variations",
+                user_input="Suggest an advanced move with detailed variations",
                 fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             )
             

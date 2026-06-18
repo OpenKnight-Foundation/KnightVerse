@@ -9,7 +9,46 @@ from gpu_worker.models import AnalysisRequest, NodeInfo
 class TestDecentralizedOrchestrator(unittest.TestCase):
     def setUp(self):
         self.config = WorkerConfig()
-        self.pool = WorkerPool([self.config])
+        
+        class FakeBridge:
+            def __init__(self, config) -> None:
+                self.config = config
+                self.started = False
+                self.initialized = False
+                self.positions = []
+                self.quit_called = False
+
+            async def start(self) -> None:
+                self.started = True
+
+            async def initialize_options(self) -> None:
+                self.initialized = True
+
+            async def set_position(self, fen: str) -> None:
+                self.positions.append(fen)
+
+            async def go(self, **_: object) -> tuple:
+                from gpu_worker.uci_bridge import UciBestMove, UciInfo
+                return UciBestMove(best_move="e2e4"), UciInfo(
+                    depth=20,
+                    evaluation=0.33,
+                    principal_variation=["e2e4", "e7e5"],
+                    nodes=2048,
+                )
+
+            async def quit(self) -> None:
+                self.quit_called = True
+
+        def fake_worker_factory(cfg):
+            from gpu_worker.worker import GPUAnalysisWorker
+            from gpu_worker.resource_monitor import ResourceMonitor
+            return GPUAnalysisWorker(
+                cfg,
+                bridge_factory=FakeBridge,
+                resource_monitor=ResourceMonitor(),
+            )
+            
+        self.pool = WorkerPool([self.config], worker_factory=fake_worker_factory)
         self.orchestrator = DecentralizedOrchestrator(self.pool, node_id="test-node")
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)

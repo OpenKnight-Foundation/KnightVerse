@@ -64,7 +64,7 @@ impl RatingService {
     ) -> Result<(i32, i32), ApiError> {
         // Start a database transaction to ensure atomicity
         let txn = db.begin().await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to start transaction: {}", e))))?;
+            .map_err(ApiError::DatabaseError)?;
 
         let result = Self::update_ratings_in_transaction(&txn, game_id, config).await;
 
@@ -72,7 +72,7 @@ impl RatingService {
             Ok(ratings) => {
                 // Commit the transaction if everything succeeded
                 txn.commit().await
-                    .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to commit transaction: {}", e))))?;
+                    .map_err(ApiError::DatabaseError)?;
                 Ok(ratings)
             }
             Err(e) => {
@@ -93,7 +93,7 @@ impl RatingService {
         let game_model = game::Entity::find_by_id(game_id)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch game: {}", e))))?
+            .map_err(ApiError::DatabaseError)?
             .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
 
         // 2. Check if game is completed
@@ -118,13 +118,13 @@ impl RatingService {
         let white_player = player::Entity::find_by_id(game_model.white_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch white player: {}", e))))?
+            .map_err(ApiError::DatabaseError)?
             .ok_or_else(|| ApiError::NotFound("White player not found".to_string()))?;
 
         let black_player = player::Entity::find_by_id(game_model.black_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch black player: {}", e))))?
+            .map_err(ApiError::DatabaseError)?
             .ok_or_else(|| ApiError::NotFound("Black player not found".to_string()))?;
 
         // 5. Calculate new ratings based on game outcome
@@ -150,10 +150,10 @@ impl RatingService {
 
         // Execute both updates in the same transaction
         white_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update white player rating: {}", e))))?;
+            .map_err(ApiError::DatabaseError)?;
 
         black_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update black player rating: {}", e))))?;
+            .map_err(ApiError::DatabaseError)?;
 
         Ok((new_white_rating, new_black_rating))
     }
@@ -216,7 +216,7 @@ impl RatingService {
         let player = player::Entity::find_by_id(player_id)
             .one(db)
             .await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch player: {}", e))))?
+            .map_err(ApiError::DatabaseError)?
             .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
 
         Ok(player.elo_rating)
@@ -238,7 +238,7 @@ impl RatingService {
         };
 
         active_model.update(db).await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to update player rating: {}", e))))?;
+            .map_err(ApiError::DatabaseError)?;
 
         Ok(())
     }

@@ -10,15 +10,19 @@ const LATENCY_BUFFER_MS: u64 = 750;
 
 type MessageSender = broadcast::Sender<ServerMessage>;
 
+use crate::pubsub::RedisPubSub;
+
 pub struct ServerState {
     pub rooms: HashMap<String, Room>,
     pub message_senders: HashMap<String, MessageSender>,
+    pub pubsub: Option<RedisPubSub>,
 }
 
 lazy_static::lazy_static! {
     pub static ref GAME_STATE: Arc<Mutex<ServerState>> = Arc::new(Mutex::new(ServerState {
         rooms: HashMap::new(),
         message_senders: HashMap::new(),
+        pubsub: None,
     }));
 }
 

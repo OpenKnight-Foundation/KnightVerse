@@ -6,6 +6,7 @@ import { MatchmakingProvider } from "@/context/matchmakingContext";
 import { ToastProvider } from "@/components/ui/toast";
 import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
+import { WebSocketScalingProvider } from "@/context/webSocketScalingContext";
 
 export const metadata: Metadata = {
   title: "XLMate",
@@ -28,13 +29,15 @@ export default function RootLayout({
         </a>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <AppProvider>
-            <MatchmakingProvider>
-              <ToastProvider>
-                <TransactionProvider>
-                  <ClientRoot>{children}</ClientRoot>
-                </TransactionProvider>
-              </ToastProvider>
-            </MatchmakingProvider>
+            <WebSocketScalingProvider>
+              <MatchmakingProvider>
+                <ToastProvider>
+                  <TransactionProvider>
+                    <ClientRoot>{children}</ClientRoot>
+                  </TransactionProvider>
+                </ToastProvider>
+              </MatchmakingProvider>
+            </WebSocketScalingProvider>
           </AppProvider>
         </ThemeProvider>
       </body>

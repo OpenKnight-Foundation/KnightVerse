@@ -110,9 +110,12 @@ export function WalletConnectModal({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm animate-overlay-in" />
 
         {/* Content */}
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-700/80 bg-gray-900/95 backdrop-blur-xl p-0 shadow-2xl animate-modal-in focus:outline-none">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-600/50 bg-gray-900/80 backdrop-blur-2xl p-0 shadow-[0_0_50px_-12px_rgba(20,184,166,0.3)] animate-modal-in focus:outline-none">
+          {/* Glowing Aura Background */}
+          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-teal-500/20 to-blue-600/20 blur-xl z-[-1] opacity-70 pointer-events-none"></div>
+
           {/* Header gradient bar */}
-          <div className="h-1 w-full rounded-t-2xl bg-gradient-to-r from-teal-500 via-blue-600 to-indigo-500" />
+          <div className="h-1.5 w-full rounded-t-2xl bg-gradient-to-r from-teal-400 via-blue-500 to-indigo-500 shadow-[0_2px_10px_rgba(45,212,191,0.5)]" />
 
           <div className="p-6 space-y-5">
             {/* Close button */}
@@ -290,10 +293,10 @@ export function WalletConnectModal({
                 <button
                   onClick={handleConnect}
                   disabled={isConnecting}
-                  className="w-full group relative py-3 rounded-xl font-semibold text-white overflow-hidden transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full group relative py-3.5 rounded-xl font-bold text-white overflow-hidden transition-all duration-300 hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(20,184,166,0.15)] hover:shadow-[0_0_30px_rgba(20,184,166,0.4)]"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-r from-teal-500 to-blue-700 transition-all duration-300 group-hover:from-teal-600 group-hover:to-blue-800" />
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-teal-400/20 to-blue-600/20" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-teal-500 via-blue-600 to-indigo-600 transition-all duration-300 group-hover:bg-gradient-to-l group-hover:scale-105" />
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.2)_0%,transparent_100%)]" />
                   <span className="relative z-10 flex items-center justify-center gap-2">
                     {isConnecting ? (
                       <>

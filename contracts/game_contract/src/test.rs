@@ -33,6 +33,7 @@ fn seed_completed_game(
             created_at: 0,
             winner: None,
             last_move_at: 0,
+            board_fen: Bytes::new(env),
         };
         let mut games: Map<u64, Game> = Map::new(env);
         games.set(game_id, game);
@@ -192,7 +193,7 @@ fn test_create_game_exceeds_max_stake() {
     let player1 = Address::generate(&env);
     let wager = 1001; // Exceeds default 1000
 
-    let res = client.try_create_game(&player1, &wager);
+    let res = client.try_create_game(&player1, &wager, &Bytes::new(&env));
     assert!(res.is_err());
 
     // The error should be StakeLimitExceeded (15)
@@ -231,11 +232,11 @@ fn test_set_max_stake() {
     client.set_max_stake(&admin, &500);
 
     // Try to create game with 600
-    let res = client.try_create_game(&player1, &600);
+    let res = client.try_create_game(&player1, &600, &Bytes::new(&env));
     assert!(res.is_err());
 
     // Try to create game with 500
-    let game_id_res = client.try_create_game(&player1, &500);
+    let game_id_res = client.try_create_game(&player1, &500, &Bytes::new(&env));
     assert!(game_id_res.is_ok());
 }
 
@@ -285,7 +286,7 @@ fn test_payout_with_fee() {
     stellar_asset_client.mint(&player1, &wager);
     stellar_asset_client.mint(&player2, &wager);
 
-    let game_id = client.create_game(&player1, &wager);
+    let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
     client.join_game(&game_id, &player2);
 
     // Force complete the game and set winner

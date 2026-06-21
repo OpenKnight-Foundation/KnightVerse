@@ -98,6 +98,8 @@ const MAX_STAKE: Symbol = symbol_short!("MAXSTAKE");
 const FEE_BIPS: Symbol = symbol_short!("FEE_BIPS"); // u32  (0–1000, i.e. 0–10 %)
 const TREASURY_ADDR: Symbol = symbol_short!("TR_ADDR"); // Address
 const CONTRACT_ADMIN: Symbol = symbol_short!("CT_ADMIN"); // Address
+const FEE_ADMINS: Symbol = symbol_short!("FEE_ADMS"); // Vec<Address>
+const FEE_THRESHOLD: Symbol = symbol_short!("FEE_THR"); // u32
 
 // Dispute resolution system
 const DISPUTE_FEE: Symbol = symbol_short!("D_FEE"); // i128 - fee to file a dispute
@@ -952,7 +954,12 @@ impl GameContract {
         env.storage().instance().set(&MAX_STAKE, &new_limit);
     }
 
-    pub fn configure_fees(env: Env, admin: Address, fee_bips: u32, treasury_address: Address) {
+    pub fn configure_fee_multisig(
+        env: Env,
+        caller: Address,
+        new_admins: Vec<Address>,
+        threshold: u32,
+    ) {
         let current_admin: Address = env
             .storage()
             .instance()
@@ -960,9 +967,73 @@ impl GameContract {
             .expect("Not initialized");
         current_admin.require_auth();
 
-        if admin != current_admin {
+        if caller != current_admin {
             panic!("Unauthorized admin address");
         }
+        if threshold == 0 || threshold > new_admins.len() as u32 {
+            panic!("Invalid threshold");
+        }
+
+        let mut unique_set = Vec::new(&env);
+        for i in 0..new_admins.len() {
+            let admin = new_admins.get(i).unwrap();
+            if unique_set.contains(&admin) {
+                panic!("Duplicate admins in list");
+            }
+            unique_set.push_back(admin);
+        }
+
+        env.storage().instance().set(&FEE_ADMINS, &new_admins);
+        env.storage().instance().set(&FEE_THRESHOLD, &threshold);
+    }
+
+    pub fn configure_fees(
+        env: Env,
+        admins: Vec<Address>,
+        fee_bips: u32,
+        treasury_address: Address,
+    ) {
+        let stored_admins: Vec<Address> =
+            env.storage()
+                .instance()
+                .get(&FEE_ADMINS)
+                .unwrap_or_else(|| {
+                    let current_admin: Address = env
+                        .storage()
+                        .instance()
+                        .get(&CONTRACT_ADMIN)
+                        .expect("Not initialized");
+                    let mut v = Vec::new(&env);
+                    v.push_back(current_admin);
+                    v
+                });
+        let threshold: u32 = env.storage().instance().get(&FEE_THRESHOLD).unwrap_or(1);
+
+        if admins.len() < threshold {
+            panic!("Not enough admin approvals");
+        }
+
+        let mut unique_approvals = 0;
+        let mut approved_set = Vec::new(&env);
+
+        for i in 0..admins.len() {
+            let admin = admins.get(i).unwrap();
+            if stored_admins.contains(&admin) {
+                if approved_set.contains(&admin) {
+                    panic!("Duplicate admin approvals");
+                }
+                admin.require_auth();
+                approved_set.push_back(admin.clone());
+                unique_approvals += 1;
+            } else {
+                panic!("Unauthorized admin address");
+            }
+        }
+
+        if unique_approvals < threshold {
+            panic!("Not enough valid admin approvals");
+        }
+
         if fee_bips > 1000 {
             panic!("Fee bips must be between 0 and 1000");
         }
@@ -1353,6 +1424,39 @@ impl GameContract {
             .get(dispute.game_id)
             .ok_or(ContractError::GameNotFound)?;
 
+        // Update dispute status
+        dispute.status = DisputeStatus::Resolved;
+        dispute.resolution = Some(resolution.clone());
+        let game_id = dispute.game_id;
+        disputes.set(dispute_id, dispute);
+        env.storage().instance().set(&DISPUTES, &disputes);
+
+        // Update game state and process payout based on arbitrator's decision
+        if let Some(ref winner_addr) = winner {
+            // Winner takes all
+            let mut games: Map<u64, Game> = env
+                .storage()
+                .instance()
+                .get(&GAMES)
+                .ok_or(ContractError::GameNotFound)?;
+
+            let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+            game.state = GameState::Completed;
+            game.winner = Some(winner_addr.clone());
+            Self::process_payout(&env, &game, winner_addr)?;
+
+            games.set(game_id, game);
+            env.storage().instance().set(&GAMES, &games);
+        } else {
+            // Draw - refund both players
+            let mut games: Map<u64, Game> = env
+                .storage()
+                .instance()
+                .get(&GAMES)
+                .ok_or(ContractError::GameNotFound)?;
+
+            let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
         if game.state != GameState::InProgress {
             return Err(ContractError::GameAlreadyCompleted);
         }
@@ -2533,6 +2637,7 @@ mod tests {
             &0u32,
             &treasury_addr,
         );
+        client.configure_dispute_system(&admin, &arbitrator, &50i128);
         client.configure_dispute_system(&admin, &arbitrator, &25i128);
         client.set_max_stake(&admin, &1_000i128);
 
@@ -2582,6 +2687,7 @@ mod tests {
             &0u32,
             &treasury_addr,
         );
+        client.configure_dispute_system(&admin, &arbitrator, &50i128);
         client.configure_dispute_system(&admin, &arbitrator, &0i128);
         client.set_max_stake(&admin, &1_000i128);
 
@@ -2599,6 +2705,19 @@ mod tests {
             &resolution,
         );
 
+        // Arbitrator resolves in favor of player1
+        let resolution = Bytes::from_slice(&env, b"Player1 wins");
+        client.resolve_dispute(
+            &dispute_id,
+            &arbitrator,
+            &Some(player1.clone()),
+            &resolution,
+        );
+
+        // Verify player1 received the payout
+        assert_eq!(token_client.balance(&player1), 1_050);
+
+        // Verify dispute is resolved
         let dispute = client.get_dispute(&dispute_id);
         assert_eq!(dispute.status, DisputeStatus::Resolved);
         assert_eq!(token_client.balance(&player1), 1_100);
@@ -2890,6 +3009,7 @@ mod tests {
             &0u32,
             &treasury_addr,
         );
+        client.configure_dispute_system(&admin, &arbitrator, &50i128);
         client.configure_dispute_system(&admin, &arbitrator, &25i128);
         client.set_max_stake(&admin, &1_000i128);
 

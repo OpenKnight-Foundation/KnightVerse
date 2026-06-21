@@ -327,14 +327,18 @@ fn test_configure_fees_permissioned() {
 
     // Update fees as admin
     let new_treasury = Address::generate(&env);
-    client.configure_fees(&admin, &50, &new_treasury); // 5% fee
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin.clone());
+    client.configure_fees(&admins, &50, &new_treasury); // 5% fee
 
     // Verify update
     // (In a real test we'd check storage or run a payout, but here we just ensure it doesn't panic)
 
     // Attempt update as someone else should panic
     let stranger = Address::generate(&env);
-    let res = client.try_configure_fees(&stranger, &100, &new_treasury);
+    let mut stranger_admins = Vec::new(&env);
+    stranger_admins.push_back(stranger.clone());
+    let res = client.try_configure_fees(&stranger_admins, &100, &new_treasury);
     assert!(res.is_err());
 }
 

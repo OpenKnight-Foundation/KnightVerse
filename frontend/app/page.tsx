@@ -263,10 +263,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen p-4 md:p-8" role="region" aria-label="Home">
-      {/* Web3 Status Bar */}
-      <div className="mb-4">
-        <Web3StatusBar />
-      </div>
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col md:flex-row gap-8 items-center justify-center">
           {/* Chessboard Section */}

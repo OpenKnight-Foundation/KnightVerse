@@ -6,10 +6,12 @@ import { MatchmakingProvider } from "@/context/matchmakingContext";
 import { ToastProvider } from "@/components/ui/toast";
 import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
+import { EnhancedHeader } from "@/components/EnhancedHeader";
+import { EnhancedTransactionStatus } from "@/components/Web3/EnhancedTransactionStatus";
 
 export const metadata: Metadata = {
-  title: "XLMate",
-  description: "XLMate — Chess on Stellar",
+  title: "XLMate — Chess on Stellar",
+  description: "Play chess on the Stellar blockchain. Compete, earn rewards, and climb the leaderboard.",
 };
 
 export default function RootLayout({
@@ -31,7 +33,11 @@ export default function RootLayout({
             <MatchmakingProvider>
               <ToastProvider>
                 <TransactionProvider>
-                  <ClientRoot>{children}</ClientRoot>
+                  <EnhancedHeader />
+                  <main id="main-content" className="min-h-[calc(100vh-4rem)]">
+                    <ClientRoot>{children}</ClientRoot>
+                  </main>
+                  <EnhancedTransactionStatus />
                 </TransactionProvider>
               </ToastProvider>
             </MatchmakingProvider>

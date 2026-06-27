@@ -102,8 +102,10 @@ export default function Home() {
         if (isMounted && typeof data.count === "number") {
           setOnlinePlayerCount(data.count);
         }
-      } catch (err) {
-        console.error("Failed to fetch player count", err);
+      } catch {
+        // Backend may not be running in local dev — log a warning, not an error,
+        // so the console stays clean when the API server is simply not started yet.
+        console.warn("[XLMate] Could not fetch online player count — backend offline?");
         if (isMounted) {
           setOnlinePlayerCount(null);
         }

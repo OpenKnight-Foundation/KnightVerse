@@ -111,7 +111,10 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
         
         // Load Stockfish worker
         const workerPath = config.jsBridgePath || '/assets/stockfish.js';
-        const worker = new Worker(workerPath);
+        // Using window.Worker (instead of bare `new Worker`) tells Turbopack
+        // not to attempt static analysis of this dynamically resolved path
+        // (fixes TP1001: "new Worker(...) is not statically analyse-able").
+        const worker = new window.Worker(workerPath);
         workerRef.current = worker;
 
         // Setup message handler

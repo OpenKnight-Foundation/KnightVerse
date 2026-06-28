@@ -3,7 +3,7 @@
 import React from "react";
 import Image from "next/image";
 import { useAppContext } from "@/context/walletContext";
-import { FaWallet, FaRobot, FaBolt, FaShieldAlt, FaChessKnight } from "react-icons/fa";
+import { FaWallet, FaBolt, FaShieldAlt, FaChessKnight } from "react-icons/fa";
 import { RiAliensFill } from "react-icons/ri";
 
 interface HeroBrandingProps {

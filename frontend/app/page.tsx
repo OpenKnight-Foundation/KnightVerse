@@ -77,7 +77,7 @@ export default function Home() {
     reconnect: reconnectSocket,
   } = useChessSocket(gameId);
 
-  const { analyzePosition, isReady: stockfishReady } = useStockfishWASM({
+  const { analyzePosition, isReady: stockfishReady, isAnalyzing } = useStockfishWASM({
     jsBridgePath: "/assets/stockfish.js",
   });
 
@@ -150,9 +150,10 @@ export default function Home() {
       // - It's Black's turn
       // - Stockfish is ready
       // - Game is not over
+      // - Not currently analyzing
       const isHeroMode = gameMode === null;
       const isBotMode = gameMode === "bot";
-      if (!stockfishReady || !(isHeroMode || isBotMode)) return;
+      if (!stockfishReady || isAnalyzing || !(isHeroMode || isBotMode)) return;
       if (game.turn() !== "b" || game.isGameOver()) return;
 
       try {
@@ -192,7 +193,7 @@ export default function Home() {
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady]);
+  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
 
   // ─── DETECT GAME OVER for hero / bot mode ───
   useEffect(() => {

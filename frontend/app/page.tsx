@@ -37,6 +37,7 @@ import { HeroBranding } from "@/components/HeroBranding";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
+import { CapturedPieces } from "@/components/chess/CapturedPieces";
 
 export default function Home() {
   const [game] = useState(new Chess());
@@ -403,6 +404,11 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Captured Pieces by Bot (Black capturing White) */}
+            <div className="mb-2 px-1">
+              <CapturedPieces fen={position} color="black" />
+            </div>
+
             {/* The board */}
             <div className="w-full min-w-[320px]">
               <ChessboardComponent
@@ -410,6 +416,11 @@ export default function Home() {
                 onDrop={handleMove}
                 aria-label="Chess board. You play as White. Click or drag pieces to move."
               />
+            </div>
+
+            {/* Captured Pieces by You (White capturing Black) */}
+            <div className="mt-2 px-1">
+              <CapturedPieces fen={position} color="white" />
             </div>
 
             {/* Move counter */}

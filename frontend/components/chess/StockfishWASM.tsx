@@ -230,7 +230,7 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
       setError(null);
 
       const searchDepth = depth || config.defaultDepth || 18;
-      const timeLimit = config.defaultTimeLimit || 5000;
+      const timeLimit = config.defaultTimeLimit || 3000;
 
       // Reset info accumulator
       latestInfo.current = { depth: 0, evaluation: null, pv: [], nodes: 0, timeMs: 0 };
@@ -242,7 +242,7 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
         // Send position + go command (UCI protocol)
         workerRef.current!.postMessage('ucinewgame');
         workerRef.current!.postMessage(`position fen ${fen}`);
-        workerRef.current!.postMessage(`go depth ${searchDepth}`);
+        workerRef.current!.postMessage(`go depth ${searchDepth} movetime ${timeLimit}`);
 
         // Set timeout
         timeoutRef.current = setTimeout(() => {

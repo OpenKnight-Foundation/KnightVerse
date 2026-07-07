@@ -156,6 +156,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
             position: "relative",
             userSelect: "none",
             cursor: "grab",
+            pointerEvents: "none",
             transform: `scale(${boardWidth < 400 ? 0.7 : 0.9})`,
             transition: "all 0.2s ease",
           }}

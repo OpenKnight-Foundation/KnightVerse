@@ -107,13 +107,13 @@ impl Modify for SecurityAddon {
         (name = "WebSocket", description = "WebSocket communication protocol")
     ),
     info(
-        title = "XLMate Chess Platform API",
+        title = "KnightVerse Chess Platform API",
         version = "1.0.0",
-        description = "API for the XLMate chess platform built on Stellar",
+        description = "API for the KnightVerse chess platform built on Stellar",
         contact(
-            name = "XLMate Team",
-            url = "https://xlmate.com/contact",
-            email = "support@xlmate.com"
+            name = "KnightVerse Team",
+            url = "https://knightverse.com/contact",
+            email = "support@knightverse.com"
         ),
         license(
             name = "MIT",

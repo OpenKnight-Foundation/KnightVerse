@@ -6,7 +6,7 @@ import chess.pgn
 import numpy as np
 from typing import List, Tuple, Optional
 
-logger = logging.getLogger("XLMate.PGNConverter")
+logger = logging.getLogger("KnightVerse.PGNConverter")
 
 class PGNConverter:
     """

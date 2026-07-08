@@ -40,7 +40,7 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `xlmate_game_${gameId}_${Date.now()}.pgn`;
+      a.download = `knightverse_game_${gameId}_${Date.now()}.pgn`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

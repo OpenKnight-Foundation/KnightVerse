@@ -5,7 +5,7 @@ from typing import Dict, Any
 
 from gpu_worker.models import PersonalityTraits
 
-logger = logging.getLogger("XLMate.PersonalityManager")
+logger = logging.getLogger("KnightVerse.PersonalityManager")
 
 class PersonalityManager:
     """

@@ -1,6 +1,6 @@
-# XLMate Smart Contracts
+# KnightVerse Smart Contracts
 
-This directory contains the Soroban smart contracts for XLMate.
+This directory contains the Soroban smart contracts for KnightVerse.
 
 ## Prerequisites
 - Rust & Cargo

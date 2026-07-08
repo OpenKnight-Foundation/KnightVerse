@@ -1,12 +1,12 @@
 # Security Policy
 
-Thanks for helping keep XLMate and its on-chain assets safe.
+Thanks for helping keep KnightVerse and its on-chain assets safe.
 
-XLMate is still pre-1.0, so our security process is intentionally simple and practical. If you believe you have found a vulnerability in the platform, smart contracts, or supporting infrastructure, please report it privately so we can investigate and fix it responsibly.
+KnightVerse is still pre-1.0, so our security process is intentionally simple and practical. If you believe you have found a vulnerability in the platform, smart contracts, or supporting infrastructure, please report it privately so we can investigate and fix it responsibly.
 
 ## Supported Versions
 
-Because XLMate is still pre-1.0, we currently provide security updates only for the active development branch.
+Because KnightVerse is still pre-1.0, we currently provide security updates only for the active development branch.
 
 | Version | Supported |
 | --- | --- |
@@ -16,7 +16,7 @@ Because XLMate is still pre-1.0, we currently provide security updates only for 
 
 ## Reporting a Vulnerability
 
-Please email security reports to `security@xlmate.ai`.
+Please email security reports to `security@knightverse.ai`.
 
 Do **not** open a public GitHub issue for security bugs, smart contract weaknesses, auth bypasses, or other vulnerabilities that could put users, wallets, or funds at risk.
 
@@ -44,7 +44,7 @@ Please avoid:
 
 ## Security Scope
 
-We welcome responsible reports covering the full XLMate stack, including:
+We welcome responsible reports covering the full KnightVerse stack, including:
 
 - **Smart contracts (Soroban/Rust)**: staking flows, escrow, payouts, game rules, admin controls, and on-chain asset handling
 - **Backend API**: authentication, authorization, session handling, refresh token rotation, WebSocket security, and data access controls
@@ -56,7 +56,7 @@ Reports related to third-party services, local-only misconfiguration with no pro
 
 ## Security Measures Already in Place
 
-XLMate already includes several security-focused controls:
+KnightVerse already includes several security-focused controls:
 
 - **JWT-based authentication with HS256** for access and reconnect tokens
 - **Refresh token rotation** with SHA256 hashing at rest and token family tracking
@@ -120,7 +120,7 @@ We follow a coordinated disclosure process.
 
 ## Security Best Practices for Contributors
 
-If you contribute code to XLMate, please keep security in mind:
+If you contribute code to KnightVerse, please keep security in mind:
 
 - Never commit secrets, seed phrases, private keys, or production credentials
 - Use parameterized database queries; SeaORM already helps with this by default

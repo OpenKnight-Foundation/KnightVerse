@@ -9,7 +9,7 @@ from gpu_worker.models import TrainingJob, TrainingStatus, PersonalityTraits
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.pgn_converter import PGNConverter
 
-logger = logging.getLogger("XLMate.TrainingPipeline")
+logger = logging.getLogger("KnightVerse.TrainingPipeline")
 
 class PersonalityTrainingPipeline:
     """

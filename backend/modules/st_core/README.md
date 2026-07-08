@@ -38,7 +38,7 @@ let ai_metadata = AIMetadata {
     issuer: "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG".to_string(),
     code: "CHESSAI".to_string(),
     attributes: None,
-    external_url: Some("https://xlmate.ai/agents/chess-master".to_string()),
+    external_url: Some("https://knightverse.ai/agents/chess-master".to_string()),
     image: Some("https://example.com/chess-ai.png".to_string()),
     animation_url: None,
     youtube_url: None,
@@ -84,7 +84,7 @@ Creates a signable XDR transaction for NFT minting.
     "url": "ipfs://QmChessAI123",
     "issuer": "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG",
     "code": "CHESSAI",
-    "external_url": "https://xlmate.ai/agents/chess-master",
+    "external_url": "https://knightverse.ai/agents/chess-master",
     "image": "https://example.com/chess-ai.png"
   },
   "destination_account": "GATTMQEODSDX45WZK2JFIYETXWYCU5GRJ5I3Z7P2UDYD6YFVONDM4CX4",

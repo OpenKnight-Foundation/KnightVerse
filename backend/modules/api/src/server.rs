@@ -34,7 +34,7 @@ async fn health() -> impl Responder {
 
 /// Welcome endpoint
 async fn greet() -> impl Responder {
-    HttpResponse::Ok().json(serde_json::json!({"message": "Welcome to XLMate API"}))
+    HttpResponse::Ok().json(serde_json::json!({"message": "Welcome to KnightVerse API"}))
 }
 
 /// Main server initialization function
@@ -51,7 +51,7 @@ pub async fn main() -> std::io::Result<()> {
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
     let jwt_secret = env::var("JWT_SECRET_KEY")
-        .unwrap_or_else(|_| "xlmate_dev_secret_key_change_in_production".to_string());
+        .unwrap_or_else(|_| "knightverse_dev_secret_key_change_in_production".to_string());
     let jwt_expiration = env::var("JWT_EXPIRATION_SECS")
         .unwrap_or_else(|_| "3600".to_string())
         .parse::<usize>()
@@ -59,7 +59,7 @@ pub async fn main() -> std::io::Result<()> {
 
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    eprintln!("Initializing XLMate Backend Server");
+    eprintln!("Initializing KnightVerse Backend Server");
     eprintln!("Server address: {}", server_addr);
 
     // Connect to database

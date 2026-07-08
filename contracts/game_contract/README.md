@@ -1,4 +1,4 @@
-# XLMate Game Contract
+# KnightVerse Game Contract
 
 A complete on-chain chess game contract built with Soroban SDK for Stellar blockchain.
 

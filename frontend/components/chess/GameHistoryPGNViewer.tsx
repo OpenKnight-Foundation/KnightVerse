@@ -11,8 +11,8 @@ import ChessboardComponent from "./ChessboardComponent";
  * Replace with the real PGN string from the API when available.
  * Clock comments use the standard %clk format: { [%clk h:mm:ss] }
  */
-export const MOCK_PGN = `[Event "XLMate Rated Game"]
-[Site "xlmate.app"]
+export const MOCK_PGN = `[Event "KnightVerse Rated Game"]
+[Site "knightverse.app"]
 [Date "2026.03.26"]
 [White "GABC...XYZ"]
 [Black "GDEF...UVW"]

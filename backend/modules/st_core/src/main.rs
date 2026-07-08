@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         issuer: "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG".to_string(),
         code: "CHESSAI".to_string(),
         attributes: None,
-        external_url: Some("https://xlmate.ai/agents/chess-master".to_string()),
+        external_url: Some("https://knightverse.ai/agents/chess-master".to_string()),
         image: Some("https://example.com/chess-ai.png".to_string()),
         animation_url: None,
         youtube_url: None,

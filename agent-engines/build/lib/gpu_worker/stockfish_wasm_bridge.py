@@ -1,8 +1,8 @@
 """
-Stockfish WASM Bridge generator for XLMate.
+Stockfish WASM Bridge generator for KnightVerse.
 
 This module generates TypeScript/JavaScript bridge code for integrating
-Stockfish WASM engine with the XLMate frontend.
+Stockfish WASM engine with the KnightVerse frontend.
 """
 
 

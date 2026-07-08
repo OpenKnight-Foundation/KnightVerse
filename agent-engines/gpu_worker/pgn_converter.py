@@ -28,7 +28,7 @@ import chess
 import chess.pgn
 from pydantic import BaseModel, Field, field_validator
 
-logger = logging.getLogger("XLMate.PGNConverter")
+logger = logging.getLogger("KnightVerse.PGNConverter")
 
 
 class GameResult(str, Enum):

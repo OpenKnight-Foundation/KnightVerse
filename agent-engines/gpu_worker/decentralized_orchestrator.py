@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
 from gpu_worker.pool import WorkerPool
 
-logger = logging.getLogger("XLMate.DecentralizedOrchestrator")
+logger = logging.getLogger("KnightVerse.DecentralizedOrchestrator")
 
 class DecentralizedOrchestrator:
     """

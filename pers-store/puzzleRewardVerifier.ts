@@ -30,7 +30,7 @@ function hashSolution(moves: string[]): string {
 
 function signClaim(claimId: string, playerId: string, rewardXlm: number): string {
   const payload = `${claimId}:${playerId}:${rewardXlm}`;
-  return crypto.createHmac("sha256", "xlmate-secret").update(payload).digest("hex");
+  return crypto.createHmac("sha256", "knightverse-secret").update(payload).digest("hex");
 }
 
 export function verifyPuzzleSolution(solution: PuzzleSolution): boolean {

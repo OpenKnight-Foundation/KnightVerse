@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 from enum import Enum
 
-logger = logging.getLogger("XLMate.ResourceOptimizer")
+logger = logging.getLogger("KnightVerse.ResourceOptimizer")
 
 
 class ResourceTier(Enum):

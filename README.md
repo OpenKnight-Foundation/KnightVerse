@@ -1,8 +1,8 @@
-# XLMate
-XLMate.ai — The free, decentralized chess platform for intelligent agents and humans. ♞
+# KnightVerse
+KnightVerse.ai — The free, decentralized chess platform for intelligent agents and humans. ♞
 
 
-**XLMate** is a decentralized chess platform that redefines competitive play by blending human strategy with customizable AI agents. Players team up with AI companions (powered by engines like Stockfish or Leela Chess Zero) for real-time multiplayer matches, variant chess rules, move suggestions, and position analysis. Built on **Stellar** and **Soroban**, XLMate enables seamless token staking (using XLM or custom assets), tournament entry, and reward payouts with ultra-low fees and near-instant finality — introducing fair, unpredictable gameplay via engine error correction and on-chain settlement.
+**KnightVerse** is a decentralized chess platform that redefines competitive play by blending human strategy with customizable AI agents. Players team up with AI companions (powered by engines like Stockfish or Leela Chess Zero) for real-time multiplayer matches, variant chess rules, move suggestions, and position analysis. Built on **Stellar** and **Soroban**, KnightVerse enables seamless token staking (using XLM or custom assets), tournament entry, and reward payouts with ultra-low fees and near-instant finality — introducing fair, unpredictable gameplay via engine error correction and on-chain settlement.
 
 Target audience: Chess enthusiasts, AI researchers, competitive gamers, and developers interested in AI-human collaboration, decentralized gaming, and blockchain rewards.
 
@@ -24,7 +24,7 @@ Target audience: Chess enthusiasts, AI researchers, competitive gamers, and deve
 
 ## Repository Structure
 ```
-XLMate/
+KnightVerse/
 ├── contracts/          # Soroban smart contracts (Rust)
 ├── backend/            # Rust/Actix server
 ├── frontend/           # TypeScript frontend
@@ -47,15 +47,15 @@ XLMate/
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/XLMate.git
-cd XLMate
+git clone https://github.com/your-username/KnightVerse.git
+cd KnightVerse
 ```
 
 ### 2. Environment Setup
 Create `.env` files in `/backend` and `/contracts` (copy from `.env.example` if present). Key variables:
 ```env
 # Backend
-DATABASE_URL=postgres://user:pass@localhost:5432/xlmate
+DATABASE_URL=postgres://user:pass@localhost:5432/knightverse
 STELLAR_NETWORK=testnet                  # or futurenet / public
 HORIZON_URL=https://horizon-testnet.stellar.org
 SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443  # Update for Futurenet if needed
@@ -119,7 +119,7 @@ This starts PostgreSQL, backend, frontend, and (optionally) a local Soroban quic
 - **Mainnet** — Production (use real XLM)
 
 ## 🏁 Contributor Roadmap (SCF Grant Readiness)
-We have identified **150 independent tasks** across the frontend, backend, contracts, and AI engine to make XLMate a premier platform for the Stellar ecosystem.
+We have identified **150 independent tasks** across the frontend, backend, contracts, and AI engine to make KnightVerse a premier platform for the Stellar ecosystem.
 
 - [View the Grant Readiness Task List](./docs/scf_grant_readiness_issues.md)
 - **Contributors**: Please pick any open issue labeled `contribution-ready`.

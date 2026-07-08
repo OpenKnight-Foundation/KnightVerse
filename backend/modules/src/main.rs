@@ -8,7 +8,7 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
     env_logger::init();
 
-    println!("Starting XLMate Backend Server...");
+    println!("Starting KnightVerse Backend Server...");
 
     // Initialize Redis connection pool
     let redis_url = env::var("REDIS_URL")

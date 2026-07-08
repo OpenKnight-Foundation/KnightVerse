@@ -1,6 +1,6 @@
-# XLMate Backend - Quick Start Guide
+# KnightVerse Backend - Quick Start Guide
 
-This guide helps you get the XLMate backend running quickly with functional user authentication.
+This guide helps you get the KnightVerse backend running quickly with functional user authentication.
 
 ## 1. Prerequisites Check
 
@@ -19,10 +19,10 @@ psql --version
 
 ```bash
 # Create PostgreSQL database
-createdb xlmate_db
+createdb knightverse_db
 
 # Or use psql
-psql -U postgres -c "CREATE DATABASE xlmate_db;"
+psql -U postgres -c "CREATE DATABASE knightverse_db;"
 ```
 
 ### Step 2: Configure Environment
@@ -34,7 +34,7 @@ cd backend
 cp .env.example .env
 
 # Edit .env - at minimum set:
-# DATABASE_URL=postgres://your_user:your_password@localhost:5432/xlmate_db
+# DATABASE_URL=postgres://your_user:your_password@localhost:5432/knightverse_db
 vim .env
 ```
 
@@ -179,7 +179,7 @@ echo $DATABASE_URL
 psql $DATABASE_URL -c "SELECT 1;"
 
 # Verify database exists
-psql -l | grep xlmate_db
+psql -l | grep knightverse_db
 ```
 
 ### Error: Port 8080 already in use
@@ -225,7 +225,7 @@ cargo test
 ### Build Release
 ```bash
 cargo build --release
-./target/release/xlmate-backend
+./target/release/knightverse-backend
 ```
 
 ## 9. Next Features to Implement

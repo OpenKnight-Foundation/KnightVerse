@@ -1,4 +1,4 @@
-"""Stockfish WASM integration module for XLMate chess platform.
+"""Stockfish WASM integration module for KnightVerse chess platform.
 
 This module provides WebAssembly-based Stockfish integration for browser-compatible
 chess engine analysis without requiring native binaries.
@@ -290,7 +290,7 @@ class StockfishWASMEngine:
             JavaScript code for WASM engine integration.
         """
         return """
-// Stockfish WASM Bridge for XLMate
+// Stockfish WASM Bridge for KnightVerse
 class StockfishWASMBridge {
     constructor(config = {}) {
         this.engine = null;

@@ -1,4 +1,4 @@
-"""GPU-accelerated chess analysis workers for XLMate."""
+"""GPU-accelerated chess analysis workers for KnightVerse."""
 
 from gpu_worker.anomaly import (
     AnomalyRiskLevel,

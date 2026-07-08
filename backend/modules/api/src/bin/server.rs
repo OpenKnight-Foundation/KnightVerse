@@ -1,6 +1,6 @@
-//! XLMate Backend Server Binary
+//! KnightVerse Backend Server Binary
 //!
-//! Entry point for running the XLMate API server.
+//! Entry point for running the KnightVerse API server.
 //! Delegates to the server module for initialization.
 
 use api::server;

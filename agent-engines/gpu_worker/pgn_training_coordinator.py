@@ -26,7 +26,7 @@ from gpu_worker.pgn_converter import (
 )
 from gpu_worker.training_pipeline import PersonalityTrainingPipeline
 
-logger = logging.getLogger("XLMate.PGNTrainingCoordinator")
+logger = logging.getLogger("KnightVerse.PGNTrainingCoordinator")
 
 
 class PGNTrainingStatus(str, Enum):

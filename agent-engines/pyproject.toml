@@ -1,7 +1,7 @@
 [project]
 name = "agent-engines"
 version = "0.1.0"
-description = "AI engine infrastructure for XLMate chess platform"
+description = "AI engine infrastructure for KnightVerse chess platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

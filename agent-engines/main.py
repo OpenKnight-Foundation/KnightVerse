@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("XLMate.AgentEngine")
+logger = logging.getLogger("KnightVerse.AgentEngine")
 
 class EngineType(Enum):
     STOCKFISH = "stockfish"
@@ -51,7 +51,7 @@ class EngineConfig:
 
 class AgentEngineOrchestrator:
     """
-    Manages the lifecycle and deployment of AI co-pilot engines for XLMate.
+    Manages the lifecycle and deployment of AI co-pilot engines for KnightVerse.
     Utilizes DecentralizedOrchestrator for multi-node coordination.
     Features auto-scaling, load balancing, and resource optimization.
     """

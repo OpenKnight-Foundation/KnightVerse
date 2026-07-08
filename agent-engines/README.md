@@ -1,6 +1,6 @@
 # agent-engines
 
-GPU-oriented engine infrastructure for the XLMate chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
+GPU-oriented engine infrastructure for the KnightVerse chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
 
 ## Overview
 
@@ -337,7 +337,7 @@ pytest --cov=gpu_worker --cov-report=html
 
 ## Soroban Contract Deployment
 
-XLMate includes a comprehensive CI/CD pipeline for deploying Soroban smart contracts to Stellar networks.
+KnightVerse includes a comprehensive CI/CD pipeline for deploying Soroban smart contracts to Stellar networks.
 
 ### Automated Deployment
 

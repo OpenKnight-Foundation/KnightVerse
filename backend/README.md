@@ -1,6 +1,6 @@
-# XLMate Backend - Complete Implementation Guide
+# KnightVerse Backend - Complete Implementation Guide
 
-Welcome to the XLMate Backend! This document serves as the master index for all backend documentation and implementation.
+Welcome to the KnightVerse Backend! This document serves as the master index for all backend documentation and implementation.
 
 ## 📚 Documentation Index
 
@@ -208,13 +208,13 @@ Open browser: **http://localhost:8080/api/docs**
 
 ### Required Environment Variables
 ```env
-DATABASE_URL=postgres://user:pass@localhost:5432/xlmate_db
+DATABASE_URL=postgres://user:pass@localhost:5432/knightverse_db
 ```
 
 ### Optional with Defaults
 ```env
 SERVER_ADDR=127.0.0.1:8080
-JWT_SECRET_KEY=xlmate_dev_secret_key_change_in_production
+JWT_SECRET_KEY=knightverse_dev_secret_key_change_in_production
 JWT_EXPIRATION_SECS=3600
 RUST_LOG=info
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
@@ -318,4 +318,4 @@ For questions or issues:
 
 **Happy Coding!** 🎉
 
-Built with ❤️ for XLMate Chess Platform
+Built with ❤️ for KnightVerse Chess Platform

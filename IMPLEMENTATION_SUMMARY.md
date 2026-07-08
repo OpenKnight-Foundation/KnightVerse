@@ -1,8 +1,8 @@
-# XLMate Implementation Summary
+# KnightVerse Implementation Summary
 
 ## Features Implemented
 
-This document summarizes the implementation of the requested AI/Infra features for the XLMate chess platform.
+This document summarizes the implementation of the requested AI/Infra features for the KnightVerse chess platform.
 
 ---
 

@@ -1,4 +1,4 @@
-XLMate Contribution Rules 🎸
+KnightVerse Contribution Rules 🎸
 **What you should know**
 This project currently has no design, and we need a UI/UX-focused developer to take ownership of the frontend experience. The ideal contributor should have a strong understanding of design principles, user experience, and modern frontend development.
 **What’s Needed?**

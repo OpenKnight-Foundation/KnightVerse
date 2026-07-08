@@ -1,7 +1,7 @@
 # Game Contract Deployment Guide
 
 ## Overview
-This document describes how to deploy the XLMate Game Contract to Stellar Testnet.
+This document describes how to deploy the KnightVerse Game Contract to Stellar Testnet.
 
 ## Contract Features
 - **Game Creation**: Create new chess games with XLM wagers

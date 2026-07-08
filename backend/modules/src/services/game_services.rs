@@ -47,6 +47,6 @@ pub async fn create_game_service(
         session_token,
         initial_state,
         player_assignments,
-        join_url: format!("https://xlmate.io/games/{}", game_id),
+        join_url: format!("https://knightverse.io/games/{}", game_id),
     })
 }

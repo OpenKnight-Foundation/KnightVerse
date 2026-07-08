@@ -1,6 +1,6 @@
-//! XLMate Backend - Main Entry Point
+//! KnightVerse Backend - Main Entry Point
 //!
-//! This is the unified entry point for the XLMate backend service.
+//! This is the unified entry point for the KnightVerse backend service.
 //! It initializes the API server with all configured routes and middleware.
 
 use api::server;

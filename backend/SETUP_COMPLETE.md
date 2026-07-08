@@ -1,4 +1,4 @@
-# XLMate Backend - Setup Complete ✅
+# KnightVerse Backend - Setup Complete ✅
 
 ## System Status
 
@@ -6,20 +6,20 @@
 - **Backend Server**: ✅ Running (PID: 333283)
   - Address: `127.0.0.1:8080`
   - Workers: 8 (Actix-web)
-  - Binary: `/home/gabriel/XLMate/backend/target/release/server`
+  - Binary: `/home/gabriel/KnightVerse/backend/target/release/server`
   - Size: 11MB (optimized release build)
 
 - **PostgreSQL Database**: ✅ Running in Docker
-  - Container: `xlmate_db`
+  - Container: `knightverse_db`
   - Image: `postgres:15-alpine`
   - Host: `localhost:5432`
-  - Database: `xlmate`
-  - User: `xlmate`
+  - Database: `knightverse`
+  - User: `knightverse`
   - Status: Accepting connections
 
 ### Configuration
 - **Environment**: `.env` file configured
-  - `DATABASE_URL`: `postgresql://xlmate:xlmate_password@localhost:5432/xlmate`
+  - `DATABASE_URL`: `postgresql://knightverse:knightverse_password@localhost:5432/knightverse`
   - `JWT_SECRET_KEY`: Set to secure value
   - `ALLOWED_ORIGINS`: Configured for CORS
 
@@ -112,23 +112,23 @@ PostgreSQL container accepting connections
 
 ### Start PostgreSQL
 ```bash
-docker run -d --name xlmate_db \
-  -e POSTGRES_USER=xlmate \
-  -e POSTGRES_PASSWORD=xlmate_password \
-  -e POSTGRES_DB=xlmate \
+docker run -d --name knightverse_db \
+  -e POSTGRES_USER=knightverse \
+  -e POSTGRES_PASSWORD=knightverse_password \
+  -e POSTGRES_DB=knightverse \
   -p 5432:5432 \
   postgres:15-alpine
 ```
 
 ### Start Backend Server
 ```bash
-cd /home/gabriel/XLMate/backend
+cd /home/gabriel/KnightVerse/backend
 ./target/release/server
 ```
 
 Or run in background:
 ```bash
-/home/gabriel/XLMate/backend/target/release/server &
+/home/gabriel/KnightVerse/backend/target/release/server &
 ```
 
 ## Next Steps
@@ -216,8 +216,8 @@ backend/
 3. Check port 8080 is not in use: `netstat -tuln | grep 8080`
 
 ### Database connection failed
-1. Verify PostgreSQL container: `docker ps | grep xlmate_db`
-2. Test connection: `docker exec xlmate_db pg_isready -U xlmate`
+1. Verify PostgreSQL container: `docker ps | grep knightverse_db`
+2. Test connection: `docker exec knightverse_db pg_isready -U knightverse`
 3. Check .env DATABASE_URL matches container credentials
 
 ### JWT token invalid

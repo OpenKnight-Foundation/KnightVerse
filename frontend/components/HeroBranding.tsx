@@ -23,8 +23,8 @@ export function HeroBranding({ onlinePlayerCount, onConnectWallet }: HeroBrandin
       <div className="flex flex-col items-center md:items-start gap-3 animate-fade-in">
         <div className="relative w-20 h-20 animate-float">
           <Image
-            src="/images/XLMateLogo.png"
-            alt="XLMate"
+            src="/images/KnightVerseLogo.png"
+            alt="KnightVerse"
             fill
             className="object-contain drop-shadow-2xl"
             priority
@@ -32,7 +32,7 @@ export function HeroBranding({ onlinePlayerCount, onConnectWallet }: HeroBrandin
         </div>
         <div className="text-center md:text-left">
           <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-teal-300 via-cyan-400 to-blue-500 bg-clip-text text-transparent tracking-tight">
-            XLMate
+            KnightVerse
           </h1>
           <p className="text-gray-400 text-sm mt-1 tracking-wide">
             Decentralized Chess on Stellar

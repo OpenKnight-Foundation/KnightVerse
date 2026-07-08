@@ -8,7 +8,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Callable
 
-logger = logging.getLogger("XLMate.DeploymentPipeline")
+logger = logging.getLogger("KnightVerse.DeploymentPipeline")
 
 
 class PipelineStage(Enum):

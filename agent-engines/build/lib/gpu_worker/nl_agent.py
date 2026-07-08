@@ -1,4 +1,4 @@
-"""Natural Language Agent service for XLMate chess platform.
+"""Natural Language Agent service for KnightVerse chess platform.
 
 This module provides the main service layer that integrates natural language processing
 with chess engine analysis to provide intelligent, conversational responses.

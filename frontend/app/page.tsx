@@ -80,6 +80,7 @@ export default function Home() {
 
   const { analyzePosition, isReady: stockfishReady, isAnalyzing } = useStockfishWASM({
     jsBridgePath: "/assets/stockfish.js",
+    defaultTimeLimit: 250,
   });
 
   // Choose which sendMove to use based on game state
@@ -128,7 +129,7 @@ export default function Home() {
           setOnlinePlayerCount(data.count);
         }
       } catch {
-        console.warn("[XLMate] Could not fetch online player count — backend offline?");
+        console.warn("[KnightVerse] Could not fetch online player count — backend offline?");
         if (isMounted) setOnlinePlayerCount(null);
       }
     };
@@ -194,7 +195,7 @@ export default function Home() {
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
+  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady]);
 
   // ─── DETECT GAME OVER for hero / bot mode ───
   useEffect(() => {
@@ -449,7 +450,7 @@ export default function Home() {
           <div
             className="flex flex-col justify-center max-w-md w-full order-1 lg:order-2"
             role="region"
-            aria-label="XLMate information"
+            aria-label="KnightVerse information"
           >
             <HeroBranding
               onlinePlayerCount={onlinePlayerCount}

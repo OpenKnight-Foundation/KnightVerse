@@ -1,4 +1,4 @@
-"""Natural Language Agent interface for XLMate chess platform.
+"""Natural Language Agent interface for KnightVerse chess platform.
 
 This module provides a natural language interface for interacting with chess engines,
 allowing users to request analysis, suggestions, and explanations using plain English.

@@ -1,8 +1,8 @@
-# XLMate API Documentation
+# KnightVerse API Documentation
 
 ## Overview
 
-This is the OpenAPI/Swagger documentation for the XLMate chess platform backend services, providing a comprehensive reference for developers. The documentation covers all API endpoints, WebSocket communication protocols, authentication flows, and includes automatic client SDK generation.
+This is the OpenAPI/Swagger documentation for the KnightVerse chess platform backend services, providing a comprehensive reference for developers. The documentation covers all API endpoints, WebSocket communication protocols, authentication flows, and includes automatic client SDK generation.
 
 ## Features
 
@@ -98,11 +98,11 @@ The API includes CORS (Cross-Origin Resource Sharing) middleware for handling re
 
 ### Environment Variables
 
-- `ALLOWED_ORIGINS`: Comma-separated list of allowed origins (e.g., `http://localhost:3000,https://xlmate.com`)
+- `ALLOWED_ORIGINS`: Comma-separated list of allowed origins (e.g., `http://localhost:3000,https://knightverse.com`)
 
 Example with specific origins:
 ```bash
-ALLOWED_ORIGINS=http://localhost:3000,https://xlmate.com cargo run
+ALLOWED_ORIGINS=http://localhost:3000,https://knightverse.com cargo run
 ```
 
 If not specified, the server will allow all origins (suitable for development only).

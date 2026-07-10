@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
+import { useBoardTheme } from "@/context/ThemeContext";
 
 import WhiteKing from "./chesspieces/white-king.svg";
 import WhiteQueen from "./chesspieces/white-queen.svg";
@@ -77,6 +78,8 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
   const touchStartSquare = useRef<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  
+  const { colors } = useBoardTheme();
 
   // Memoize board state parsing - prevents re-parsing on every render
   const boardState = useMemo(() => parseFen(position), [position]);
@@ -375,7 +378,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 }
               }}
               style={{
-                backgroundColor: isLight ? "#008e90" : "#ffffff",
+                backgroundColor: isLight ? colors.dark : colors.light,
                 width: "100%",
                 height: "100%",
                 display: "flex",

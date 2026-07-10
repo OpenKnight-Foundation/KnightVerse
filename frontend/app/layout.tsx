@@ -6,6 +6,7 @@ import { MatchmakingProvider } from "@/context/matchmakingContext";
 import { ToastProvider } from "@/components/ui/toast";
 import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
+import { BoardThemeProvider } from "@/context/ThemeContext";
 
 export const metadata: Metadata = {
   title: "KnightVerse",
@@ -31,7 +32,9 @@ export default function RootLayout({
             <MatchmakingProvider>
               <ToastProvider>
                 <TransactionProvider>
-                  <ClientRoot>{children}</ClientRoot>
+                  <BoardThemeProvider>
+                    <ClientRoot>{children}</ClientRoot>
+                  </BoardThemeProvider>
                 </TransactionProvider>
               </ToastProvider>
             </MatchmakingProvider>

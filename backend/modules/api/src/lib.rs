@@ -7,6 +7,7 @@ pub mod config;
 pub mod server;
 pub mod players;
 pub mod games;
+pub mod metrics_middleware;
 
 // External modules
 extern crate challenge;

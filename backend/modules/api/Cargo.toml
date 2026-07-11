@@ -36,6 +36,7 @@ indexmap = "=2.2.6"
 db_entity = { path = "../db/entity" }
 actix-governor = "0.5"
 st_core = { path = "../st_core", features = ["api"] }
+metrics = { path = "../metrics" }
 
 # For Redis Pub/Sub in WebSocket
 redis = { version = "0.24", features = ["tokio-comp", "json"] }

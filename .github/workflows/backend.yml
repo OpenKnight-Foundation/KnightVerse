@@ -58,9 +58,53 @@ jobs:
         working-directory: backend
         run: cargo test -p st_core
 
+      - name: Check pairing module
+        working-directory: backend
+        run: cargo check -p pairing
+
+      - name: Test pairing module
+        working-directory: backend
+        run: cargo test -p pairing
+
+      - name: Check metrics module
+        working-directory: backend
+        run: cargo check -p metrics
+
+      - name: Test metrics module
+        working-directory: backend
+        run: cargo test -p metrics
+
+      - name: Check tournament module
+        working-directory: backend
+        run: cargo check -p tournament
+
+      - name: Test tournament module
+        working-directory: backend
+        run: cargo test -p tournament
+
+      - name: Check validation module
+        working-directory: backend
+        run: cargo check -p validation
+
+      - name: Test validation module
+        working-directory: backend
+        run: cargo test -p validation
+
+      - name: Check archiving module
+        working-directory: backend
+        run: cargo check -p archiving
+
+      - name: Test archiving module
+        working-directory: backend
+        run: cargo test -p archiving
+
       - name: Check API integration
         working-directory: backend
         run: cargo check -p api
+
+      - name: Run integration tests
+        working-directory: backend
+        run: cargo test -p integration_tests
 
       - name: Run backend tests
         working-directory: backend
@@ -88,10 +132,38 @@ jobs:
           cargo install cargo-audit
           cargo audit
 
+  monitoring-test:
+    name: Test Monitoring Stack
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start monitoring stack
+        working-directory: backend
+        run: |
+          docker-compose -f docker-compose.monitoring.yml up -d
+          sleep 30
+
+      - name: Test Prometheus endpoint
+        run: |
+          curl -f http://localhost:9090/-/healthy || exit 1
+
+      - name: Test Grafana endpoint
+        run: |
+          curl -f http://localhost:3000/api/health || exit 1
+
+      - name: Cleanup
+        working-directory: backend
+        run: |
+          docker-compose -f docker-compose.monitoring.yml down
+
   docker-build:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, monitoring-test]
     if: github.event_name == 'push'
     
     steps:

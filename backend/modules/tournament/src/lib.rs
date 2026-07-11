@@ -8,6 +8,6 @@ pub use swiss::{
     SwissPairer, PairingError
 };
 pub use bracket::{
-    BracketFormat, BracketMatch, BracketService, BracketError,
-    MatchStatus, TournamentBracket, TournamentParticipant, TournamentStatus,
+    Tournament, TournamentFormat, TournamentStatus, TournamentParticipant,
+    BracketPairing, TournamentStanding, BracketConfig, TournamentStats
 };

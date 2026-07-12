@@ -38,10 +38,13 @@ import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
+import { EvaluationBar } from "@/components/chess/EvaluationBar";
+import { MoveHistory } from "@/components/chess/MoveHistory";
 
 export default function Home() {
   const [game] = useState(new Chess());
   const [position, setPosition] = useState("start");
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [gameMode, setGameMode] = useState<"online" | "bot" | null>(null);
   const router = useRouter();
   const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
@@ -83,6 +86,20 @@ export default function Home() {
     defaultTimeLimit: 250,
   });
 
+  const currentDisplayPosition = React.useMemo(() => {
+    if (viewIndex === null) return position;
+    const tempGame = new Chess();
+    const history = game.history();
+    for (let i = 0; i <= viewIndex; i++) {
+      try { tempGame.move(history[i]); } catch {}
+    }
+    return tempGame.fen();
+  }, [position, viewIndex, game]);
+
+  const handleMoveClick = useCallback((index: number) => {
+    setViewIndex(index === game.history().length - 1 ? null : index);
+  }, [game]);
+
   // Choose which sendMove to use based on game state
   const sendMove = useCallback(
     (from: string, to: string, promotion?: string) => {
@@ -111,7 +128,10 @@ export default function Home() {
         to: lastOpponentMove.to,
         promotion: lastOpponentMove.promotion ?? "q",
       });
-      if (move) setPosition(game.fen());
+      if (move) {
+        setPosition(game.fen());
+        setViewIndex(null);
+      }
     } catch {
       // illegal move from server — ignore
     }
@@ -182,6 +202,7 @@ export default function Home() {
             result.bestMove.length > 4 ? result.bestMove.substring(4, 5) : undefined;
           game.move({ from, to, promotion });
           setPosition(game.fen());
+          setViewIndex(null);
           setHeroMoveCount((c) => c + 1);
         }
       } catch (e) {
@@ -241,6 +262,10 @@ export default function Home() {
       targetSquare: string;
     }) => {
       if (!isMyTurn || game.isGameOver()) return false;
+      if (viewIndex !== null) {
+        setViewIndex(null);
+        return false;
+      }
 
       try {
         const move = game.move({
@@ -253,18 +278,19 @@ export default function Home() {
         setBotAnalysis(null);
         setHeroMoveCount((c) => c + 1);
         requestAnimationFrame(() => setPosition(game.fen()));
-
         // Forward move to server in online mode
         if (gameMode === "online") {
           sendMove(sourceSquare, targetSquare, "q");
         }
-
+        
+        setPosition(game.fen());
+        setViewIndex(null);
         return true;
       } catch {
         return false;
       }
     },
-    [isMyTurn, game, gameMode, sendMove],
+    [isMyTurn, game, gameMode, sendMove, viewIndex],
   );
 
   // ─── HERO PLAY AGAIN ───
@@ -410,13 +436,16 @@ export default function Home() {
               <CapturedPieces fen={position} color="black" />
             </div>
 
-            {/* The board */}
-            <div className="w-full min-w-[320px]">
-              <ChessboardComponent
-                position={position}
-                onDrop={handleMove}
-                aria-label="Chess board. You play as White. Click or drag pieces to move."
-              />
+            {/* The board and Eval bar */}
+            <div className="w-full min-w-[320px] flex flex-row items-stretch justify-center gap-2 md:gap-4">
+              <EvaluationBar evaluation={botAnalysis?.evaluation ?? null} />
+              <div className="w-full">
+                <ChessboardComponent
+                  position={currentDisplayPosition}
+                  onDrop={handleMove}
+                  aria-label="Chess board. You play as White. Click or drag pieces to move."
+                />
+              </div>
             </div>
 
             {/* Captured Pieces by You (White capturing Black) */}
@@ -444,6 +473,15 @@ export default function Home() {
                 </span>
               )}
             </div>
+          </div>
+
+          {/* Move History */}
+          <div className="w-full max-w-[280px] order-3 flex justify-center mt-4 lg:mt-0">
+            <MoveHistory 
+              history={game.history()} 
+              onMoveClick={handleMoveClick} 
+              currentMoveIndex={viewIndex ?? game.history().length - 1} 
+            />
           </div>
 
           {/* Branding Panel */}

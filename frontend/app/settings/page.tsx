@@ -17,7 +17,7 @@ export default function SettingsPage() {
           collapsed ? "md:ml-16" : "md:ml-64"
         }`}
       >
-        <Header collapsed={collapsed} />
+        <Header />
         
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-4xl mx-auto space-y-8">

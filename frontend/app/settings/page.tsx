@@ -4,7 +4,6 @@ import React from 'react';
 import AppearanceSettings from '@/components/AppearanceSettings';
 import { GameSidebar } from '@/components/GameSidebar';
 import { Header } from '@/components/Header';
-import { usePathname } from 'next/navigation';
 
 export default function SettingsPage() {
   const [collapsed, setCollapsed] = React.useState(false);

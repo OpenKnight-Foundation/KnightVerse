@@ -195,7 +195,7 @@ export default function Home() {
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady]);
+  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
 
   // ─── DETECT GAME OVER for hero / bot mode ───
   useEffect(() => {

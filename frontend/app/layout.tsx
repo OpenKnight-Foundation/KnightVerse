@@ -7,6 +7,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
 import { BoardThemeProvider } from "@/context/ThemeContext";
+import { SoundProvider } from "@/context/SoundContext";
 
 export const metadata: Metadata = {
   title: "KnightVerse",
@@ -33,7 +34,9 @@ export default function RootLayout({
               <ToastProvider>
                 <TransactionProvider>
                   <BoardThemeProvider>
-                    <ClientRoot>{children}</ClientRoot>
+                    <SoundProvider>
+                      <ClientRoot>{children}</ClientRoot>
+                    </SoundProvider>
                   </BoardThemeProvider>
                 </TransactionProvider>
               </ToastProvider>

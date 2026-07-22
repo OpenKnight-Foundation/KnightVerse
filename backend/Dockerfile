@@ -1,7 +1,7 @@
 FROM rust:slim-bookworm AS builder
 
 RUN apt-get update && \
-    apt-get install -y pkg-config libssl-dev && \
+    apt-get install -y pkg-config libssl-dev build-essential file && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app

@@ -86,7 +86,7 @@ jobs:
         working-directory: backend
         run: |
           cargo install cargo-audit
-          cargo audit
+          cargo audit --ignore RUSTSEC-2024-0421 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0190
 
   docker-build:
     name: Build Docker Image

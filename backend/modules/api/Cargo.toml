@@ -41,6 +41,11 @@ st_core = { path = "../st_core", features = ["api"] }
 redis = { version = "0.24", features = ["tokio-comp", "json"] }
 tokio = { version = "1", features = ["full"] }
 
+# For Prometheus metrics
+prometheus = "0.13"
+actix-web-prom = "0.7"
+once_cell = "1.19"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 actix-rt = "2.9"

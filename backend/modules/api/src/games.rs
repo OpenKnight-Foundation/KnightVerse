@@ -16,6 +16,7 @@ use validator::Validate;
 use uuid::Uuid;
 use sea_orm::DatabaseConnection;
 use service::games::GameService;
+use crate::metrics::{increment_active_games, decrement_active_games, increment_game_events};
 
 // ---------------------------------------------------------------------------
 // Helper: extract authenticated player UUID inserted by the JWT middleware.
@@ -62,10 +63,16 @@ pub async fn create_game(
     };
 
     match GameService::create_game(db.get_ref(), creator_id, payload.0).await {
-        Ok(game_dto) => HttpResponse::Created().json(json!({
-            "message": "Game created successfully",
-            "data": { "game": game_dto }
-        })),
+        Ok(game_dto) => {
+            // Track game creation metric
+            increment_active_games();
+            increment_game_events("created");
+            
+            HttpResponse::Created().json(json!({
+                "message": "Game created successfully",
+                "data": { "game": game_dto }
+            }))
+        }
         Err(e) => {
             eprintln!("create_game error: {e}");
             HttpResponse::InternalServerError().json(json!({
@@ -340,10 +347,16 @@ pub async fn abandon_game(
     let game_id = id.into_inner();
 
     match GameService::abandon_game(db.get_ref(), game_id, player_id).await {
-        Ok(_) => HttpResponse::Ok().json(json!({
-            "message": "Game abandoned successfully",
-            "data": {}
-        })),
+        Ok(_) => {
+            // Track game abandonment metric
+            decrement_active_games();
+            increment_game_events("abandoned");
+            
+            HttpResponse::Ok().json(json!({
+                "message": "Game abandoned successfully",
+                "data": {}
+            }))
+        }
         Err(ApiError::NotFound(_)) => HttpResponse::NotFound().json(json!({
             "message": "Game not found"
         })),
@@ -540,6 +553,10 @@ pub async fn complete_game(
     // Complete the game and update ratings
     match GameService::complete_game(db.get_ref(), game_id, result_enum.clone(), Some(rating_config)).await {
         Ok((white_new_rating, black_new_rating)) => {
+            // Track game completion metric
+            decrement_active_games();
+            increment_game_events("completed");
+            
             let white_change = white_new_rating - white_old_rating;
             let black_change = black_new_rating - black_old_rating;
 

@@ -12,6 +12,7 @@ use validator::Validate;
 
 use service::engine_service::EngineService;
 use std::env;
+use crate::metrics::increment_ai_requests;
 
 #[utoipa::path(
     post,
@@ -28,6 +29,9 @@ use std::env;
 )]
 #[post("/suggest")]
 pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpResponse {
+    // Track AI request
+    increment_ai_requests("suggestion");
+    
     match payload.0.validate() {
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());
@@ -90,6 +94,9 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
 )]
 #[post("/analyze")]
 pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpResponse {
+    // Track AI request
+    increment_ai_requests("analysis");
+    
     match payload.0.validate() {
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());

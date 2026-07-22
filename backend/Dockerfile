@@ -1,13 +1,20 @@
-FROM rust:slim-bookworm AS builder
-
+FROM rust:slim-bookworm AS chef
 RUN apt-get update && \
     apt-get install -y pkg-config libssl-dev build-essential file && \
     rm -rf /var/lib/apt/lists/*
-
+RUN cargo install cargo-chef
 WORKDIR /usr/src/app
-COPY . .
 
-# Build the API binary (excluding the chess crate if it has issues)
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /usr/src/app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY . .
 RUN cargo build --release -p api
 
 FROM debian:bookworm-slim

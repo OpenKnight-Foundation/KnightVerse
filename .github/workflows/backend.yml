@@ -64,14 +64,14 @@ jobs:
 
       - name: Run backend tests
         working-directory: backend
-        run: cargo test --workspace --exclude chess
+        run: cargo test --workspace
         env:
           STELLAR_NETWORK: testnet
           HORIZON_URL: https://horizon-testnet.stellar.org
 
       - name: Build backend
         working-directory: backend
-        run: cargo build --workspace --release --exclude chess
+        run: cargo build --workspace --release
 
   security-scan:
     name: Security Scan

@@ -75,21 +75,44 @@ soroban config network --global testnet \
   --network-passphrase "Test SDF Network ; September 2015"
 ```
 
-### 4. Deploy Contract
+### 4. Set Up Secret Key (Secure Method)
+
+**⚠️ SECURITY: Never pass your secret key directly as a CLI argument.** Doing so exposes it to shell history and process lists.
+
+Choose one of the following secure methods:
+
+#### Option A: Using `.env` file (Recommended)
 ```bash
-# Deploy to testnet
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/game_contract.wasm \
-  --source <YOUR_SECRET_KEY> \
-  --network testnet
+# Copy the template and edit with your secret key
+cp contracts/game_contract/.env.example contracts/game_contract/.env
+# Edit .env and set your STELLAR_SECRET_KEY
+# Then simply run:
+./contracts/game_contract/deploy.sh
 ```
 
-### 5. Verify Deployment
+#### Option B: Environment variable
+```bash
+export STELLAR_SECRET_KEY=your_secret_key_here
+./contracts/game_contract/deploy.sh
+```
+
+#### Option C: Interactive prompt (input is hidden)
+```bash
+./contracts/game_contract/deploy.sh
+# The script will prompt you to enter the secret key securely
+```
+
+### 5. Deploy Contract
+```bash
+# Simply run the deploy script (key is handled securely)
+./contracts/game_contract/deploy.sh
+```
+
+### 6. Verify Deployment
 ```bash
 # Get contract ID
 soroban contract install \
   --wasm target/wasm32-unknown-unknown/release/game_contract.wasm \
-  --source <YOUR_SECRET_KEY> \
   --network testnet
 ```
 

@@ -15,6 +15,7 @@ pub enum GameState {
     Created,
     InProgress,
     Completed,
+    Escrowed,
     Settled,
     Drawn,
     Forfeited,
@@ -1909,24 +1910,32 @@ impl GameContract {
         Ok(())
     }
 
-    /// Create a time-locked escrow for a completed tournament game.
+/// Create a time-locked escrow for a completed tournament game.
     ///
     /// Locks the total prize pool until `current_ledger + timelock_duration`.
     /// Returns the escrow ID.
+    ///
+    /// # State Persistence (SC-02 fix)
+    /// Marks the game as `Escrowed` and persists the update to prevent
+    /// re-escrowing the same game.
     pub fn create_tournament_escrow(
         env: Env,
         game_id: u64,
     ) -> Result<u64, ContractError> {
-        let games: Map<u64, Game> = env
+        let mut games: Map<u64, Game> = env
             .storage()
             .instance()
             .get(&GAMES)
             .ok_or(ContractError::GameNotFound)?;
 
-        let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
 
-        if game.state != GameState::Completed {
-            return Err(ContractError::GameNotInProgress);
+        // SC-02: Reject if already escrowed, settled, or not in Completed state
+        match game.state {
+            GameState::Completed => {} // OK to proceed
+            GameState::Escrowed => return Err(ContractError::GameAlreadyCompleted),
+            GameState::Settled => return Err(ContractError::AlreadySettled),
+            _ => return Err(ContractError::GameNotInProgress),
         }
 
         game.player1.require_auth();
@@ -1959,8 +1968,13 @@ impl GameContract {
             released: false,
         };
 
-        escrows.set(escrow_id, escrow);
+escrows.set(escrow_id, escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        // SC-02: Mark game as Escrowed and persist to prevent re-escrow attacks
+        game.state = GameState::Escrowed;
+        games.set(game_id, game);
+        env.storage().instance().set(&GAMES, &games);
 
         env.events().publish(
             (symbol_short!("tl_escrow"), symbol_short!("created")),
@@ -2035,6 +2049,22 @@ impl GameContract {
         released_escrow.released = true;
         escrows.set(escrow_id, released_escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        // SC-02: Update game state to Settled after escrow release
+        // This ensures the game lifecycle is complete: Completed → Escrowed → Settled
+        let escrow = released_escrow;
+        {
+            let mut games: Map<u64, Game> = env
+                .storage()
+                .instance()
+                .get(&GAMES)
+                .unwrap_or(Map::new(&env));
+            if let Some(mut game) = games.get(escrow.game_id) {
+                game.state = GameState::Settled;
+                games.set(escrow.game_id, game);
+                env.storage().instance().set(&GAMES, &games);
+            }
+        }
 
         env.events().publish(
             (symbol_short!("tl_escrow"), symbol_short!("released")),

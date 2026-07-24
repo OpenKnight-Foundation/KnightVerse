@@ -8,6 +8,8 @@ import { useChessSocket } from "@/hook/useChessSocket";
 import { FaUser, FaClock, FaSignal } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
+import { GameResultOverlay } from "@/components/GameResultOverlay";
+import type { GameResult } from "@/components/GameResultOverlay";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
 
@@ -199,6 +201,15 @@ export default function PlayOnlinePage() {
     },
     [],
   );
+
+  let overlayResult: GameResult | null = null;
+  if (gameStatus === "checkmate") {
+    overlayResult = game.turn() === "b" ? "white_wins" : "black_wins";
+  } else if (gameStatus === "stalemate") {
+    overlayResult = "stalemate";
+  } else if (gameStatus === "draw") {
+    overlayResult = "draw";
+  }
 
   return (
     <div className="min-h-screen p-4 md:p-8" role="region" aria-label="Online Chess Game">
@@ -430,6 +441,14 @@ export default function PlayOnlinePage() {
           </div>
         </div>
       </div>
+
+      {overlayResult && (
+        <GameResultOverlay
+          result={overlayResult}
+          onPlayAgain={() => router.push("/")}
+          onPlayOnline={() => router.push("/")}
+        />
+      )}
     </div>
   );
 }

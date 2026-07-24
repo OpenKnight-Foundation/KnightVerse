@@ -249,6 +249,15 @@ class TestPGNConverter(unittest.TestCase):
         examples = converter.extract_positions(games[0])
         self.assertGreater(len(examples), 0)
 
+    def test_move_number_and_ply_count_incrementing(self):
+        """Test move_number increments every 2 plies while ply_count increments every ply."""
+        games = list(self.converter.parse_pgn_string(self.simple_pgn))
+        examples = self.converter.extract_positions(games[0])
+        ply_counts = [ex.position_features["ply_count"] for ex in examples]
+        move_numbers = [ex.position_features["move_number"] for ex in examples]
+        self.assertEqual(ply_counts, [1, 2, 3, 4, 5, 6, 7])
+        self.assertEqual(move_numbers, [1, 1, 2, 2, 3, 3, 4])
+
     def test_pgn_file_parsing(self):
         """Test parsing PGN from file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pgn", delete=False) as f:

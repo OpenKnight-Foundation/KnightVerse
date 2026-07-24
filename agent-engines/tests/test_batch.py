@@ -53,3 +53,9 @@ async def test_batch_flushes_on_timer() -> None:
     assert result.best_move == "e2e4"
     assert time.monotonic() - started_at >= 0.01
     assert pool.max_concurrency == 1
+
+
+def test_synchronous_instantiation_without_event_loop() -> None:
+    pool = FakePool()
+    analyzer = BatchAnalyzer(pool, batch_size=4, flush_interval_ms=10)
+    assert analyzer._task is None

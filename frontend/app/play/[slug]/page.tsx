@@ -52,7 +52,12 @@ export default function PlayOnlinePage() {
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
+  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
   const isMobile = useIsMobile();
+
+  const handleFlipBoard = useCallback(() => {
+    setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
+  }, []);
 
   const {
     status: socketStatus,
@@ -269,6 +274,7 @@ export default function PlayOnlinePage() {
               <ChessboardComponent
                 position={position}
                 onDrop={handleMove}
+                orientation={boardOrientation}
               />
             </div>
 
@@ -301,7 +307,7 @@ export default function PlayOnlinePage() {
             {/* Mobile controls — visible only on mobile, directly below board */}
             <div className="flex items-center gap-2 mt-3 lg:hidden">
               <button
-                onClick={() => {}}
+                onClick={handleFlipBoard}
                 aria-label="Flip board orientation"
                 className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
               >
@@ -413,7 +419,7 @@ export default function PlayOnlinePage() {
             {/* Controls — desktop only, mobile controls are above the sidebar */}
             <div className="hidden lg:flex gap-2">
               <button
-                onClick={() => {}}
+                onClick={handleFlipBoard}
                 aria-label="Flip board orientation"
                 className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
               >

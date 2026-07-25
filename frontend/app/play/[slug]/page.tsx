@@ -46,8 +46,8 @@ export default function PlayOnlinePage() {
   const [game] = useState(new Chess());
   const [position, setPosition] = useState("start");
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [whiteTime] = useState(600); // 10 min in seconds
-  const [blackTime] = useState(600);
+  const [whiteTime, setWhiteTime] = useState(600); // 10 min in seconds
+  const [blackTime, setBlackTime] = useState(600);
   const [playerColor] = useState<"white" | "black">("white");
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
@@ -71,6 +71,42 @@ export default function PlayOnlinePage() {
       setGameStatus("draw");
     }
   }, [game]);
+
+  // ── FE-04: Countdown clocks ───────────────────────────────────────────────
+  // Tick the active side's clock down by 1 second every second while the game
+  // is live. The interval is cleared the moment the game ends.
+  useEffect(() => {
+    if (socketStatus !== "connected" || gameStatus !== "playing") return;
+
+    const id = setInterval(() => {
+      const activeColor = game.turn(); // "w" | "b"
+      if (activeColor === "w") {
+        setWhiteTime((t) => Math.max(0, t - 1));
+      } else {
+        setBlackTime((t) => Math.max(0, t - 1));
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [socketStatus, gameStatus, game]);
+
+  // Sync clocks from authoritative server clock messages.
+  // The socket emits { type: "clock", whiteTime: number, blackTime: number }
+  // after each move so both sides stay in sync.
+  useEffect(() => {
+    // useChessSocket only exposes lastOpponentMove; clock data arrives via the
+    // raw WebSocket.  We listen for a "clock" message relayed through a custom
+    // DOM event dispatched by a thin shim (or we handle it here directly).
+    // For now we seed from lastOpponentMove's accompanying clock field when
+    // the server includes it.
+    if (!lastOpponentMove) return;
+    const raw = lastOpponentMove as typeof lastOpponentMove & {
+      whiteTime?: number;
+      blackTime?: number;
+    };
+    if (typeof raw.whiteTime === "number") setWhiteTime(raw.whiteTime);
+    if (typeof raw.blackTime === "number") setBlackTime(raw.blackTime);
+  }, [lastOpponentMove]);
 
   // Cheat detection
   const {

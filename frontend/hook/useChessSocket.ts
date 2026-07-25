@@ -40,7 +40,12 @@ const RECONNECT_TIMEOUT = 3000; // 3 seconds timeout for reconnection
  * @returns Object containing WebSocket status, game state, and control functions
  */
 export function useChessSocket(gameId: string | null): UseChessSocketReturn {
-  const [status, setStatus] = useState<ChessSocketStatus>("idle");
+  const [status, setStatusState] = useState<ChessSocketStatus>("idle");
+  // Wrapper so statusRef always mirrors the React state value.
+  const setStatus = useCallback((s: ChessSocketStatus) => {
+    statusRef.current = s;
+    setStatusState(s);
+  }, []);
   const [lastOpponentMove, setLastOpponentMove] = useState<ChessMove | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
@@ -50,6 +55,9 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   const moveQueueRef = useRef<ChessMove[]>([]);
   const isManualDisconnectRef = useRef(false);
   const isOnlineRef = useRef(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  // Keep a ref to the latest status so callbacks can read it without being
+  // re-created every time status changes (prevents infinite reconnect loop).
+  const statusRef = useRef<ChessSocketStatus>("idle");
 
   /**
    * Clears all pending reconnection timeouts and timers.
@@ -178,7 +186,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
             // Set a timeout to ensure reconnection completes within 3 seconds
             reconnectTimerRef.current = setTimeout(() => {
-              if (status === "reconnecting") {
+              if (statusRef.current === "reconnecting") {
                 console.log("[WebSocket] Reconnection timeout exceeded 3 seconds");
                 // Continue trying but log the timeout
               }
@@ -199,7 +207,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       setStatus("error");
       return null;
     }
-  }, [gameId, calculateReconnectDelay, status]);
+  }, [gameId, calculateReconnectDelay]);
 
   /**
    * Sends a chess move to the server.
@@ -225,12 +233,12 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       console.log("[WebSocket] Move queued (disconnected):", move);
       
       // Start reconnection if not already attempting
-      if (status === "disconnected" || status === "idle") {
+      if (statusRef.current === "disconnected" || statusRef.current === "idle") {
         reconnectAttemptsRef.current = 0;
         createWebSocket(true);
       }
     }
-  }, [gameId, status, createWebSocket]);
+  }, [gameId, createWebSocket]);
 
   /**
    * Manually disconnects from the WebSocket server.
@@ -280,7 +288,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       isOnlineRef.current = true;
       
       // If we were disconnected and are now online, attempt reconnection
-      if (status === "disconnected" && gameId) {
+      if (statusRef.current === "disconnected" && gameId) {
         console.log("[Network] Online detected, attempting reconnection...");
         reconnectAttemptsRef.current = 0;
         createWebSocket(true);
@@ -310,7 +318,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
         window.removeEventListener('offline', handleOffline);
       }
     };
-  }, [status, gameId, createWebSocket, clearReconnectTimeout]);
+  }, [gameId, createWebSocket, clearReconnectTimeout]);
 
   // Initialize WebSocket when gameId changes
   useEffect(() => {

@@ -1970,15 +1970,26 @@ impl GameContract {
         Ok(escrow_id)
     }
 
-    /// Release a time-locked tournament escrow to the specified winners.
-    ///
-    /// Can only be called after the lock period has expired.
-    pub fn release_tournament_escrow(
-        env: Env,
-        escrow_id: u64,
-        winners: Vec<Address>,
-        percentages: Vec<u32>,
-    ) -> Result<(), ContractError> {
+   /// Release a time-locked tournament escrow to the specified winners.
+///
+/// Can only be called after the lock period has expired, and only by the
+/// contract admin.
+pub fn release_tournament_escrow(
+    env: Env,
+    admin: Address,
+    escrow_id: u64,
+    winners: Vec<Address>,
+    percentages: Vec<u32>,
+) -> Result<(), ContractError> {
+    let current_admin: Address = env
+        .storage()
+        .instance()
+        .get(&CONTRACT_ADMIN)
+        .expect("Not initialized");
+    current_admin.require_auth();
+    if admin != current_admin {
+        return Err(ContractError::Unauthorized);
+    }
         let mut escrows: Map<u64, TournamentEscrow> = env
             .storage()
             .instance()
@@ -3006,5 +3017,131 @@ mod tests {
         client.payout(&game_id, &player1);
         let second = client.try_payout(&game_id, &player1);
         assert_eq!(second, Err(Ok(ContractError::AlreadySettled)));
+    }
+
+    #[test]
+    fn test_release_tournament_escrow_rejects_unauthorized_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
+        client.configure_tournament_timelock(&admin, &100u64);
+
+        let wager: i128 = 100;
+        let game_id = client.create_game(&player1, &wager);
+        client.join_game(&game_id, &player2);
+
+        env.as_contract(&contract_id, || {
+            let mut games: Map<u64, Game> = env.storage().instance().get(&GAMES).unwrap();
+            let mut game = games.get(game_id).unwrap();
+            game.state = GameState::Completed;
+            games.set(game_id, game);
+            env.storage().instance().set(&GAMES, &games);
+        });
+
+        let escrow_id = client.create_tournament_escrow(&game_id);
+
+        env.ledger().set_sequence_number(200);
+
+        let winners = Vec::from_array(&env, [player1.clone()]);
+        let percentages = Vec::from_array(&env, [100u32]);
+
+        let winners_attack = Vec::from_array(&env, [attacker.clone()]);
+        let result = client.try_release_tournament_escrow(
+            &attacker,
+            &escrow_id,
+            &winners_attack,
+            &percentages,
+        );
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+        client.release_tournament_escrow(&admin, &escrow_id, &winners, &percentages);
+        let escrow = client.get_tournament_escrow(&escrow_id);
+        assert!(escrow.released);
+    }
+
+    #[test]
+    fn test_release_tournament_escrow_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let token_client = TokenClient::new(&env, &token_address);
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
+        client.configure_tournament_timelock(&admin, &100u64);
+
+        let wager: i128 = 500;
+        let game_id = client.create_game(&player1, &wager);
+        client.join_game(&game_id, &player2);
+
+        env.as_contract(&contract_id, || {
+            let mut games: Map<u64, Game> = env.storage().instance().get(&GAMES).unwrap();
+            let mut game = games.get(game_id).unwrap();
+            game.state = GameState::Completed;
+            games.set(game_id, game);
+            env.storage().instance().set(&GAMES, &games);
+        });
+
+        let escrow_id = client.create_tournament_escrow(&game_id);
+
+        env.ledger().set_sequence_number(200);
+
+        let winners = Vec::from_array(&env, [player1.clone(), player2.clone()]);
+        let percentages = Vec::from_array(&env, [70u32, 30u32]);
+        client.release_tournament_escrow(&admin, &escrow_id, &winners, &percentages);
+
+        assert_eq!(token_client.balance(&player1), 1200);
+        assert_eq!(token_client.balance(&player2), 800);
+
+        let escrow = client.get_tournament_escrow(&escrow_id);
+        assert!(escrow.released);
     }
 }

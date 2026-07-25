@@ -5,10 +5,8 @@ import { Eye, Radio, SearchX } from "lucide-react";
 import { LiveGameCard } from "@/components/watch/LiveGameCard";
 import { SpectatorBoard } from "@/components/watch/SpectatorBoard";
 import {
-  MOCK_LIVE_GAMES,
   type LiveGameMode,
   type LiveGameSummary,
-  type MockLiveGameSummary,
 } from "@/constants/mockLiveGames";
 import { cn } from "@/lib/utils";
 
@@ -57,8 +55,9 @@ function normalizeLiveGame(game: Partial<LiveGameRecord>, index: number): LiveGa
 export default function WatchPage() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | LiveGameMode>("all");
-  const [liveGames, setLiveGames] = useState<LiveGameRecord[]>(MOCK_LIVE_GAMES);
+  const [liveGames, setLiveGames] = useState<LiveGameRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -79,12 +78,15 @@ export default function WatchPage() {
           .filter((game): game is LiveGameRecord => game !== null);
 
         if (active) {
-          setLiveGames(normalizedGames.length > 0 ? normalizedGames : MOCK_LIVE_GAMES);
+          setLiveGames(normalizedGames);
+          setFetchError(null);
         }
-      } catch {
+      } catch (err) {
         if (active) {
-          // Real API integration will replace this mock fallback when the live lobby endpoint is available.
-          setLiveGames(MOCK_LIVE_GAMES as MockLiveGameSummary[]);
+          setFetchError(
+            err instanceof Error ? err.message : "Failed to load live games."
+          );
+          setLiveGames([]);
         }
       } finally {
         if (active) {
@@ -157,6 +159,17 @@ export default function WatchPage() {
         </div>
       </section>
 
+      {fetchError && (
+        <div
+          className="rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-300 animate-fade-in"
+          role="alert"
+          aria-live="polite"
+        >
+          <p className="font-semibold">Unable to load live games</p>
+          <p className="mt-0.5 text-red-400/80">{fetchError}</p>
+        </div>
+      )}
+
       {filteredGames.length === 0 && !loading ? (
         <div className="flex min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-700/40 bg-gray-800/30 p-8 text-center animate-fade-in">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-teal-400/30 to-blue-500/30 text-teal-200">
@@ -187,7 +200,11 @@ export default function WatchPage() {
 
       <div className="inline-flex items-center gap-2 rounded-full border border-gray-700/40 bg-gray-800/50 px-3 py-1 text-xs text-gray-400">
         <Eye className="h-3.5 w-3.5" />
-        {loading ? "Refreshing live lobby…" : "Live list auto-refreshes every 10 seconds"}
+        {loading
+          ? "Refreshing live lobby…"
+          : fetchError
+          ? "Last refresh failed — retrying every 10 seconds"
+          : "Live list auto-refreshes every 10 seconds"}
       </div>
     </div>
   );

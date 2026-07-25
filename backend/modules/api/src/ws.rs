@@ -9,6 +9,10 @@ use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use actix_web::error::ErrorUnauthorized;
 use serde_json::{Value, json};
 use uuid::Uuid;
+use sea_orm::{DatabaseConnection, EntityTrait};
+use db_entity::game;
+use sea_orm::{DatabaseConnection, EntityTrait};
+use db_entity::game;
 
 // For Redis Pub/Sub
 // Redis pub/sub integration removed for test stability in CI environment
@@ -24,6 +28,7 @@ pub enum WsMessage {
     End   { result: String, final_fen: String },
     Error { code: u16, message: String },
     ReconnectToken { token: String, expires_in: u32 },
+    PlayerColor { player_color: String },
 }
 
 /// Actor messages
@@ -107,6 +112,7 @@ pub struct WsSession {
     pub username: String,
     pub session_id: String,
     pub redis_sub_task: Option<JoinHandle<()>>,     // Placeholder for compatibility
+    pub player_color: Option<String>,
 }
 
 impl WsSession {

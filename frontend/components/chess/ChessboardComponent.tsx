@@ -231,18 +231,36 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
       const clickedSquare = `${row},${col}`;
-      if (!selectedSquare && boardState[row][col]) {
-        setSelectedSquare(clickedSquare);
+      const clickedPiece = boardState[row][col];
+
+      // No piece selected yet — select if there's a piece on the square.
+      if (!selectedSquare) {
+        if (clickedPiece) setSelectedSquare(clickedSquare);
         return;
       }
+
+      // Clicking the already-selected square deselects it.
       if (selectedSquare === clickedSquare) {
         setSelectedSquare(null);
         return;
       }
-      if (selectedSquare) {
-        const [sourceRow, sourceCol] = selectedSquare.split(",").map(Number);
-        attemptMove(sourceRow, sourceCol, row, col);
+
+      const [sourceRow, sourceCol] = selectedSquare.split(",").map(Number);
+      const selectedPiece = boardState[sourceRow][sourceCol];
+
+      // If the target square holds a piece of the same color, switch selection
+      // rather than attempting an illegal capture.
+      if (
+        clickedPiece &&
+        selectedPiece &&
+        clickedPiece[0] === selectedPiece[0] // same color prefix ('w' or 'b')
+      ) {
+        setSelectedSquare(clickedSquare);
+        return;
       }
+
+      // Otherwise attempt the move; clear selection only on success.
+      attemptMove(sourceRow, sourceCol, row, col);
     },
     [selectedSquare, boardState, attemptMove],
   );

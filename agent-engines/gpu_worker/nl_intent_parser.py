@@ -129,8 +129,8 @@ def extract_fen_from_input(user_input: str) -> Optional[str]:
     Returns:
         FEN string if found, None otherwise.
     """
-    # FEN pattern: 8 ranks separated by /, with pieces, numbers, and side to move
-    fen_pattern = r'([rnbqkpRNBQKP1-8]{1,8}/){7}[rnbqkpRNBQKP1-8]{1,8}\s+[wb]\s+'
+    # FEN pattern: 6 space-separated segments (piece placement, side to move, castling, en passant, halfmove, fullmove)
+    fen_pattern = r'(?:[rnbqkpRNBQKP1-8]{1,8}/){7}[rnbqkpRNBQKP1-8]{1,8}\s+[wb]\s+(?:[KQkqA-Ha-h]+|-)\s+(?:[a-h][36]|-)(?:\s+\d+\s+\d+)?'
     match = re.search(fen_pattern, user_input)
     if match:
         return match.group(0).strip()

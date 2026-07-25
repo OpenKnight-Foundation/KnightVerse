@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -32,8 +33,11 @@ class DecentralizedOrchestrator:
 
     async def shutdown(self):
         """Shutdown the orchestrator and workers."""
-        if self._health_check_task:
+        if self._health_check_task and not self._health_check_task.done():
             self._health_check_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._health_check_task
+            self._health_check_task = None
         await self.pool.shutdown_all()
         logger.info(f"Decentralized Orchestrator {self.node_id} shut down.")
 

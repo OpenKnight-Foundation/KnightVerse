@@ -21,6 +21,7 @@ interface ChessboardComponentProps {
   position: string;
   onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
   width?: number; // Added width as optional prop
+  orientation?: "white" | "black"; // Board orientation: white = normal, black = flipped
 }
 
 // Parse FEN string to board state - memoized pure function
@@ -71,6 +72,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   position,
   onDrop,
   width,
+  orientation = "white",
 }) => {
   const [mounted, setMounted] = useState(false);
   const [boardWidth, setBoardWidth] = useState(width || 560);
@@ -83,6 +85,14 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
 
   // Memoize board state parsing - prevents re-parsing on every render
   const boardState = useMemo(() => parseFen(position), [position]);
+
+  // When orientation is black, flip both rows and columns for display
+  const displayRows = useMemo(() => {
+    if (orientation === "black") {
+      return [...boardState].reverse().map((row) => [...row].reverse());
+    }
+    return boardState;
+  }, [boardState, orientation]);
 
   useEffect(() => {
     const updateBoardSize = () => {
@@ -214,24 +224,31 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       targetRow: number,
       targetCol: number,
     ): void => {
-      const sourceSquare = `${String.fromCharCode(97 + sourceCol)}${
-        8 - sourceRow
+      // Map display indices back to actual board indices when flipped
+      const toActual = (row: number, col: number) =>
+        orientation === "black" ? [7 - row, 7 - col] : [row, col];
+
+      const [actualSrcRow, actualSrcCol] = toActual(sourceRow, sourceCol);
+      const [actualTgtRow, actualTgtCol] = toActual(targetRow, targetCol);
+
+      const sourceSquare = `${String.fromCharCode(97 + actualSrcCol)}${
+        8 - actualSrcRow
       }`;
-      const targetSquare = `${String.fromCharCode(97 + targetCol)}${
-        8 - targetRow
+      const targetSquare = `${String.fromCharCode(97 + actualTgtCol)}${
+        8 - actualTgtRow
       }`;
       const moveSuccess = onDrop({ sourceSquare, targetSquare });
       if (moveSuccess) {
         setSelectedSquare(null);
       }
     },
-    [onDrop],
+    [onDrop, orientation],
   );
 
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
       const clickedSquare = `${row},${col}`;
-      if (!selectedSquare && boardState[row][col]) {
+      if (!selectedSquare && displayRows[row][col]) {
         setSelectedSquare(clickedSquare);
         return;
       }
@@ -244,7 +261,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         attemptMove(sourceRow, sourceCol, row, col);
       }
     },
-    [selectedSquare, boardState, attemptMove],
+    [selectedSquare, displayRows, attemptMove],
   );
 
   const handleDragStart = useCallback(
@@ -292,11 +309,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent, row: number, col: number) => {
-      if (!boardState[row][col]) return;
+      if (!displayRows[row][col]) return;
       touchStartSquare.current = `${row},${col}`;
       setSelectedSquare(`${row},${col}`);
     },
-    [boardState],
+    [displayRows],
   );
 
   const handleTouchMove = useCallback(
@@ -358,19 +375,23 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       }}
       aria-live="polite"
     >
-      {boardState.map((row, rowIndex) =>
+      {displayRows.map((row, rowIndex) =>
         row.map((piece, colIndex) => {
           const isLight = (rowIndex + colIndex) % 2 === 1;
           const squareKey = `${rowIndex},${colIndex}`;
           const isSelected = selectedSquare === squareKey;
           const isHovered = hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
+
+          // Compute actual board coordinates for the aria-label
+          const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
+          const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
+          const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+
           return (
             <div
               key={`${rowIndex}-${colIndex}`}
               role="gridcell"
-              aria-label={`${String.fromCharCode(97 + colIndex)}${
-                8 - rowIndex
-              }${piece ? " with " + piece : ""}`}
+              aria-label={`${squareLabel}${piece ? " with " + piece : ""}`}
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {

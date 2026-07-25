@@ -9,6 +9,7 @@ from enum import Enum
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 
+from gpu_worker.anomaly import BotFarmAnomalyDetector
 from gpu_worker.config import WorkerConfig
 from gpu_worker.pool import WorkerPool
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
@@ -58,7 +59,8 @@ class AgentEngineOrchestrator:
     
     def __init__(self, node_id: Optional[str] = None):
         self.config = WorkerConfig()
-        self.pool = WorkerPool([self.config])
+        self.bot_farm_detector = BotFarmAnomalyDetector()
+        self.pool = WorkerPool([self.config], anomaly_detector=self.bot_farm_detector)
         self.decentralized = DecentralizedOrchestrator(self.pool, node_id=node_id)
         self.resource_optimizer = ResourceOptimizer()
         self.deployment_pipeline = DeploymentPipelineOrchestrator()

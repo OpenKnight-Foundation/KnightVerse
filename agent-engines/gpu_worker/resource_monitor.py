@@ -5,9 +5,12 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 import shutil
 import subprocess
+import logging
 from typing import Any
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 try:
     import pynvml  # type: ignore
@@ -103,8 +106,8 @@ class ResourceMonitor:
                         }
                     )
                 return {"available": True, "devices": devices}
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error("NVML GPU error: %s", exc)
             finally:
                 with suppress(Exception):
                     pynvml.nvmlShutdown()

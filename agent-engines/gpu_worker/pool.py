@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 
+from gpu_worker.anomaly import BotFarmAnomalyDetector
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo
 from gpu_worker.worker import GPUAnalysisWorker
@@ -16,6 +17,7 @@ class WorkerPool:
         configs: list[WorkerConfig],
         *,
         worker_factory: Callable[[WorkerConfig], GPUAnalysisWorker] | None = None,
+        anomaly_detector: BotFarmAnomalyDetector | None = None,
     ) -> None:
         if not configs:
             raise ValueError("WorkerPool requires at least one worker configuration")
@@ -24,6 +26,7 @@ class WorkerPool:
         self._reservations = [0 for _ in self._workers]
         self._condition = asyncio.Condition()
         self._started = False
+        self.anomaly_detector = anomaly_detector or BotFarmAnomalyDetector()
 
     async def start_all(self) -> None:
         """Initialize all workers in parallel."""
@@ -38,6 +41,7 @@ class WorkerPool:
 
         if not self._started:
             raise RuntimeError("worker pool has not been started")
+        self.anomaly_detector.record_request(request)
         worker = await self._acquire_worker()
         worker_index = self._workers.index(worker)
         try:

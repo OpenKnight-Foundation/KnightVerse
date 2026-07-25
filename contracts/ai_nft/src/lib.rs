@@ -122,9 +122,20 @@ impl AINFTContract {
         let current_owner = owners.get(nft_id).ok_or(ContractError::NFTNotFound)?;
         current_owner.require_auth();
 
-        // Update owner
+        // Update owner in NFT_OWNERS
         owners.set(nft_id, to.clone());
         env.storage().instance().set(&NFT_OWNERS, &owners);
+
+        // Update owner in NFT_METADATA
+        let mut nft_metadata: Map<u64, AINFTMetadata> = env
+            .storage()
+            .instance()
+            .get(&NFT_METADATA)
+            .ok_or(ContractError::NFTNotFound)?;
+        let mut nft = nft_metadata.get(nft_id).ok_or(ContractError::NFTNotFound)?;
+        nft.owner = to;
+        nft_metadata.set(nft_id, nft);
+        env.storage().instance().set(&NFT_METADATA, &nft_metadata);
 
         Ok(())
     }
@@ -218,6 +229,10 @@ mod tests {
         // Verify new owner
         let new_owner_check = client.owner_of(&nft_id);
         assert_eq!(new_owner_check, new_owner);
+
+        // Verify metadata owner is also updated
+        let nft_meta_after = client.metadata(&nft_id);
+        assert_eq!(nft_meta_after.owner, new_owner);
 
         // Verify minter is still the original minter
         let minter_check = client.minter_of(&nft_id);

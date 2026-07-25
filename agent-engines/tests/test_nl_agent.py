@@ -193,13 +193,13 @@ class TestIntentParser(unittest.TestCase):
         self.assertEqual(complexity, ComplexityLevel.INTERMEDIATE)
     
     def test_extract_fen(self):
-        """Test FEN extraction from input."""
+        """Test FEN extraction from input captures all 6 segments."""
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         input_text = f"Analyze this position: {fen}"
         
         extracted = extract_fen_from_input(input_text)
-        self.assertIsNotNone(extracted)
-        self.assertIn("rnbqkbnr", extracted)
+        self.assertEqual(extracted, fen)
+        self.assertIn("KQkq", extracted)
     
     def test_extract_fen_not_present(self):
         """Test FEN extraction when not present."""
@@ -421,6 +421,31 @@ class TestNaturalLanguageAgent(unittest.TestCase):
             self.assertEqual(specific.request_id, response.request_id)
         
         self.loop.run_until_complete(run_test())
+
+    def test_null_evaluation_handling(self):
+        """Test natural language response generation when result.evaluation is None."""
+        from gpu_worker.models import AnalysisResult
+        from gpu_worker.nl_models import NLAnalysisRequest, IntentType, ComplexityLevel
+        result_none_eval = AnalysisResult(
+            request_id="test-null-eval",
+            best_move="e2e4",
+            evaluation=None,
+            depth=10,
+            nodes_searched=100,
+            principal_variation=["e2e4", "e7e5"]
+        )
+        req = NLAnalysisRequest(user_input="Analyze e4")
+        for level in [ComplexityLevel.BEGINNER, ComplexityLevel.INTERMEDIATE, ComplexityLevel.ADVANCED]:
+            resp1 = self.agent._generate_position_analysis_nl(req, result_none_eval, level)
+            self.assertIsNotNone(resp1.natural_language_response)
+            resp2 = self.agent._generate_move_suggestion_nl(req, result_none_eval, level)
+            self.assertIsNotNone(resp2.natural_language_response)
+            resp3 = self.agent._generate_move_explanation_nl(req, result_none_eval, level)
+            self.assertIsNotNone(resp3.natural_language_response)
+            resp4 = self.agent._generate_hint_nl(req, result_none_eval, level)
+            self.assertIsNotNone(resp4.natural_language_response)
+            resp5 = self.agent._generate_move_comparison_nl(req, result_none_eval, ["e2e4", "d2d4"], level)
+            self.assertIsNotNone(resp5.natural_language_response)
 
 
 if __name__ == "__main__":

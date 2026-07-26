@@ -1,5 +1,10 @@
 import React, { memo, useCallback } from 'react';
 
+interface BoardState {
+  pieces?: Record<string, string>;
+  selectedSquare?: number;
+}
+
 const ChessPiece = memo(({ square, onClick }: { square: number; onClick: (square: number) => void }) => (
   <div onClick={() => onClick(square)}>♔</div>
 ));
@@ -12,7 +17,7 @@ const ChessSquare = memo(({ square, onMove }: { square: number; onMove: (square:
 ));
 ChessSquare.displayName = 'ChessSquare';
 
-export const OptimizedChessboard = memo(({ boardState, onMove }: { boardState?: any; onMove: (square: number) => void }) => {
+export const OptimizedChessboard = memo(({ onMove }: { onMove: (square: number) => void }) => {
   const handleMove = useCallback((square: number) => {
     onMove(square);
   }, [onMove]);

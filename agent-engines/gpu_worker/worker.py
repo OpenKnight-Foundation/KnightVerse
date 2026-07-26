@@ -4,11 +4,14 @@ import asyncio
 from collections.abc import Callable
 import time
 import uuid
+import chess
+import chess.polyglot
 
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo, WorkerStatus
 from gpu_worker.resource_monitor import ResourceMonitor
 from gpu_worker.uci_bridge import AsyncUciBridge
+from gpu_worker.opening_book import OpeningBook
 
 
 class GPUAnalysisWorker:
@@ -21,12 +24,14 @@ class GPUAnalysisWorker:
         *,
         bridge_factory: Callable[[WorkerConfig], AsyncUciBridge] | None = None,
         resource_monitor: ResourceMonitor | None = None,
+        opening_book: OpeningBook | None = None,
     ) -> None:
         self.config = config
         self.worker_id = worker_id or str(uuid.uuid4())
         self._bridge_factory = bridge_factory or (lambda cfg: AsyncUciBridge(cfg))
         self._bridge = self._bridge_factory(config)
         self._monitor = resource_monitor or ResourceMonitor()
+        self._opening_book = opening_book
         self._status = WorkerStatus.IDLE
         self._started = False
         self._analyses_completed = 0
@@ -82,6 +87,23 @@ class GPUAnalysisWorker:
 
         started_at = time.monotonic()
         try:
+            # Check for a book move first.
+            if self._opening_book:
+                board = chess.Board(request.fen)
+                book_move = self._opening_book.find_move(board)
+                if book_move:
+                    return AnalysisResult(
+                        request_id=request.id,
+                        best_move=book_move.uci(),
+                        evaluation=0,
+                        depth=0,
+                        principal_variation=[book_move.uci()],
+                        nodes_searched=0,
+                        time_ms=int((time.monotonic() - started_at) * 1000),
+                        gpu_utilization=0.0,
+                        is_book_move=True,
+                    )
+
             async with self._analysis_lock:
                 self._status = WorkerStatus.BUSY
                 await self._bridge.set_position(request.fen)

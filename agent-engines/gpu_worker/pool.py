@@ -7,6 +7,7 @@ from gpu_worker.anomaly import BotFarmAnomalyDetector
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo
 from gpu_worker.worker import GPUAnalysisWorker
+from gpu_worker.opening_book import OpeningBook
 
 
 class WorkerPool:
@@ -16,13 +17,14 @@ class WorkerPool:
         self,
         configs: list[WorkerConfig],
         *,
-        worker_factory: Callable[[WorkerConfig], GPUAnalysisWorker] | None = None,
+        worker_factory: Callable[[WorkerConfig, OpeningBook | None], GPUAnalysisWorker] | None = None,
         anomaly_detector: BotFarmAnomalyDetector | None = None,
+        opening_book: OpeningBook | None = None,
     ) -> None:
         if not configs:
             raise ValueError("WorkerPool requires at least one worker configuration")
-        factory = worker_factory or (lambda cfg: GPUAnalysisWorker(cfg))
-        self._workers = [factory(config) for config in configs]
+        factory = worker_factory or (lambda cfg, book: GPUAnalysisWorker(cfg, opening_book=book))
+        self._workers = [factory(config, opening_book) for config in configs]
         self._reservations = [0 for _ in self._workers]
         self._condition = asyncio.Condition()
         self._started = False
@@ -36,7 +38,7 @@ class WorkerPool:
         await asyncio.gather(*(worker.start() for worker in self._workers))
         self._started = True
 
-    async def submit(self, request: AnalysisRequest) -> AnalysisResult:
+    async def submit(self, request: AnalysisRequest, opening_book: OpeningBook | None = None) -> AnalysisResult:
         """Dispatch an analysis request to the least-loaded worker."""
 
         if not self._started:
@@ -45,6 +47,7 @@ class WorkerPool:
         worker = await self._acquire_worker()
         worker_index = self._workers.index(worker)
         try:
+            # Pass the opening book to the worker's analyze method.
             return await worker.analyze(request)
         finally:
             async with self._condition:

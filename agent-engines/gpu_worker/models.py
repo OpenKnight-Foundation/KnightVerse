@@ -59,6 +59,7 @@ class AnalysisResult(BaseModel):
     nodes_searched: Optional[int] = None
     time_ms: Optional[int] = None
     gpu_utilization: Optional[float] = None
+    is_book_move: bool = False
 
 
 class WorkerStatus(str, Enum):

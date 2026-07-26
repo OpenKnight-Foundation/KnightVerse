@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
 from gpu_worker.pool import WorkerPool
+from gpu_worker.opening_book import OpeningBook
 
 logger = logging.getLogger("KnightVerse.DecentralizedOrchestrator")
 
@@ -18,12 +19,18 @@ class DecentralizedOrchestrator:
     Supports node discovery, load balancing, and fault tolerance.
     """
 
-    def __init__(self, pool: WorkerPool, node_id: Optional[str] = None):
+    def __init__(
+        self,
+        pool: WorkerPool,
+        node_id: Optional[str] = None,
+        opening_book_path: Optional[str] = None,
+    ):
         self.node_id = node_id or str(uuid.uuid4())
         self.pool = pool
         self.peers: Dict[str, NodeInfo] = {}
         self._lock = asyncio.Lock()
         self._health_check_task: Optional[asyncio.Task] = None
+        self.opening_book = OpeningBook(opening_book_path) if opening_book_path else None
 
     async def start(self):
         """Start the orchestrator and background tasks."""
@@ -84,7 +91,8 @@ class DecentralizedOrchestrator:
 
         if best_node.node_id == self.node_id:
             logger.debug(f"Executing task {request.id} locally.")
-            return await self.pool.submit(request)
+            # Pass the opening book to the worker if available.
+            return await self.pool.submit(request, opening_book=self.opening_book)
         else:
             logger.info(f"Offloading task {request.id} to remote node {best_node.node_id}.")
             return await self._dispatch_to_remote(best_node, request)

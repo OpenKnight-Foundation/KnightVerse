@@ -21,6 +21,7 @@ from gpu_worker.deployment_pipeline import (
     PipelineResult,
     DeploymentTarget
 )
+import websockets
 
 # Configure logging with a professional format
 logging.basicConfig(
@@ -68,9 +69,26 @@ class AgentEngineOrchestrator:
         self._pipelines: Dict[str, DeploymentStatus] = {}
         self._resource_allocations: Dict[str, ResourceLimits] = {}
 
+    async def websocket_handler(self, websocket, path):
+        """Handle incoming WebSocket connections."""
+        try:
+            async for message in websocket:
+                try:
+                    request_data = json.loads(message)
+                    request = AnalysisRequest(**request_data)
+                    result = await self.decentralized.submit_task(request)
+                    await websocket.send(result.model_dump_json())
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    await websocket.send(json.dumps({"error": str(e)}))
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
     async def start(self):
         """Start the orchestrator services."""
         await self.decentralized.start()
+        start_server = websockets.serve(self.websocket_handler, "localhost", 8765)
+        await start_server
+        logger.info("WebSocket server started on ws://localhost:8765")
 
     async def shutdown(self):
         """Shutdown the orchestrator services."""

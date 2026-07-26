@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
+from gpu_worker.maia_config import MaiaConfig
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -40,6 +41,8 @@ class WorkerConfig(BaseModel):
     threads: int = Field(default=2, ge=1)
     hash_size_mb: int = Field(default=512, ge=1)
     network_weights_path: str | None = None
+    maia_models: list[MaiaConfig] = Field(default_factory=list)
+    personality_path: str | None = None
 
     @field_validator("engine_path")
     @classmethod

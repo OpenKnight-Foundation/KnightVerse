@@ -31,6 +31,7 @@ class WASMEngineStatus(str, Enum):
 class WASMEngineConfig:
     """Configuration for WASM-based Stockfish engine."""
     
+    engine_path: str = "stockfish"
     wasm_path: str = "stockfish.wasm"
     js_bridge_path: str = "stockfish.js"
     threads: int = 1
@@ -44,6 +45,7 @@ class WASMEngineConfig:
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
         return {
+            "engine_path": self.engine_path,
             "wasm_path": self.wasm_path,
             "js_bridge_path": self.js_bridge_path,
             "threads": self.threads,
@@ -210,28 +212,60 @@ class StockfishWASMEngine:
         depth: int,
         time_limit_ms: int,
     ) -> WASMAnalysisResult:
-        """Perform the actual analysis (simulated).
+        """Perform the actual analysis using a local UCI binary."""
         
-        In production, this would:
-        1. Send position to WASM engine via postMessage
-        2. Wait for bestmove response
-        3. Parse and return results
-        """
-        # Simulate analysis time
-        analysis_time = min(time_limit_ms, 1000) / 1000.0
-        await asyncio.sleep(analysis_time)
+        process = await asyncio.create_subprocess_exec(
+            self.config.engine_path,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        async def send_command(command: str):
+            process.stdin.write(f"{command}\n".encode())
+            await process.stdin.drain()
+
+        await send_command("uci")
+        await send_command("isready")
+        await send_command(f"position fen {fen}")
+        await send_command(f"go depth {depth} movetime {time_limit_ms}")
+
+        lines = []
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            lines.append(line.decode().strip())
+            if line.startswith(b"bestmove"):
+                break
         
-        # Simulated analysis result
+        await process.terminate()
+
+        best_move = ""
+        evaluation = None
+        principal_variation = []
+        nodes_searched = 0
+
+        for line in lines:
+            if line.startswith("bestmove"):
+                best_move = line.split(" ")[1]
+            elif " score cp " in line:
+                evaluation = int(line.split(" score cp ")[1].split(" ")[0]) / 100.0
+            elif " pv " in line:
+                principal_variation = line.split(" pv ")[1].split(" ")
+            elif " nodes " in line:
+                nodes_searched = int(line.split(" nodes ")[1].split(" ")[0])
+
         return WASMAnalysisResult(
-            best_move="e4",
-            evaluation=0.5,
+            best_move=best_move,
+            evaluation=evaluation,
             depth=depth,
-            principal_variation=["e4", "e5", "Nf3", "Nc6"],
-            nodes_searched=depth * 10000,
-            time_ms=int(analysis_time * 1000),
+            principal_variation=principal_variation,
+            nodes_searched=nodes_searched,
+            time_ms=time_limit_ms,
             metadata={
-                "engine": "stockfish-16.1-wasm",
-                "backend": "wasm",
+                "engine": "stockfish-16.1-local",
+                "backend": "uci",
             },
         )
     

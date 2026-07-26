@@ -25,6 +25,24 @@ class AnalysisRequest(BaseModel):
     device_hash: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class FullGameAnalysisRequest(BaseModel):
+    """Request payload for a full game analysis."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    fens: list[str]
+    depth: Optional[int] = Field(default=None, ge=1)
+    time_limit_ms: Optional[int] = Field(default=None, ge=1)
+    priority: int = 0
+
+
+class FullGameAnalysisResult(BaseModel):
+    """Result of a full game analysis."""
+
+    request_id: str
+    results: list[AnalysisResult]
+
+
     @field_validator("fen")
     @classmethod
     def validate_fen(cls, value: str) -> str:
@@ -124,3 +142,28 @@ class TrainingJob(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     node_id: Optional[str] = None  # Node where training is occurring
+
+
+class Player(BaseModel):
+    """A player in a game."""
+
+    id: str
+    rated: bool = True
+
+
+class Move(BaseModel):
+    """A single move in a game."""
+
+    player: Player
+    move: str
+    time_taken: float  # in seconds
+
+
+class Game(BaseModel):
+    """A rated game between two players."""
+
+    id: str
+    white_player: Player
+    black_player: Player
+    moves: list[Move]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

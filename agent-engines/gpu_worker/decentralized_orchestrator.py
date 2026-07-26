@@ -7,7 +7,13 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
+from gpu_worker.models import (
+    AnalysisRequest,
+    AnalysisResult,
+    FullGameAnalysisRequest,
+    FullGameAnalysisResult,
+    NodeInfo,
+)
 from gpu_worker.pool import WorkerPool
 from gpu_worker.opening_book import OpeningBook
 from gpu_worker.redis_cache import RedisCache
@@ -114,6 +120,27 @@ class DecentralizedOrchestrator:
             self.redis_cache.set(cache_key, result, ttl=3600)
 
         return result
+
+    async def submit_full_game_analysis(
+        self, request: FullGameAnalysisRequest
+    ) -> FullGameAnalysisResult:
+        """
+        Submit a full game analysis task to the cluster.
+        Splits the game's FENs into chunks and distributes them across available workers.
+        """
+        analysis_requests = [
+            AnalysisRequest(
+                fen=fen,
+                depth=request.depth,
+                time_limit_ms=request.time_limit_ms,
+                priority=request.priority,
+            )
+            for fen in request.fens
+        ]
+
+        results = await self.pool.submit_batch(analysis_requests)
+
+        return FullGameAnalysisResult(request_id=request.id, results=results)
 
     async def _dispatch_to_remote(self, node: NodeInfo, request: AnalysisRequest) -> AnalysisResult:
         """

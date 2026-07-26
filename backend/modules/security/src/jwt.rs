@@ -10,6 +10,7 @@ use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, 
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// JWT Claims structure containing user identification and expiration
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -18,6 +19,9 @@ pub struct Claims {
     pub sub: String,
     /// User ID as integer
     pub user_id: i32,
+    /// Player UUID (defaults to nil for backwards compatibility with old tokens)
+    #[serde(default)]
+    pub player_id: Uuid,
     /// Username
     pub username: String,
     /// Expiration time (Unix timestamp)
@@ -57,7 +61,7 @@ impl JwtService {
     }
 
     /// Generate a new JWT access token for a user
-    pub fn generate_token(&self, user_id: i32, username: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_token(&self, user_id: i32, username: &str, player_id: Uuid) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -66,6 +70,7 @@ impl JwtService {
         let claims = Claims {
             sub: user_id.to_string(),
             user_id,
+            player_id,
             username: username.to_string(),
             exp: now + self.expiration_time,
             iat: now,
@@ -83,7 +88,7 @@ impl JwtService {
     }
 
     /// Generate a reconnection token for seamless WebSocket reconnection
-    pub fn generate_reconnect_token(&self, user_id: i32, username: &str, session_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_reconnect_token(&self, user_id: i32, username: &str, player_id: Uuid, session_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -92,6 +97,7 @@ impl JwtService {
         let claims = Claims {
             sub: user_id.to_string(),
             user_id,
+            player_id,
             username: username.to_string(),
             exp: now + self.reconnect_expiration_time,
             iat: now,

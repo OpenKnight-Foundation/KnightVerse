@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use dto::auth::{RegisterRequest, LoginRequest, AuthResponse, ErrorResponse, RefreshTokenRequest, RefreshResponse, LogoutResponse};
 use security::{JwtService, TokenService, TokenServiceError};
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, EntityTrait, ColumnTrait, QueryFilter};
+use db_entity::player;
 
 /// Register a new user
 #[utoipa::path(
@@ -69,12 +70,27 @@ pub async fn login(
         });
     }
 
-    // For MVP: mock user with ID 1
-    let user_id = 1;
     let username = payload.username.clone();
 
+    // Look up the player UUID from the player table
+    let player_id = match player::Entity::find()
+        .filter(player::Column::Username.eq(&username))
+        .one(&db)
+        .await
+    {
+        Ok(Some(p)) => p.id,
+        _ => {
+            // No player record found — not strictly an auth failure;
+            // generate a namespaced UUID so downstream calls still work.
+            Uuid::new_v4()
+        }
+    };
+
+    // For MVP: mock user with ID 1
+    let user_id = 1;
+
     // Generate access token
-    let access_token = match jwt_service.generate_token(user_id, &username) {
+    let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
         Ok(t) => t,
         Err(_) => {
             return HttpResponse::InternalServerError().json(ErrorResponse {
@@ -221,7 +237,7 @@ pub async fn refresh(
     };
 
     // Generate new access token
-    let new_access_token = match jwt_service.generate_token(claims.user_id, &claims.username) {
+    let new_access_token = match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
         Ok(t) => t,
         Err(_) => {
             return HttpResponse::InternalServerError().json(ErrorResponse {

@@ -11,6 +11,7 @@ use dto::{
     responses::{InvalidCredentialsResponse, NotFoundResponse},
 };
 use error::error::ApiError;
+use security::jwt::Claims;
 use serde_json::json;
 use validator::Validate;
 use uuid::Uuid;
@@ -18,12 +19,12 @@ use sea_orm::DatabaseConnection;
 use service::games::GameService;
 
 // ---------------------------------------------------------------------------
-// Helper: extract authenticated player UUID inserted by the JWT middleware.
+// Helper: extract authenticated player UUID from JWT claims.
 // ---------------------------------------------------------------------------
 fn authenticated_player(req: &HttpRequest) -> Result<Uuid, HttpResponse> {
     req.extensions()
-        .get::<Uuid>()
-        .copied()
+        .get::<Claims>()
+        .map(|c| c.player_id)
         .ok_or_else(|| {
             HttpResponse::Unauthorized().json(json!({
                 "message": "Authentication required"
@@ -286,8 +287,10 @@ pub async fn join_game(
         return ApiError::ValidationError(errors).error_response();
     }
 
-    // Prefer JWT-extracted id; fall back to body field so the DTO stays intact.
-    let player_id = authenticated_player(&req).unwrap_or(payload.0.player_id);
+    let player_id = match authenticated_player(&req) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
     let game_id   = id.into_inner();
 
     match GameService::join_game(db.get_ref(), game_id, player_id).await {

@@ -104,6 +104,7 @@ pub struct WsSession {
     pub lobby: Addr<LobbyState>,
     pub hb: std::time::Instant,
     pub user_id: i32,
+    pub player_id: Uuid,
     pub username: String,
     pub session_id: String,
     pub redis_sub_task: Option<JoinHandle<()>>,     // Placeholder for compatibility
@@ -119,7 +120,7 @@ impl WsSession {
     fn generate_reconnect_token(&self) -> Result<String, jsonwebtoken::errors::Error> {
         let secret = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
         let jwt_service = security::jwt::JwtService::new(secret, 3600);
-        jwt_service.generate_reconnect_token(self.user_id, &self.username, &self.session_id)
+        jwt_service.generate_reconnect_token(self.user_id, &self.username, self.player_id, &self.session_id)
     }
 
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
@@ -264,6 +265,7 @@ pub async fn ws_route(
             lobby: lobby.get_ref().clone(), 
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
+            player_id: claims.player_id,
             username: claims.username,
             session_id,
             redis_sub_task: None,

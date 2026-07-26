@@ -62,6 +62,8 @@ impl AINFTContract {
         metadata_hash: BytesN<32>,
         personality_traits: String,
     ) -> u64 {
+        let admin = Self::admin(env.clone());
+        admin.require_auth();
         minter.require_auth();
 
         // Increment NFT counter

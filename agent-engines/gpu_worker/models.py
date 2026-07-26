@@ -124,3 +124,28 @@ class TrainingJob(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     node_id: Optional[str] = None  # Node where training is occurring
+
+
+class Player(BaseModel):
+    """A player in a game."""
+
+    id: str
+    rated: bool = True
+
+
+class Move(BaseModel):
+    """A single move in a game."""
+
+    player: Player
+    move: str
+    time_taken: float  # in seconds
+
+
+class Game(BaseModel):
+    """A rated game between two players."""
+
+    id: str
+    white_player: Player
+    black_player: Player
+    moves: list[Move]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

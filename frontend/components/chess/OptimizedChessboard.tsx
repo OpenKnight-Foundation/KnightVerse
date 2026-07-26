@@ -1,10 +1,5 @@
 import React, { memo, useCallback } from 'react';
 
-interface BoardState {
-  pieces?: Record<string, string>;
-  selectedSquare?: number;
-}
-
 const ChessPiece = memo(({ square, onClick }: { square: number; onClick: (square: number) => void }) => (
   <div onClick={() => onClick(square)}>♔</div>
 ));

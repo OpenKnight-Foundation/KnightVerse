@@ -25,6 +25,24 @@ class AnalysisRequest(BaseModel):
     device_hash: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class FullGameAnalysisRequest(BaseModel):
+    """Request payload for a full game analysis."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    fens: list[str]
+    depth: Optional[int] = Field(default=None, ge=1)
+    time_limit_ms: Optional[int] = Field(default=None, ge=1)
+    priority: int = 0
+
+
+class FullGameAnalysisResult(BaseModel):
+    """Result of a full game analysis."""
+
+    request_id: str
+    results: list[AnalysisResult]
+
+
     @field_validator("fen")
     @classmethod
     def validate_fen(cls, value: str) -> str:

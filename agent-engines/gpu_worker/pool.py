@@ -78,6 +78,15 @@ class WorkerPool:
                     self._reservations[worker_index] -= 1
                     self._condition.notify_all()
 
+    async def submit_batch(self, requests: list[AnalysisRequest]) -> list[AnalysisResult]:
+        """Dispatch a batch of analysis requests to the workers."""
+
+        if not self._started:
+            raise RuntimeError("worker pool has not been started")
+
+        tasks = [self.submit(request) for request in requests]
+        return await asyncio.gather(*tasks)
+
     async def shutdown_all(self) -> None:
         """Gracefully shut down all workers."""
 

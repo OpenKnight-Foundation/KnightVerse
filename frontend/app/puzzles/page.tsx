@@ -179,10 +179,11 @@ export default function PuzzlesPage() {
     }
     setIsClaiming(true);
 
-    const result = await executeClaim(async () => {
+    const result = await executeClaim(async (txId: string) => {
       // Simulate on-chain reward claim — in production this would invoke a Soroban contract
+      void txId;
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      return true;
+      return { hash: undefined };
     });
 
     setIsClaiming(false);

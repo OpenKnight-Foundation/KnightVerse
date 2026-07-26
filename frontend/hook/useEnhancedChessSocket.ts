@@ -31,6 +31,20 @@ interface WebSocketMessage {
   expires_in?: number;
 }
 
+/**
+ * Runtime type guard for WebSocket message payloads.
+ * Ensures the value is a plain object with at least a string `type` field
+ * before we switch on it — replacing unsafe non-null assertions (`data.from!`).
+ */
+function isWebSocketMessage(value: unknown): value is WebSocketMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).type === "string"
+  );
+}
+
 interface UseEnhancedChessSocketReturn {
   status: EnhancedSocketStatus;
   gameId: string | null;
@@ -147,17 +161,35 @@ export function useEnhancedChessSocket(
 
       ws.onmessage = (event) => {
         try {
-          const data: WebSocketMessage = JSON.parse(event.data);
+          const raw: unknown = JSON.parse(event.data);
+
+          // ── Type guard: ensure the parsed value is a plain object with a string `type` ──
+          if (!isWebSocketMessage(raw)) {
+            console.warn("[EnhancedWebSocket] Received malformed message (missing/invalid type):", raw);
+            return;
+          }
+
+          const data = raw;
 
           switch (data.type) {
-            case "move":
+            case "move": {
+              // Validate that `from` and `to` are non-empty strings before using them
+              if (typeof data.from !== "string" || data.from.trim() === "") {
+                console.warn("[EnhancedWebSocket] Received move message with missing `from` field:", data);
+                break;
+              }
+              if (typeof data.to !== "string" || data.to.trim() === "") {
+                console.warn("[EnhancedWebSocket] Received move message with missing `to` field:", data);
+                break;
+              }
               console.log(`[EnhancedWebSocket] Received opponent move:`, data);
               setLastOpponentMove({
-                from: data.from!,
-                to: data.to!,
-                promotion: data.promotion,
+                from: data.from,
+                to: data.to,
+                promotion: typeof data.promotion === "string" ? data.promotion : undefined,
               });
               break;
+            }
 
             case "clock":
               console.log(`[EnhancedWebSocket] Clock update:`, data);
@@ -170,10 +202,12 @@ export function useEnhancedChessSocket(
               break;
 
             case "reconnect_token":
-              // Store reconnection token for seamless reconnection
-              if (data.token) {
+              // Validate token is a non-empty string before storing it
+              if (typeof data.token === "string" && data.token.trim() !== "") {
                 reconnectTokenRef.current = data.token;
                 console.log(`[EnhancedWebSocket] Received reconnection token (expires in ${data.expires_in}s)`);
+              } else {
+                console.warn("[EnhancedWebSocket] Received reconnect_token message with invalid token:", data);
               }
               break;
 

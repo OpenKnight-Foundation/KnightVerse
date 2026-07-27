@@ -125,6 +125,9 @@ const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle co
 const TOURNAMENT_TIMELOCK: Symbol = symbol_short!("TL_DUR"); // u64 - lock duration in ledger sequences
 const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, TournamentEscrow>
 
+// Emergency circuit breaker
+const CIRCUIT_BREAKER: Symbol = symbol_short!("CB_ADDR"); // Address of the emergency_circuit_breaker contract
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -215,6 +218,8 @@ pub enum ContractError {
     EscrowStillLocked = 34,
     /// Tournament escrow already released (#532)
     EscrowAlreadyReleased = 35,
+    /// Emergency circuit breaker is tripped — all fund movements are halted
+    CircuitBreakerTripped = 36,
 }
 
 #[contract]
@@ -232,6 +237,30 @@ impl GameContract {
             .set(&TOKEN_CONTRACT, &token_contract);
     }
 
+    /// Register the emergency circuit breaker contract address.
+    ///
+    /// May be called once; subsequent calls are a no-op unless the contract
+    /// admin overrides it via a future governance function.  Only the contract
+    /// admin may call this.
+    pub fn initialize_circuit_breaker(
+        env: Env,
+        admin: Address,
+        circuit_breaker: Address,
+    ) {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            panic!("Unauthorized admin address");
+        }
+        env.storage()
+            .instance()
+            .set(&CIRCUIT_BREAKER, &circuit_breaker);
+    }
+
     fn token_contract_address(env: &Env) -> Address {
         env.storage()
             .instance()
@@ -241,6 +270,28 @@ impl GameContract {
 
     fn token_client(env: &Env) -> TokenClient<'_> {
         TokenClient::new(env, &Self::token_contract_address(env))
+    }
+
+    /// Check the emergency circuit breaker.  If a breaker address is
+    /// configured and the breaker contract reports that it is paused,
+    /// returns `Err(CircuitBreakerTripped)`.
+    ///
+    /// If no breaker address has been registered the check is skipped
+    /// (opt-in; the contract still works before the breaker is wired up).
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        let cb_opt: Option<Address> = env.storage().instance().get(&CIRCUIT_BREAKER);
+        if let Some(cb_addr) = cb_opt {
+            // Cross-contract call: invoke `paused()` on the circuit-breaker
+            let paused: bool = env.invoke_contract(
+                &cb_addr,
+                &soroban_sdk::symbol_short!("paused"),
+                soroban_sdk::Vec::new(env),
+            );
+            if paused {
+                return Err(ContractError::CircuitBreakerTripped);
+            }
+        }
+        Ok(())
     }
 
     /// Gas-optimized tournament payout — single pass, no redundant map reads.
@@ -264,6 +315,8 @@ impl GameContract {
         }
 
         game.player1.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         if winners.len() != percentages.len() {
             return Err(ContractError::MismatchedLengths);
@@ -496,6 +549,8 @@ impl GameContract {
             return Err(ContractError::NotPlayer);
         }
 
+        Self::require_not_paused(&env)?;
+
         // Verify backend admin signature for a draw to prevent unilateral draws
         let admin_key_bytes: Bytes = env
             .storage()
@@ -548,6 +603,8 @@ impl GameContract {
         if game.player1 != winner && Some(winner.clone()) != game.player2 {
             return Err(ContractError::NotPlayer);
         }
+
+        Self::require_not_paused(&env)?;
 
         // Verify admin signature to confirm the win
         let admin_key_bytes: Bytes = env
@@ -604,6 +661,8 @@ impl GameContract {
 
         player.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         // Refund player1's staked wager
         let mut escrow: Map<Address, i128> = env
             .storage()
@@ -643,6 +702,8 @@ impl GameContract {
         }
 
         player.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         let winner = if player == game.player1 {
             game.player2
@@ -684,6 +745,8 @@ impl GameContract {
 
         winner.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         Self::process_payout(&env, &game, &winner)?;
         game.state = GameState::Settled;
 
@@ -712,6 +775,8 @@ impl GameContract {
         }
 
         game.player1.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         if winners.len() != percentages.len() {
             return Err(ContractError::MismatchedLengths);
@@ -1007,6 +1072,8 @@ impl GameContract {
             return Err(ContractError::InvalidAmount);
         }
 
+        Self::require_not_paused(&env)?;
+
         // 1. Load admin ED25519 public key
         let admin_key_bytes: Bytes = env
             .storage()
@@ -1251,6 +1318,8 @@ impl GameContract {
 
         claimant.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let waiting_player = if game.current_turn == 1 {
             game.player2
                 .as_ref()
@@ -1331,6 +1400,8 @@ impl GameContract {
         }
         arbitrator.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let mut disputes: Map<u64, Dispute> = env
             .storage()
             .instance()
@@ -1409,6 +1480,8 @@ impl GameContract {
             return Err(ContractError::NotArbitrator);
         }
         arbitrator.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         // Get dispute
         let mut disputes: Map<u64, Dispute> = env
@@ -1990,6 +2063,8 @@ pub fn release_tournament_escrow(
     if admin != current_admin {
         return Err(ContractError::Unauthorized);
     }
+        Self::require_not_paused(&env)?;
+
         let mut escrows: Map<u64, TournamentEscrow> = env
             .storage()
             .instance()
@@ -3143,5 +3218,360 @@ mod tests {
 
         let escrow = client.get_tournament_escrow(&escrow_id);
         assert!(escrow.released);
+    }
+
+    // ── Circuit Breaker Tests ─────────────────────────────────────────────────
+
+    /// Helper: deploy & initialise the circuit-breaker contract, then wire it
+    /// into an already-initialised game-contract client.
+    fn setup_with_circuit_breaker<'a>(
+        env: &'a Env,
+        game_client: &GameContractClient<'a>,
+        admin: &Address,
+    ) -> (
+        emergency_circuit_breaker::PausableContractClient<'a>,
+        Address, // circuit-breaker contract address
+    ) {
+        use emergency_circuit_breaker::PausableContract;
+
+        let cb_id = env.register_contract(None, PausableContract);
+        let cb_client = emergency_circuit_breaker::PausableContractClient::new(env, &cb_id);
+        cb_client.initialize(admin);
+
+        game_client.initialize_circuit_breaker(admin, &cb_id);
+        (cb_client, cb_id)
+    }
+
+    /// When the circuit breaker is not configured (None), fund-moving functions
+    /// proceed normally.
+    #[test]
+    fn test_circuit_breaker_not_configured_allows_forfeit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        // No circuit breaker registered — fund movement should still work
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+        client.forfeit(&game_id, &player1); // should succeed
+    }
+
+    /// When the circuit breaker is registered but NOT paused, fund-moving
+    /// functions proceed normally.
+    #[test]
+    fn test_circuit_breaker_not_paused_allows_forfeit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        assert!(!cb_client.paused()); // breaker is live but not tripped
+
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+        client.forfeit(&game_id, &player1);
+
+        // player2 should have won the pool
+        assert_eq!(token_client.balance(&player2), 1_100);
+    }
+
+    /// When the circuit breaker IS paused, `forfeit` returns
+    /// `CircuitBreakerTripped`.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_forfeit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        cb_client.pause(&admin); // trip the breaker
+        assert!(cb_client.paused());
+
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+
+        let result = client.try_forfeit(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// After unpausing, fund-moving functions work again.
+    #[test]
+    fn test_circuit_breaker_unpause_resumes_forfeit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+
+        // Should be blocked while paused
+        assert_eq!(
+            client.try_forfeit(&game_id, &player1),
+            Err(Ok(ContractError::CircuitBreakerTripped))
+        );
+
+        cb_client.unpause(&admin); // lift the breaker
+
+        client.forfeit(&game_id, &player1); // should now succeed
+        assert_eq!(token_client.balance(&player2), 1_100);
+    }
+
+    /// create_game is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_create_game() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let result = client.try_create_game(&player1, &100i128);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// cancel_game is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_cancel_game() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        let game_id = client.create_game(&player1, &100i128);
+
+        cb_client.pause(&admin);
+
+        let result = client.try_cancel_game(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// claim_timeout_win is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_claim_timeout_win() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.configure_timeout(&admin, &100u64);
+        client.set_max_stake(&admin, &1_000i128);
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+
+        // Fast-forward past timeout
+        env.as_contract(&contract_id, || {
+            let mut games: Map<u64, Game> = env.storage().instance().get(&GAMES).unwrap();
+            let mut game = games.get(game_id).unwrap();
+            game.last_move_at = 0;
+            games.set(game_id, game);
+            env.storage().instance().set(&GAMES, &games);
+        });
+        env.ledger().set_sequence_number(101);
+
+        cb_client.pause(&admin);
+
+        let result = client.try_claim_timeout_win(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// claim_puzzle_reward is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_claim_puzzle_reward() {
+        use ed25519_dalek::Signer;
+        use rand::rngs::OsRng;
+
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key_bytes: [u8; 32] = signing_key.verifying_key().to_bytes();
+        let admin_key = Bytes::from_slice(&env, &verifying_key_bytes);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        client.initialize_puzzle_rewards(&admin, &admin_key, &10_000i128, &0u32, &treasury_addr);
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let recipient = Address::generate(&env);
+        let sig = sign_payload(&env, &signing_key, &recipient, 500, 1);
+
+        let result = client.try_claim_puzzle_reward(&recipient, &500i128, &1u64, &sig);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
     }
 }

@@ -382,6 +382,8 @@ impl GameContract {
 
         player1.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
 
@@ -453,6 +455,9 @@ impl GameContract {
         }
 
         player2.require_auth();
+
+        Self::require_not_paused(&env)?;
+
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
 
@@ -1247,6 +1252,8 @@ impl GameContract {
         }
 
         filer.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         let dispute_fee: i128 = env.storage().instance().get(&DISPUTE_FEE).unwrap_or(0);
         if dispute_fee > 0 {
@@ -3449,6 +3456,91 @@ mod tests {
         cb_client.pause(&admin);
 
         let result = client.try_create_game(&player1, &100i128);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// join_game is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_join_game() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        let game_id = client.create_game(&player1, &100i128);
+
+        cb_client.pause(&admin);
+
+        let result = client.try_join_game(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// file_dispute is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_file_dispute() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.configure_dispute_system(&admin, &arbitrator, &25i128);
+        client.set_max_stake(&admin, &1_000i128);
+
+        let game_id = client.create_game(&player1, &100i128);
+        client.join_game(&game_id, &player2);
+
+        let (cb_client, _cb_id) = setup_with_circuit_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let reason = Bytes::from_slice(&env, b"False claim");
+        let result = client.try_file_dispute(&game_id, &player1, &player2, &reason);
         assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
     }
 

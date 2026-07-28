@@ -88,10 +88,14 @@ class AsyncUciBridge:
         startup_timeout_seconds: float = 5.0,
         command_timeout_seconds: float = 30.0,
         process_factory: Callable[..., object] | None = None,
+        max_retries: int = 3,
+        initial_backoff: float = 0.5,
     ) -> None:
         self.config = config
         self.startup_timeout_seconds = startup_timeout_seconds
         self.command_timeout_seconds = command_timeout_seconds
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
         self._process_factory = process_factory
         self._process: UciProcess | None = None
         self._command_lock = asyncio.Lock()

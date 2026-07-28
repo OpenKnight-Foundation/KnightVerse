@@ -47,14 +47,19 @@ class DecentralizedOrchestrator:
         self._health_check_task = asyncio.create_task(self._health_check_loop())
         logger.info(f"Decentralized Orchestrator {self.node_id} started.")
 
-    async def shutdown(self):
-        """Shutdown the orchestrator and workers."""
+    async def shutdown(self, wait_for_pending: bool = True, timeout: float | None = 30):
+        """Shutdown the orchestrator and workers.
+        
+        Args:
+            wait_for_pending: Whether to wait for pending tasks to complete before shutdown
+            timeout: Maximum time to wait for pending tasks in seconds
+        """
         if self._health_check_task and not self._health_check_task.done():
             self._health_check_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._health_check_task
             self._health_check_task = None
-        await self.pool.shutdown_all()
+        await self.pool.shutdown_all(wait_for_pending=wait_for_pending, timeout=timeout)
         logger.info(f"Decentralized Orchestrator {self.node_id} shut down.")
 
     async def register_peer(self, node: NodeInfo):

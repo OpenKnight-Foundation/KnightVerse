@@ -9,6 +9,8 @@ use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use actix_web::error::ErrorUnauthorized;
 use serde_json::{Value, json};
 use uuid::Uuid;
+use std::sync::Arc;
+use crate::metrics::{increment_ws_connections, decrement_ws_connections, Metrics};
 
 // For Redis Pub/Sub
 // Redis pub/sub integration removed for test stability in CI environment
@@ -146,6 +148,9 @@ impl Actor for WsSession {
         self.hb(ctx);
         let addr = ctx.address().recipient();
         self.lobby.do_send(Connect { game_id: self.game_id.clone(), addr });
+        
+        // Track WebSocket connection
+        increment_ws_connections();
 
         // Redis pub/sub subscription intentionally disabled here; leave placeholder
         self.redis_sub_task = None;
@@ -153,6 +158,9 @@ impl Actor for WsSession {
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
         log::info!("WebSocket disconnected for game: {}", self.game_id);
+        
+        // Track WebSocket disconnection
+        decrement_ws_connections();
         
         // Send reconnection token to client for seamless reconnection
         if let Ok(reconnect_token) = self.generate_reconnect_token() {

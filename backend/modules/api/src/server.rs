@@ -18,12 +18,14 @@ use crate::auth::{login, register, refresh, logout};
 use crate::ai::{get_ai_suggestion, analyze_position};
 use crate::ws::{LobbyState, ws_route};
 use crate::config::AppConfig;
+use crate::metrics::{init_metrics, metrics_handler};
 use actix_governor::{Governor, GovernorConfigBuilder};
 use matchmaking::service::MatchmakingService;
 use matchmaking::redis::{create_redis_pool, test_redis_connection};
 use challenge::puzzle_validation::PuzzleValidationService;
 use challenge::api::configure_puzzle_routes;
 use st_core::endpoint::configure as configure_nft_routes;
+use actix_web_prom::PrometheusMetrics;
 
 use crate::openapi::ApiDoc;
 
@@ -101,6 +103,15 @@ pub async fn main() -> std::io::Result<()> {
     // Initialize Puzzle Validation Service
     let puzzle_service = Arc::new(PuzzleValidationService::new(jwt_secret.clone()));
 
+    // Initialize Metrics
+    let metrics = init_metrics();
+
+    // Configure Prometheus middleware for HTTP metrics (shared across all workers)
+    let prometheus: PrometheusMetrics = actix_web_prom::PrometheusMetricsBuilder::new("xlmate_http")
+        .endpoint("/metrics/http")
+        .build()
+        .expect("Failed to create Prometheus metrics middleware");
+
     eprintln!("Starting HTTP server on {}", server_addr);
 
     // Define the app factory closure
@@ -110,6 +121,8 @@ pub async fn main() -> std::io::Result<()> {
         let jwt_secret = jwt_secret.clone();
         let matchmaking_service = matchmaking_service.clone();
         let puzzle_service = puzzle_service.clone();
+        let metrics = metrics.clone();
+        let prometheus = prometheus.clone();
         
         // Configure CORS middleware with environment variables for flexibility
         let cors = {
@@ -153,15 +166,18 @@ pub async fn main() -> std::io::Result<()> {
         App::new()
             // Global middleware
             .wrap(cors)
+            .wrap(prometheus)
             // App data
             .app_data(web::Data::from(db.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(lobby.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            .app_data(web::Data::new(metrics))
             // Register your routes
             .route("/health", web::get().to(health))
             .route("/", web::get().to(greet))
+            .route("/metrics", web::get().to(metrics_handler))
             // Puzzle routes
             .configure(configure_puzzle_routes)
             // Player routes

@@ -248,19 +248,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const invokeSorobanContract = async (contractId: string, functionName: string, args: any[] = []) => {
     if (!address) throw new Error("No wallet connected");
-    // Best-effort Soroban invocation using `soroban-client` if present. This is a helper that
-    // will build a transaction targeting the Soroban network and request Freighter to sign it.
-    // Actual invocation details (host function, footprints, etc.) depend on the contract ABI.
     try {
-      // dynamic import to avoid build-time hard dependency when not used
-      const sc = await import("soroban-client");
-      const SorobanClient = sc.default;
-      // Modern Soroban SDK usage
-      const rpc = new SorobanClient(SOROBAN_RPC);
-      // TODO: Implement full hostfunction builder for specific contract/ABI
-      // Example: await rpc.getContractData(contractId);
-      // TODO: Implement full hostfunction builder for specific contract/ABI
-      throw new Error("invokeSorobanContract: implement contract-specific invocation (ABI required)");
+      // Dynamic import to avoid build-time issues
+      const { Contract, TimeoutInfinite } = await import("stellar-sdk");
+      
+      // Use the Soroban RPC
+      const rpcServer = new Server(SOROBAN_RPC, { allowHttp: true });
+      const acct = await rpcServer.getAccount(address);
+      const contract = new Contract(contractId);
+
+      // Build the initial transaction
+      let tx = new TransactionBuilder(acct, {
+        fee: "10000",
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call(functionName, ...args))
+        .setTimeout(TimeoutInfinite)
+        .build();
+
+      // Simulate transaction to get correct footprints & fee
+      const simulatedTx = await rpcServer.simulateTransaction(tx);
+      
+      if ("error" in simulatedTx && simulatedTx.error) {
+        throw new Error(`Simulation failed: ${simulatedTx.error}`);
+      }
+
+      // Assemble transaction with simulation data
+      if (!simulatedTx.transactionData) {
+        throw new Error("Simulation failed: missing transactionData");
+      }
+
+      tx = TransactionBuilder.assembleTransaction(tx, NETWORK_PASSPHRASE, simulatedTx as any).build();
+      
+      // Sign with Freighter
+      const txXDR = tx.toXDR();
+      const signedEnvelopeXDR = await signWithFreighter(txXDR);
+      const signedTx = TransactionBuilder.fromXDR(signedEnvelopeXDR, NETWORK_PASSPHRASE);
+      
+      // Submit the transaction to Soroban
+      const sendResponse = await rpcServer.sendTransaction(signedTx);
+      
+      if (sendResponse.status === "ERROR") {
+        throw new Error(`Transaction failed: ${JSON.stringify(sendResponse.errorResult)}`);
+      }
+      
+      return sendResponse;
     } catch (err) {
       console.error("invokeSorobanContract", err);
       throw err;

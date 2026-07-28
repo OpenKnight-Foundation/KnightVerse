@@ -2101,6 +2101,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "knightverse-core"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "api",
+ "chrono",
+ "lazy_static",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "kv-log-macro"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

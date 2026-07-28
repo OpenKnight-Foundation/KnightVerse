@@ -192,6 +192,7 @@ impl MatchmakingService {
                     player2: accepting_player,
                     match_type: MatchType::Private,
                     created_at: Utc::now(),
+                    time_control: invite_request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();
@@ -404,6 +405,7 @@ impl MatchmakingService {
                     player2: request.player.clone(),
                     match_type: MatchType::Rated,
                     created_at: Utc::now(),
+                    time_control: request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();
@@ -444,6 +446,7 @@ impl MatchmakingService {
                     player2: request.player.clone(),
                     match_type: MatchType::Casual,
                     created_at: Utc::now(),
+                    time_control: request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();

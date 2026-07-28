@@ -9,7 +9,7 @@ impl Lc0Orchestrator {
         format!("Lc0 analysis for {} at depth {}", fen, depth)
     }
 
-    pub fn get_best_move(&self, fen: &str) -> String {
+    pub fn get_best_move(&self, _fen: &str) -> String {
         "e2e4".to_string()
     }
 

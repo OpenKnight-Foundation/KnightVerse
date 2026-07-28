@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import type { ChessVariant } from "@/lib/chessVariants";
 
 export type MatchmakingStatus =
   | "idle"
@@ -18,7 +19,10 @@ interface UseMatchmakingReturn {
   gameId: string | null;
   playerColor: "white" | "black" | null;
   error: string | null;
-  joinMatchmaking: (matchType?: "Rated" | "Casual") => Promise<void>;
+  joinMatchmaking: (
+    matchType?: "Rated" | "Casual",
+    timeControl?: ChessVariant,
+  ) => Promise<void>;
   cancelMatchmaking: () => void;
   sendMove: (from: string, to: string, promotion?: string) => void;
   lastOpponentMove: { from: string; to: string; promotion?: string } | null;
@@ -30,7 +34,9 @@ const WS_BASE = API_BASE.replace(/^http/, "ws");
 export function useMatchmaking(): UseMatchmakingReturn {
   const [status, setStatus] = useState<MatchmakingStatus>("idle");
   const [gameId, setGameId] = useState<string | null>(null);
-  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(null);
+  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [lastOpponentMove, setLastOpponentMove] = useState<{
     from: string;
@@ -95,11 +101,14 @@ export function useMatchmaking(): UseMatchmakingReturn {
         if (statusRef.current === "connected") setStatusSynced("idle");
       };
     },
-    [setStatusSynced]
+    [setStatusSynced],
   );
 
   const joinMatchmaking = useCallback(
-    async (matchType: "Rated" | "Casual" = "Casual") => {
+    async (
+      matchType: "Rated" | "Casual" = "Casual",
+      timeControl: ChessVariant = "standard",
+    ) => {
       setStatusSynced("searching");
       setError(null);
 
@@ -109,7 +118,10 @@ export function useMatchmaking(): UseMatchmakingReturn {
         const res = await fetch(`${API_BASE}/v1/matchmaking/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ match_type: matchType }),
+          body: JSON.stringify({
+            match_type: matchType,
+            time_control: timeControl,
+          }),
           credentials: "include",
         });
 
@@ -121,7 +133,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
 
         // Open WebSocket to listen for match_found event
         const ws = new WebSocket(
-          `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`
+          `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`,
         );
         matchmakingWsRef.current = ws;
 
@@ -162,7 +174,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
         setStatusSynced("error");
       }
     },
-    [openGameSocket, setStatusSynced]
+    [openGameSocket, setStatusSynced],
   );
 
   const cancelMatchmaking = useCallback(() => {
@@ -187,11 +199,11 @@ export function useMatchmaking(): UseMatchmakingReturn {
     (from: string, to: string, promotion = "q") => {
       if (gameWsRef.current?.readyState === WebSocket.OPEN && gameId) {
         gameWsRef.current.send(
-          JSON.stringify({ type: "move", gameId, from, to, promotion })
+          JSON.stringify({ type: "move", gameId, from, to, promotion }),
         );
       }
     },
-    [gameId]
+    [gameId],
   );
 
   // Cleanup on unmount

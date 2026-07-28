@@ -284,7 +284,7 @@ export default function PlayOnlinePage() {
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           {/* Chessboard Section */}
-          <div className="w-full max-w-[600px]" role="region" aria-label="Chess board">
+          <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0" role="region" aria-label="Chess board">
             {/* Opponent info bar */}
             <div className="flex items-center justify-between mb-3 px-1" role="status" aria-label="Opponent info">
               <div className="flex items-center gap-3">

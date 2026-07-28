@@ -4,13 +4,11 @@ import { useCallback, useRef } from "react";
 import { useTransactionContext } from "@/context/transactionContext";
 import type { TxType } from "@/context/transactionContext";
 import { useToast } from "@/components/ui/toast";
+import { HORIZON_URL, endpoints } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Horizon polling helper (FE-16 fix)
 // ---------------------------------------------------------------------------
-
-const HORIZON_URL =
-  process.env.NEXT_PUBLIC_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
 
 interface HorizonTxRecord {
   successful: boolean;
@@ -41,7 +39,7 @@ async function pollHorizonForConfirmation(
     }
 
     try {
-      const url = `${HORIZON_URL}/transactions/${encodeURIComponent(hash)}`;
+      const url = endpoints.horizon.transaction(hash);
       const res = await fetch(url, { signal });
 
       if (res.ok) {

@@ -41,6 +41,7 @@ import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { endpoints } from "@/lib/api";
 
 export default function Home() {
   const [game] = useState(new Chess());
@@ -49,8 +50,7 @@ export default function Home() {
   const [gameMode, setGameMode] = useState<"online" | "bot" | null>(null);
   const router = useRouter();
   const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const PLAYER_COUNT_ENDPOINT = `${API_BASE}/v1/players/online`;
+  const PLAYER_COUNT_ENDPOINT = endpoints.players.online();
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);
   const [isMatchmakingModalOpen, setIsMatchmakingModalOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);

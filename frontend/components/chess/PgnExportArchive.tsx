@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/authContext";
+import { endpoints, IPFS_GATEWAY } from "@/lib/api";
 
 interface PgnArchiveResult {
   game_id: string;
@@ -24,8 +25,6 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveResult, setArchiveResult] = useState<PgnArchiveResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
   /**
    * Export PGN as a downloadable file
@@ -82,7 +81,7 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
       setIsArchiving(true);
       setError(null);
 
-      const response = await fetch(`${API_BASE}/v1/games/archive-pgn`, {
+      const response = await fetch(endpoints.games.archivePgn(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -113,15 +112,14 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
     } finally {
       setIsArchiving(false);
     }
-  }, [gameId, pgnContent, accessToken, isAuthenticated, API_BASE, onArchiveComplete]);
+  }, [gameId, pgnContent, accessToken, isAuthenticated, onArchiveComplete]);
 
   /**
    * View PGN on IPFS gateway
    */
   const viewOnIpfs = useCallback(() => {
     if (archiveResult?.ipfs_cid) {
-      const ipfsGateway = process.env.NEXT_PUBLIC_IPFS_GATEWAY ?? "https://gateway.pinata.cloud";
-      window.open(`${ipfsGateway}/ipfs/${archiveResult.ipfs_cid}`, "_blank");
+      window.open(`${IPFS_GATEWAY}/ipfs/${archiveResult.ipfs_cid}`, "_blank");
     }
   }, [archiveResult]);
 

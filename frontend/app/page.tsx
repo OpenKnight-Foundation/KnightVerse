@@ -56,10 +56,6 @@ export default function Home() {
   const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(
     null,
   );
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const PLAYER_COUNT_ENDPOINT = `${API_BASE}/v1/players/online`;
-
-  const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
   const PLAYER_COUNT_ENDPOINT = endpoints.players.online();
 
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);

@@ -87,8 +87,31 @@ class WorkerPool:
         tasks = [self.submit(request) for request in requests]
         return await asyncio.gather(*tasks)
 
-    async def shutdown_all(self) -> None:
-        """Gracefully shut down all workers."""
+    async def wait_for_pending_tasks(self, timeout: float | None = None) -> None:
+        """Wait for all pending tasks to complete before shutting down."""
+        async with self._condition:
+            # Wait until all pending tasks are completed
+            await asyncio.wait_for(
+                self._condition.wait_for(
+                    lambda: all(r == 0 for r in self._reservations) and 
+                            all(r == 0 for r in self._maia_reservations)
+                ),
+                timeout=timeout
+            )
+            logger.info("All pending analysis tasks completed")
+
+    async def shutdown_all(self, wait_for_pending: bool = True, timeout: float | None = 30) -> None:
+        """Gracefully shut down all workers.
+        
+        Args:
+            wait_for_pending: Whether to wait for pending tasks to complete before shutdown
+            timeout: Maximum time to wait for pending tasks in seconds
+        """
+        if wait_for_pending:
+            try:
+                await self.wait_for_pending_tasks(timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"Timed out waiting for {sum(self._reservations)} standard and {sum(self._maia_reservations)} Maia pending tasks to complete, proceeding with shutdown")
 
         await asyncio.gather(*(worker.shutdown() for worker in self._workers))
         await asyncio.gather(*(worker.shutdown() for worker in self._maia_workers))

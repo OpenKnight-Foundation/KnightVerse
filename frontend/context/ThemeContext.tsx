@@ -25,21 +25,31 @@ const ThemeContext = createContext<ThemeContextProps | undefined>(undefined);
 
 export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [boardTheme, setBoardThemeState] = useState<BoardTheme>('default');
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('knightverse_board_theme') as BoardTheme;
     if (saved && THEME_COLORS[saved]) {
       setBoardThemeState(saved);
     }
+    setMounted(true);
   }, []);
 
   const setBoardTheme = (theme: BoardTheme) => {
     setBoardThemeState(theme);
-    localStorage.setItem('knightverse_board_theme', theme);
+    if (mounted) {
+      localStorage.setItem('knightverse_board_theme', theme);
+    }
+  };
+
+  const value = {
+    boardTheme,
+    setBoardTheme,
+    colors: THEME_COLORS[mounted ? boardTheme : 'default'],
   };
 
   return (
-    <ThemeContext.Provider value={{ boardTheme, setBoardTheme, colors: THEME_COLORS[boardTheme] }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

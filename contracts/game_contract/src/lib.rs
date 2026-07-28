@@ -32,6 +32,7 @@ pub struct Game {
     pub moves: Vec<ChessMove>,
     pub created_at: u64,
     pub winner: Option<Address>,
+    pub proof_of_game: BytesN<32>,
     pub last_move_at: u64, // Ledger sequence of last move
 }
 
@@ -352,6 +353,7 @@ impl GameContract {
             moves: Vec::new(&env),
             created_at: env.ledger().sequence() as u64,
             winner: None,
+            proof_of_game: BytesN::from_array(&env, &[0; 32]),
             last_move_at: env.ledger().sequence() as u64,
         };
 
@@ -467,9 +469,21 @@ impl GameContract {
 
         let chess_move = ChessMove {
             player: player.clone(),
-            move_data,
+            move_data: move_data.clone(),
             timestamp: env.ledger().sequence() as u64,
         };
+
+        let mut proof_payload = Bytes::new(&env);
+        proof_payload.append(&game.proof_of_game.clone().into());
+        for m in move_data.iter() {
+            proof_payload.append(&Bytes::from_slice(&env, &m.to_le_bytes()));
+        }
+        proof_payload.append(&Bytes::from_slice(
+            &env,
+            &chess_move.timestamp.to_le_bytes(),
+        ));
+        game.proof_of_game = env.crypto().sha256(&proof_payload).into();
+
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
         game.last_move_at = env.ledger().sequence() as u64;

@@ -191,8 +191,33 @@ class AsyncUciBridge:
             best_move = parse_bestmove_line(line)
             return best_move
 
-        best_move = await self._wait_for(matcher, timeout_seconds=self._search_timeout(time_limit_ms))
-        return best_move, info
+        # Retry the search with backoff if it times out
+        search_timeout = self._search_timeout(time_limit_ms)
+        for attempt in range(self.max_retries + 1):
+            try:
+                best_move = await self._wait_for_with_retry(
+                    matcher, 
+                    timeout_seconds=search_timeout,
+                    max_retries=0,  # We're handling retries at this level for search operations
+                    initial_backoff=self.initial_backoff
+                )
+                return best_move, info
+            except UciBridgeError as e:
+                if attempt < self.max_retries:
+                    backoff = self.initial_backoff * (2 ** attempt)
+                    logger.warning(
+                        f"Search timeout on attempt {attempt + 1}/{self.max_retries + 1}, "
+                        f"restarting search after {backoff:.1f}s backoff"
+                    )
+                    # Send stop to terminate any ongoing search before retrying
+                    with suppress(Exception):
+                        await self.stop()
+                    await asyncio.sleep(backoff)
+                    # Resend the go command to retry the search
+                    await self._send_command(" ".join(command))
+                else:
+                    logger.error(f"All {self.max_retries + 1} search attempts failed")
+                    raise
 
     async def stop(self) -> None:
         """Stop the current search if the engine is still running."""
@@ -318,7 +343,12 @@ class AsyncUciBridge:
         timeout_seconds: float | None = None,
     ) -> object:
         """Read stdout lines until the matcher returns a non-None value (delegates to retry version)."""
-        return await self._wait_for_with_retry(matcher, timeout_seconds=timeout_seconds)
+        return await self._wait_for_with_retry(
+            matcher, 
+            timeout_seconds=timeout_seconds,
+            max_retries=self.max_retries,
+            initial_backoff=self.initial_backoff
+        )
 
     def _search_timeout(self, time_limit_ms: int | None) -> float:
         """Derive a search timeout with slack beyond movetime."""

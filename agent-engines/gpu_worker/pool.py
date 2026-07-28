@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 
 from gpu_worker.anomaly import BotFarmAnomalyDetector
@@ -10,6 +11,8 @@ from gpu_worker.worker import GPUAnalysisWorker
 from gpu_worker.opening_book import OpeningBook
 from gpu_worker.maia_worker import MaiaWorker
 from gpu_worker.maia_config import MaiaConfig
+
+logger = logging.getLogger("KnightVerse.WorkerPool")
 
 
 class WorkerPool:

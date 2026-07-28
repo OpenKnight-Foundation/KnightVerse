@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { API_BASE, WS_BASE } from "@/lib/api";
 
 export type ChessSocketStatus =
   | "idle"
@@ -23,10 +24,6 @@ interface UseChessSocketReturn {
   reconnect: () => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
-
-// Exponential backoff configuration
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000; // 1 second
 const MAX_RECONNECT_DELAY = 30000; // 30 seconds

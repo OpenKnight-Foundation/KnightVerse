@@ -358,7 +358,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       style={{
         width: "100%",
         maxWidth: `${boardWidth}px`,
-        minWidth: "320px",
+        minWidth: "min(280px, 90vw)",
         aspectRatio: "1/1",
         display: "grid",
         gridTemplateColumns: `repeat(8, minmax(0, 1fr))`,

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { endpoints } from "@/lib/api";
 
 interface AuthUser {
   user_id: number;
@@ -43,8 +44,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -82,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken]);
 
   const login = useCallback(async (username: string, password: string): Promise<AuthResponse> => {
-    const response = await fetch(`${API_BASE}/v1/auth/login`, {
+    const response = await fetch(endpoints.auth.login(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(async (username: string, email: string, password: string): Promise<AuthResponse> => {
-    const response = await fetch(`${API_BASE}/v1/auth/register`, {
+    const response = await fetch(endpoints.auth.register(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -147,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/v1/auth/logout`, {
+      await fetch(endpoints.auth.logout(), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -166,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshToken = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/v1/auth/refresh`, {
+      const response = await fetch(endpoints.auth.refresh(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -190,7 +189,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken, logout]);
 
   const getSessions = useCallback(async (): Promise<SessionInfo[]> => {
-    const response = await fetch(`${API_BASE}/v1/auth/sessions`, {
+    const response = await fetch(endpoints.auth.sessions(), {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -204,7 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken]);
 
   const revokeSession = useCallback(async (sessionId: string) => {
-    const response = await fetch(`${API_BASE}/v1/auth/sessions/${sessionId}`, {
+    const response = await fetch(endpoints.auth.revokeSession(sessionId), {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -217,7 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken]);
 
   const revokeAllSessions = useCallback(async () => {
-    const response = await fetch(`${API_BASE}/v1/auth/sessions/revoke-all`, {
+    const response = await fetch(endpoints.auth.revokeAllSessions(), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,

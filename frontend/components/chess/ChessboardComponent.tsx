@@ -67,6 +67,21 @@ const parseFen = (fen: string): string[][] => {
   }
 };
 
+// Format piece code into a human-readable name for screen readers
+const formatPieceName = (piece: string): string => {
+  if (!piece) return "";
+  const color = piece[0] === "w" ? "white" : "black";
+  const names: Record<string, string> = {
+    K: "king",
+    Q: "queen",
+    R: "rook",
+    B: "bishop",
+    N: "knight",
+    P: "pawn",
+  };
+  return `${color} ${names[piece[1]] ?? piece[1]}`;
+};
+
 // ChessboardComponent with full memoization
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   position,
@@ -296,6 +311,47 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     e.preventDefault();
   }, []);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!selectedSquare) return;
+      const [row, col] = selectedSquare.split(",").map(Number);
+      let nextRow = row;
+      let nextCol = col;
+
+      switch (e.key) {
+        case "ArrowUp":
+          e.preventDefault();
+          nextRow = Math.max(0, row - 1);
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          nextRow = Math.min(7, row + 1);
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          nextCol = Math.max(0, col - 1);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          nextCol = Math.min(7, col + 1);
+          break;
+        case "Escape":
+          setSelectedSquare(null);
+          return;
+        default:
+          return;
+      }
+
+      const nextKey = `${nextRow},${nextCol}`;
+      setSelectedSquare(nextKey);
+      const nextCell = boardRef.current?.querySelector(
+        `[data-square="${nextKey}"]`,
+      ) as HTMLElement | null;
+      nextCell?.focus();
+    },
+    [selectedSquare],
+  );
+
   const getSquareFromTouch = useCallback((touch: React.Touch): [number, number] | null => {
     if (!boardRef.current) return null;
     const rect = boardRef.current.getBoundingClientRect();
@@ -352,9 +408,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       ref={boardRef}
       className="chessboard-container w-full mx-auto relative"
       role="grid"
-      aria-label="Chess Board"
+      aria-label={`Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
+      aria-roledescription="chessboard"
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onKeyDown={handleKeyDown}
       style={{
         width: "100%",
         maxWidth: `${boardWidth}px`,
@@ -375,6 +433,17 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       }}
       aria-live="polite"
     >
+      {/* Screen reader live region for move announcements */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {selectedSquare && (() => {
+          const [r, c] = selectedSquare.split(",").map(Number);
+          const actualR = orientation === "black" ? 7 - r : r;
+          const actualC = orientation === "black" ? 7 - c : c;
+          const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
+          const piece = displayRows[r][c];
+          return `Selected ${piece} on ${sq}`;
+        })()}
+      </div>
       {displayRows.map((row, rowIndex) =>
         row.map((piece, colIndex) => {
           const isLight = (rowIndex + colIndex) % 2 === 1;
@@ -390,11 +459,14 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           return (
             <div
               key={`${rowIndex}-${colIndex}`}
+              data-square={`${rowIndex}-${colIndex}`}
               role="gridcell"
-              aria-label={`${squareLabel}${piece ? " with " + piece : ""}`}
+              aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}`}
+              aria-selected={isSelected}
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
                   handleSquareClick(rowIndex, colIndex);
                 }
               }}

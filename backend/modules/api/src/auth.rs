@@ -7,6 +7,7 @@ use dto::auth::{RegisterRequest, LoginRequest, AuthResponse, ErrorResponse, Refr
 use security::{JwtService, TokenService, TokenServiceError};
 use sea_orm::{DatabaseConnection, EntityTrait, ColumnTrait, QueryFilter};
 use db_entity::player;
+use service::helper::password;
 
 /// Register a new user
 #[utoipa::path(
@@ -72,22 +73,31 @@ pub async fn login(
 
     let username = payload.username.clone();
 
-    // Look up the player UUID from the player table
-    let player_id = match player::Entity::find()
+    // Look up the player and verify password
+    let player = match player::Entity::find()
         .filter(player::Column::Username.eq(&username))
         .one(db.get_ref())
         .await
     {
-        Ok(Some(p)) => p.id,
+        Ok(Some(p)) => p,
         _ => {
-            // No player record found — not strictly an auth failure;
-            // generate a namespaced UUID so downstream calls still work.
-            Uuid::new_v4()
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid username or password".to_string(),
+                code: "INVALID_CREDENTIALS".to_string(),
+            });
         }
     };
 
-    // For MVP: mock user with ID 1
-    let user_id = 1;
+    let stored_hash = String::from_utf8_lossy(&player.password_hash);
+    if password::verify_password(&payload.password, &stored_hash).is_err() {
+        return HttpResponse::Unauthorized().json(ErrorResponse {
+            message: "Invalid username or password".to_string(),
+            code: "INVALID_CREDENTIALS".to_string(),
+        });
+    }
+
+    let player_id = player.id;
+    let user_id = (player_id.as_u128() & 0x7F_FF_FF_FF) as i32;
 
     // Generate access token
     let access_token = match jwt_service.generate_token(user_id, &username, player_id) {

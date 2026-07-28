@@ -128,6 +128,7 @@ import {
 } from "stellar-sdk";
 import { Transaction } from "stellar-sdk";
 
+
 const HORIZON_URL =
   process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const SOROBAN_RPC =
@@ -135,6 +136,9 @@ const SOROBAN_RPC =
   "https://soroban-testnet.stellar.org:443";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
+
+import { HORIZON_URL, SOROBAN_RPC, NETWORK_PASSPHRASE } from "@/lib/api";
+
 
 type AppContextType = {
   address?: string;

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+
 import type { ChessVariant } from "@/lib/chessVariants";
+
+import { API_BASE, WS_BASE, endpoints } from "@/lib/api";
+
 
 export type MatchmakingStatus =
   | "idle"
@@ -27,9 +31,6 @@ interface UseMatchmakingReturn {
   sendMove: (from: string, to: string, promotion?: string) => void;
   lastOpponentMove: { from: string; to: string; promotion?: string } | null;
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 export function useMatchmaking(): UseMatchmakingReturn {
   const [status, setStatus] = useState<MatchmakingStatus>("idle");
@@ -71,7 +72,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
 
   const openGameSocket = useCallback(
     (gId: string) => {
-      const ws = new WebSocket(`${WS_BASE}/v1/games/${gId}/ws`);
+      const ws = new WebSocket(endpoints.games.ws(gId));
       gameWsRef.current = ws;
 
       ws.onopen = () => setStatusSynced("connected");
@@ -115,7 +116,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
       try {
         // wallet_address and elo are resolved server-side from the authenticated session.
         // The server reads the JWT cookie (credentials: "include") to identify the player.
-        const res = await fetch(`${API_BASE}/v1/matchmaking/join`, {
+        const res = await fetch(endpoints.matchmaking.join(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -131,9 +132,12 @@ export function useMatchmaking(): UseMatchmakingReturn {
         const sessionId = json.request_id || json.sessionId;
         sessionIdRef.current = sessionId;
 
-        // Open WebSocket to listen for match_found event
         const ws = new WebSocket(
+
           `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`,
+
+          endpoints.matchmaking.ws(sessionId)
+
         );
         matchmakingWsRef.current = ws;
 
@@ -180,8 +184,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
   const cancelMatchmaking = useCallback(() => {
     cleanup();
     if (sessionIdRef.current) {
-      // Best-effort cancel; use the correct /cancel endpoint with request_id
-      fetch(`${API_BASE}/v1/matchmaking/cancel`, {
+      fetch(endpoints.matchmaking.cancel(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: sessionIdRef.current }),

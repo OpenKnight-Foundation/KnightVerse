@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { WS_BASE, endpoints } from "@/lib/api";
 
 export type EnhancedSocketStatus =
   | "idle"
@@ -59,9 +60,6 @@ interface UseEnhancedChessSocketReturn {
   reconnect: () => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
-
 // Exponential backoff configuration
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000; // 1 second
@@ -112,8 +110,7 @@ export function useEnhancedChessSocket(
     if (!gameId) return null;
 
     try {
-      // Build WebSocket URL with reconnection token if available
-      let wsUrl = `${WS_BASE}/v1/ws/game/${gameId}`;
+      let wsUrl = endpoints.enhancedGame.ws(gameId);
       const params = new URLSearchParams();
 
       if (reconnectTokenRef.current && attemptReconnect) {

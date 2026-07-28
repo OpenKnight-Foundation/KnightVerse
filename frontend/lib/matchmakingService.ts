@@ -5,6 +5,8 @@
  * Handles joining/leaving the queue, polling for a match, and private invites.
  */
 
+import { API_BASE } from "@/lib/api";
+
 export type MatchType = "Rated" | "Casual" | "Private";
 
 export interface MatchRequest {
@@ -28,14 +30,11 @@ export interface QueueStatus {
   matchType: MatchType;
 }
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
-
 /** Join the matchmaking queue. Returns a requestId to poll with. */
 export async function joinQueue(
   request: MatchRequest,
 ): Promise<MatchmakingResponse> {
-  const res = await fetch(`${BASE_URL}/matchmaking/join`, {
+  const res = await fetch(`${API_BASE}/matchmaking/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -62,7 +61,7 @@ export async function getQueueStatus(
   requestId: string,
 ): Promise<QueueStatus | null> {
   const res = await fetch(
-    `${BASE_URL}/matchmaking/status/${encodeURIComponent(requestId)}`,
+    `${API_BASE}/matchmaking/status/${encodeURIComponent(requestId)}`,
   );
 
   if (res.status === 404) return null;
@@ -77,7 +76,7 @@ export async function getQueueStatus(
 /** Leave the matchmaking queue. */
 export async function leaveQueue(requestId: string): Promise<void> {
   const res = await fetch(
-    `${BASE_URL}/matchmaking/leave/${encodeURIComponent(requestId)}`,
+    `${API_BASE}/matchmaking/leave/${encodeURIComponent(requestId)}`,
     { method: "DELETE" },
   );
 
@@ -92,7 +91,7 @@ export async function acceptPrivateInvite(
   walletAddress: string,
   elo: number,
 ): Promise<MatchmakingResponse | null> {
-  const res = await fetch(`${BASE_URL}/matchmaking/accept-invite`, {
+  const res = await fetch(`${API_BASE}/matchmaking/accept-invite`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

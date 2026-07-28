@@ -6,6 +6,7 @@ import {
   createMockSpectatorGameState,
   getMockLiveGameById,
 } from "@/constants/mockLiveGames";
+import { WS_BASE, endpoints } from "@/lib/api";
 
 export type SpectatorStatus =
   | "idle"
@@ -42,8 +43,6 @@ interface UseSpectatorSocketReturn {
   reconnect: () => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
@@ -129,7 +128,7 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
       }
 
       try {
-        const ws = new WebSocket(`${WS_BASE}/v1/games/${gameId}/spectate`);
+        const ws = new WebSocket(endpoints.games.spectate(gameId));
         wsRef.current = ws;
         usingMockDataRef.current = false;
         setStatus(attemptReconnect ? "reconnecting" : "connecting");

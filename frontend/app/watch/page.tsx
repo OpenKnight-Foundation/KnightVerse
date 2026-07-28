@@ -9,8 +9,8 @@ import {
   type LiveGameSummary,
 } from "@/constants/mockLiveGames";
 import { cn } from "@/lib/utils";
+import { endpoints } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const FILTERS: Array<{ label: string; value: "all" | LiveGameMode }> = [
   { label: "All", value: "all" },
   { label: "Rated", value: "rated" },
@@ -64,7 +64,7 @@ export default function WatchPage() {
 
     const fetchLiveGames = async () => {
       try {
-        const response = await fetch(`${API_BASE}/v1/games/live`, {
+        const response = await fetch(endpoints.games.live(), {
           credentials: "include",
         });
 

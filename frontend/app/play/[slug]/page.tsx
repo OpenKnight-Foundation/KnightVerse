@@ -12,6 +12,7 @@ import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -283,7 +284,7 @@ export default function PlayOnlinePage() {
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           {/* Chessboard Section */}
-          <div className="w-full max-w-[600px]" role="region" aria-label="Chess board">
+          <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0" role="region" aria-label="Chess board">
             {/* Opponent info bar */}
             <div className="flex items-center justify-between mb-3 px-1" role="status" aria-label="Opponent info">
               <div className="flex items-center gap-3">
@@ -307,11 +308,13 @@ export default function PlayOnlinePage() {
 
             {/* Board */}
             <div className="w-full min-w-[320px]">
-              <ChessboardComponent
-                position={position}
-                onDrop={handleMove}
-                orientation={boardOrientation}
-              />
+              <ErrorBoundary componentName="Chessboard">
+                <ChessboardComponent
+                  position={position}
+                  onDrop={handleMove}
+                  orientation={boardOrientation}
+                />
+              </ErrorBoundary>
             </div>
 
             {/* Player info bar */}

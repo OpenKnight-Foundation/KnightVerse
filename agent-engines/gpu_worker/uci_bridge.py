@@ -195,12 +195,20 @@ class AsyncUciBridge:
         await self._send_command("stop")
 
     async def quit(self) -> None:
-        """Gracefully terminate the engine process."""
+        """Gracefully terminate the engine process, first stopping any ongoing search."""
 
         if self._process is None:
             return
         process = self._process
         self._process = None
+        
+        # First send stop to terminate any ongoing search
+        with suppress(UciBridgeError):
+            await self._send_command("stop", process=process)
+            # Wait a short time for the engine to stop the current search
+            await asyncio.sleep(0.5)
+        
+        # Then send quit to properly terminate the process
         with suppress(UciBridgeError):
             await self._send_command("quit", process=process)
         try:

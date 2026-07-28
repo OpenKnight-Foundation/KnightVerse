@@ -183,6 +183,70 @@ fn test_payout_tournament_invalid_percentage() {
     assert!(res.is_err());
 }
 
+/// Wrapping u32 percentages that would sum to 100 via overflow must be rejected.
+/// Without checked arithmetic, `u32::MAX - 50 + 151` wraps to 100 and could pass
+/// a naive `total == 100` check.
+#[test]
+fn test_payout_tournament_percentage_overflow_rejected() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, GameContract);
+    let client = GameContractClient::new(&env, &contract_id);
+
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let wager: i128 = 1000;
+
+    let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
+
+    let winner1 = Address::generate(&env);
+    let winner2 = Address::generate(&env);
+
+    let mut winners = Vec::new(&env);
+    winners.push_back(winner1);
+    winners.push_back(winner2);
+
+    let mut percentages = Vec::new(&env);
+    percentages.push_back(u32::MAX - 50);
+    percentages.push_back(151);
+
+    let res = client
+        .mock_all_auths()
+        .try_payout_tournament(&game_id, &winners, &percentages);
+
+    assert!(res.is_err());
+}
+
+/// Same wrapping attack against the gas-optimized payout path.
+#[test]
+fn test_payout_tournament_optimized_percentage_overflow_rejected() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, GameContract);
+    let client = GameContractClient::new(&env, &contract_id);
+
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let wager: i128 = 1000;
+
+    let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
+
+    let winner1 = Address::generate(&env);
+    let winner2 = Address::generate(&env);
+
+    let mut winners = Vec::new(&env);
+    winners.push_back(winner1);
+    winners.push_back(winner2);
+
+    let mut percentages = Vec::new(&env);
+    percentages.push_back(u32::MAX - 50);
+    percentages.push_back(151);
+
+    let res = client
+        .mock_all_auths()
+        .try_payout_tournament_optimized(&game_id, &winners, &percentages);
+
+    assert!(res.is_err());
+}
+
 #[test]
 fn test_create_game_exceeds_max_stake() {
     let env = Env::default();

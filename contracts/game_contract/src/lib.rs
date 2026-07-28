@@ -281,7 +281,9 @@ impl GameContract {
 
         for i in 0..winners.len() {
             let pct = percentages.get(i).unwrap();
-            total_pct += pct;
+            total_pct = total_pct
+                .checked_add(pct)
+                .ok_or(ContractError::InvalidPercentage)?;
             if total_pct > 100 {
                 return Err(ContractError::InvalidPercentage);
             }
@@ -751,7 +753,9 @@ impl GameContract {
         for i in 0..winners.len() {
             let winner = winners.get(i).unwrap();
             let percentage = percentages.get(i).unwrap();
-            total_percentage += percentage;
+            total_percentage = total_percentage
+                .checked_add(percentage)
+                .ok_or(ContractError::InvalidPercentage)?;
             let payout_amount = (total_pool * percentage as i128) / 100;
             distributed += payout_amount;
             let winner_escrow = escrow.get(winner.clone()).unwrap_or(0);
@@ -2013,7 +2017,9 @@ pub fn release_tournament_escrow(
 
         let mut total_pct: u32 = 0;
         for i in 0..percentages.len() {
-            total_pct += percentages.get(i).unwrap();
+            total_pct = total_pct
+                .checked_add(percentages.get(i).unwrap())
+                .ok_or(ContractError::InvalidPercentage)?;
             if total_pct > 100 {
                 return Err(ContractError::InvalidPercentage);
             }

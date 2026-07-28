@@ -4,7 +4,7 @@ Thank you for your interest in contributing to KnightVerse! We are building the 
 
 ## How to Contribute
 
-1.  **Find an Issue**: Browse our [GitHub Issues](https://github.com/your-username/KnightVerse/issues).
+1.  **Find an Issue**: Browse our [GitHub Issues](https://github.com/OpenKnight-Foundation/KnightVerse/issues).
 2.  **Claim it**: Comment on the issue you'd like to work on.
 3.  **Fork & Branch**: Fork the repository and create a feature branch (`git checkout -b feature/issue-name`).
 4.  **Develop**: Follow our coding standards (Rust for contracts/backend, TypeScript for frontend).

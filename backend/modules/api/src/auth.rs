@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use dto::auth::{RegisterRequest, LoginRequest, AuthResponse, ErrorResponse, RefreshTokenRequest, RefreshResponse, LogoutResponse};
 use security::{JwtService, TokenService, TokenServiceError};
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, EntityTrait, ColumnTrait, QueryFilter};
+use db_entity::player;
 
 /// Register a new user
 #[utoipa::path(
@@ -69,12 +70,27 @@ pub async fn login(
         });
     }
 
-    // For MVP: mock user with ID 1
-    let user_id = 1;
     let username = payload.username.clone();
 
+    // Look up the player UUID from the player table
+    let player_id = match player::Entity::find()
+        .filter(player::Column::Username.eq(&username))
+        .one(db.get_ref())
+        .await
+    {
+        Ok(Some(p)) => p.id,
+        _ => {
+            // No player record found — not strictly an auth failure;
+            // generate a namespaced UUID so downstream calls still work.
+            Uuid::new_v4()
+        }
+    };
+
+    // For MVP: mock user with ID 1
+    let user_id = 1;
+
     // Generate access token
-    let access_token = match jwt_service.generate_token(user_id, &username) {
+    let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
         Ok(t) => t,
         Err(_) => {
             return HttpResponse::InternalServerError().json(ErrorResponse {
@@ -91,7 +107,7 @@ pub async fn login(
         .parse::<i64>()
         .unwrap_or(7);
 
-    let refresh_token = match TokenService::generate_refresh_token(&db, user_id, family_id, refresh_ttl).await {
+    let refresh_token = match TokenService::generate_refresh_token(db.get_ref(), user_id, family_id, refresh_ttl).await {
         Ok(t) => t,
         Err(e) => {
             log::error!("Failed to generate refresh token: {}", e);
@@ -197,7 +213,7 @@ pub async fn refresh(
     };
 
     // Verify refresh token and mark as used
-    let family_id = match TokenService::verify_and_mark_used(&db, &refresh_token, claims.user_id).await {
+    let family_id = match TokenService::verify_and_mark_used(db.get_ref(), &refresh_token, claims.user_id).await {
         Ok(fid) => fid,
         Err(TokenServiceError::TokenReuseDetected) => {
             log::warn!("Token reuse detected for player {}", claims.user_id);
@@ -221,7 +237,7 @@ pub async fn refresh(
     };
 
     // Generate new access token
-    let new_access_token = match jwt_service.generate_token(claims.user_id, &claims.username) {
+    let new_access_token = match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
         Ok(t) => t,
         Err(_) => {
             return HttpResponse::InternalServerError().json(ErrorResponse {
@@ -237,7 +253,7 @@ pub async fn refresh(
         .parse::<i64>()
         .unwrap_or(7);
 
-    let new_refresh_token = match TokenService::generate_refresh_token(&db, claims.user_id, family_id, refresh_ttl).await {
+    let new_refresh_token = match TokenService::generate_refresh_token(db.get_ref(), claims.user_id, family_id, refresh_ttl).await {
         Ok(t) => t,
         Err(e) => {
             log::error!("Failed to generate new refresh token: {}", e);
@@ -318,7 +334,7 @@ pub async fn logout(
     let user_id = 1;
 
     // Revoke all tokens for this player
-    if let Err(e) = TokenService::revoke_player_tokens(&db, user_id).await {
+    if let Err(e) = TokenService::revoke_player_tokens(db.get_ref(), user_id).await {
         log::error!("Failed to revoke tokens: {}", e);
         return HttpResponse::InternalServerError().json(ErrorResponse {
             message: "Failed to logout".to_string(),

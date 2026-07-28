@@ -93,7 +93,7 @@ impl RatingService {
         let game_model = game::Entity::find_by_id(game_id)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch game: {}", e))))?
+            .map_err(|e| ApiError::DatabaseError(sea_orm::DbErr::Custom(format!("Failed to fetch game: {}", e))))?
             .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
 
         // 2. Check if game is completed

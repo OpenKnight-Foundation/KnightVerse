@@ -922,6 +922,7 @@ dependencies = [
  "matchmaking",
  "regex",
  "sea-orm",
+ "serde",
  "shakmaty 0.27.3",
  "thiserror 1.0.69",
  "uuid",

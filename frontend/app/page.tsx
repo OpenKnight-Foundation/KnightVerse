@@ -40,6 +40,7 @@ import { WalletConnectModal } from "@/components/WalletConnectModal";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { endpoints } from "@/lib/api";
 
 export default function Home() {
@@ -440,11 +441,13 @@ export default function Home() {
             <div className="w-full min-w-[320px] flex flex-row items-stretch justify-center gap-2 md:gap-4">
               <EvaluationBar evaluation={botAnalysis?.evaluation ?? null} />
               <div className="w-full">
-                <ChessboardComponent
-                  position={currentDisplayPosition}
-                  onDrop={handleMove}
-                  aria-label="Chess board. You play as White. Click or drag pieces to move."
-                />
+                <ErrorBoundary componentName="Chessboard">
+                  <ChessboardComponent
+                    position={currentDisplayPosition}
+                    onDrop={handleMove}
+                    aria-label="Chess board. You play as White. Click or drag pieces to move."
+                  />
+                </ErrorBoundary>
               </div>
             </div>
 

@@ -16,12 +16,30 @@ import StatCard from "@/components/dashboard/StatCard";
 import { EXTENDED_MOCK_ELO_DATA } from "@/constants/mockEloData";
 import { useEloStats, type TimeRange } from "@/hook/useEloStats";
 import { cn } from "@/lib/utils";
+import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 
 const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
   ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-gray-700/30 bg-gray-800/40 p-6 shadow-lg shadow-black/10">
+      <LoadingSkeleton className="h-5 w-48 mb-4" />
+      <LoadingSkeleton className="h-[390px] w-full" />
+    </div>
+  ),
 });
 const PerformanceBreakdown = dynamic(() => import("@/components/dashboard/PerformanceBreakdown"), {
   ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-gray-700/30 bg-gray-800/40 p-6 shadow-lg shadow-black/10 space-y-4">
+      <LoadingSkeleton className="h-5 w-40" />
+      <div className="grid grid-cols-2 gap-4">
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+      </div>
+    </div>
+  ),
 });
 
 const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [

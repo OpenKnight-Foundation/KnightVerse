@@ -3,7 +3,8 @@ extern crate std;
 
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
-use rand::rngs::OsRng;
+use rand::rngs::{OsRng, StdRng};
+use rand::{Rng, SeedableRng};
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{Address, Bytes, BytesN, Env, Map, Vec, testutils::Address as _};
 
@@ -240,9 +241,10 @@ fn test_payout_tournament_optimized_percentage_overflow_rejected() {
     percentages.push_back(u32::MAX - 50);
     percentages.push_back(151);
 
-    let res = client
-        .mock_all_auths()
-        .try_payout_tournament_optimized(&game_id, &winners, &percentages);
+    let res =
+        client
+            .mock_all_auths()
+            .try_payout_tournament_optimized(&game_id, &winners, &percentages);
 
     assert!(res.is_err());
 }
@@ -445,10 +447,7 @@ fn init_contract(env: &Env, contract_id: &Address) -> (Address, Address) {
 
 /// Helper: initialise the contract with a real ed25519 signing key.
 /// Returns (admin, treasury, signing_key).
-fn init_contract_with_key(
-    env: &Env,
-    contract_id: &Address,
-) -> (Address, Address, SigningKey) {
+fn init_contract_with_key(env: &Env, contract_id: &Address) -> (Address, Address, SigningKey) {
     let client = GameContractClient::new(env, contract_id);
     let admin = Address::generate(env);
     let treasury = Address::generate(env);
@@ -828,4 +827,425 @@ fn test_submit_move_player1_cannot_move_twice() {
     client.submit_move(&game_id, &player1, &Vec::from_array(&env, [1u32]));
     let res = client.try_submit_move(&game_id, &player1, &Vec::from_array(&env, [2u32]));
     assert_eq!(res, Err(Ok(ContractError::NotYourTurn)));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Fuzz Tests — Randomized Payout Invariant Verification
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests use a seeded PRNG (StdRng) to generate randomized inputs
+// across many iterations, verifying that payout invariants hold for
+// arbitrary wager amounts and winner distributions.
+
+const FUZZ_SEED: u64 = 0xDEAD_BEEF_CAFE_BABE;
+const FUZZ_ITERATIONS: usize = 200;
+
+/// Generate n random percentages that sum to exactly 100.
+/// Uses std Vec to avoid Soroban sdk::Vec type conflicts.
+fn gen_pcts(rng: &mut impl Rng, n: usize) -> std::vec::Vec<u32> {
+    assert!(n > 0);
+    let mut remaining = 100u32;
+    let mut pcts = std::vec::Vec::with_capacity(n);
+    for _ in 0..n - 1 {
+        let p = rng.gen_range(0..=remaining);
+        pcts.push(p);
+        remaining -= p;
+    }
+    pcts.push(remaining);
+    pcts
+}
+
+/// Convert Rust pct slice to Soroban Vec for contract calls.
+fn to_soroban(env: &Env, pcts: &[u32]) -> Vec<u32> {
+    let mut v = Vec::new(env);
+    for &p in pcts {
+        v.push_back(p);
+    }
+    v
+}
+
+/// Compute expected dust: total_pool - sum(floor(total_pool * pct / 100)).
+fn dust(total_pool: i128, pcts: &Vec<u32>) -> i128 {
+    let mut d: i128 = 0;
+    for i in 0..pcts.len() {
+        d += (total_pool * pcts.get(i as u32).unwrap() as i128) / 100;
+    }
+    total_pool - d
+}
+
+// ── Fuzz: Total pool conservation ───────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_total_invariant() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED);
+    for iter in 0..FUZZ_ITERATIONS {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(1i128..=1_000_000);
+        let pool = wager * 2;
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let n = rng.gen_range(1usize..=10);
+        let rpcts = gen_pcts(&mut rng, n);
+        let mut winners = Vec::new(&env);
+        for _ in 0..n {
+            winners.push_back(Address::generate(&env));
+        }
+        let spcts = to_soroban(&env, &rpcts);
+        cli.mock_all_auths()
+            .payout_tournament(&gid, &winners, &spcts);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
+                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
+            });
+            assert_eq!(sum, pool, "[iter {iter}] sum={sum} != pool={pool}");
+        });
+    }
+}
+
+// ── Fuzz: Dust invariant + individual payout correctness ────────────────────
+
+#[test]
+fn fuzz_payout_dust_invariant() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(1));
+    for iter in 0..FUZZ_ITERATIONS {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(1i128..=10_000);
+        let pool = wager * 2;
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let n = rng.gen_range(1usize..=10);
+        let rpcts = gen_pcts(&mut rng, n);
+        let mut winners = Vec::new(&env);
+        for _ in 0..n {
+            winners.push_back(Address::generate(&env));
+        }
+        let spcts = to_soroban(&env, &rpcts);
+        let d = dust(pool, &spcts);
+        cli.mock_all_auths()
+            .payout_tournament(&gid, &winners, &spcts);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            assert!(d < n as i128, "[iter {iter}] dust={d} >= n={n}");
+            // First winner gets their share + dust
+            let w0 = esc.get(winners.get(0).unwrap()).unwrap_or(0);
+            let ex0 = (pool * spcts.get(0).unwrap() as i128) / 100 + d;
+            assert_eq!(w0, ex0, "[iter {iter}] first winner mismatch");
+            // Others get exact floor-divided share
+            for i in 1..n {
+                let actual = esc.get(winners.get(i as u32).unwrap()).unwrap_or(0);
+                let expected = (pool * spcts.get(i as u32).unwrap() as i128) / 100;
+                assert_eq!(actual, expected, "[iter {iter}] winner[{i}] mismatch");
+            }
+        });
+    }
+}
+
+// ── Fuzz: Invalid percentages always rejected ──────────────────────────────
+
+#[test]
+fn fuzz_payout_invalid_pct_rejected() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(2));
+    for iter in 0..FUZZ_ITERATIONS {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(1i128..=10_000);
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let n = rng.gen_range(1usize..=5);
+        let mut rpcts: std::vec::Vec<u32> = (0..n).map(|_| rng.gen_range(0u32..=30)).collect();
+        let s: u32 = rpcts.iter().sum();
+        if s == 100 {
+            rpcts[0] = rpcts[0].saturating_sub(1);
+        }
+        let mut winners = Vec::new(&env);
+        let mut spcts = Vec::new(&env);
+        for _ in 0..n {
+            winners.push_back(Address::generate(&env));
+        }
+        for &p in &rpcts {
+            spcts.push_back(p);
+        }
+        let res = cli
+            .mock_all_auths()
+            .try_payout_tournament(&gid, &winners, &spcts);
+        assert!(res.is_err(), "[iter {iter}] expected rejection (sum={s})");
+    }
+}
+
+// ── Fuzz: Overflow defense ──────────────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_overflow_defense() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(3));
+    // Known-dangerous overflow pairs
+    let pairs: [(u32, u32); 12] = [
+        (u32::MAX, 1),
+        (u32::MAX - 1, 2),
+        (u32::MAX - 50, 51),
+        (u32::MAX - 100, 101),
+        (u32::MAX - 50, 151),
+        (u32::MAX / 2, u32::MAX / 2 + 1),
+        (u32::MAX / 2 + 1, u32::MAX / 2),
+        (1_000_000_000, 3_294_967_296),
+        (2_000_000_000, 2_294_967_296),
+        (u32::MAX, u32::MAX),
+        (u32::MAX - 99, 100),
+        (u32::MAX / 3, u32::MAX / 3 + u32::MAX / 3),
+    ];
+    for (idx, (a, b)) in pairs.iter().enumerate() {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, rng.gen_range(100i128..=10_000));
+        let w = Vec::from_array(&env, [Address::generate(&env), Address::generate(&env)]);
+        let p = Vec::from_array(&env, [*a, *b]);
+        assert!(
+            cli.mock_all_auths()
+                .try_payout_tournament(&gid, &w, &p)
+                .is_err(),
+            "pair #{idx} should reject"
+        );
+        assert!(
+            cli.mock_all_auths()
+                .try_payout_tournament_optimized(&gid, &w, &p)
+                .is_err(),
+            "pair #{idx} opt should reject"
+        );
+    }
+    // Random overflow probes
+    for iter in 0..FUZZ_ITERATIONS / 4 {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, rng.gen_range(1i128..=10_000));
+        let k = rng.gen_range(2usize..=3);
+        let mut w = Vec::new(&env);
+        let mut p = Vec::new(&env);
+        for _ in 0..k {
+            w.push_back(Address::generate(&env));
+            p.push_back(rng.gen_range(u32::MAX / 3..=u32::MAX));
+        }
+        assert!(
+            cli.mock_all_auths()
+                .try_payout_tournament(&gid, &w, &p)
+                .is_err(),
+            "[iter {iter}] should reject overflow"
+        );
+        assert!(
+            cli.mock_all_auths()
+                .try_payout_tournament_optimized(&gid, &w, &p)
+                .is_err(),
+            "[iter {iter}] opt should reject overflow"
+        );
+    }
+}
+
+// ── Fuzz: Extreme wager values ──────────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_extreme_wagers() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(4));
+    let edges: [i128; 9] = [
+        1,
+        2,
+        3,
+        50,
+        99,
+        100,
+        1_000_000_000,
+        i64::MAX as i128,
+        i128::MAX / 1000,
+    ];
+    for (idx, &wager) in edges.iter().enumerate() {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let pool = wager * 2;
+        let n = rng.gen_range(1usize..=5);
+        let rpcts = gen_pcts(&mut rng, n);
+        let mut winners = Vec::new(&env);
+        for _ in 0..n {
+            winners.push_back(Address::generate(&env));
+        }
+        let spcts = to_soroban(&env, &rpcts);
+        cli.mock_all_auths()
+            .payout_tournament(&gid, &winners, &spcts);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
+                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
+            });
+            assert_eq!(sum, pool, "[edge {idx}: {wager}] sum={sum} pool={pool}");
+        });
+    }
+}
+
+// ── Fuzz: Many winners stress test ──────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_many_winners() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(5));
+    for &n in &[10usize, 25, 50, 100] {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(100i128..=1_000_000);
+        let pool = wager * 2;
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let rpcts = gen_pcts(&mut rng, n);
+        let mut winners = Vec::new(&env);
+        for _ in 0..n {
+            winners.push_back(Address::generate(&env));
+        }
+        let spcts = to_soroban(&env, &rpcts);
+        cli.mock_all_auths()
+            .payout_tournament(&gid, &winners, &spcts);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
+                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
+            });
+            assert_eq!(sum, pool, "[n={n}] sum={sum} != pool={pool}");
+            for i in 0..n {
+                let payout = esc.get(winners.get(i as u32).unwrap()).unwrap_or(0);
+                assert!(payout <= pool, "[n={n}] winner[{i}] {payout} > {pool}");
+            }
+        });
+    }
+}
+
+// ── Fuzz: Single winner gets everything ─────────────────────────────────────
+
+#[test]
+fn fuzz_payout_single_winner() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(6));
+    for iter in 0..FUZZ_ITERATIONS / 2 {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(1i128..=1_000_000);
+        let pool = wager * 2;
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let w = Vec::from_array(&env, [Address::generate(&env)]);
+        let p = Vec::from_array(&env, [100u32]);
+        cli.mock_all_auths().payout_tournament(&gid, &w, &p);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            assert_eq!(
+                esc.get(w.get(0).unwrap()).unwrap_or(0),
+                pool,
+                "[iter {iter}] single winner"
+            );
+        });
+    }
+}
+
+// ── Fuzz: Mismatched lengths rejected ───────────────────────────────────────
+
+#[test]
+fn fuzz_payout_mismatched_rejected() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(7));
+    for iter in 0..FUZZ_ITERATIONS / 2 {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, rng.gen_range(1i128..=10_000));
+        let nw = rng.gen_range(1usize..=5);
+        let np = if rng.gen_bool(0.5) {
+            nw + rng.gen_range(1usize..=3)
+        } else {
+            nw.saturating_sub(rng.gen_range(1..=nw.max(1)))
+        };
+        let mut w = Vec::new(&env);
+        let mut p = Vec::new(&env);
+        for _ in 0..nw {
+            w.push_back(Address::generate(&env));
+        }
+        for _ in 0..np {
+            p.push_back(rng.gen_range(0u32..=100));
+        }
+        assert!(
+            cli.mock_all_auths()
+                .try_payout_tournament(&gid, &w, &p)
+                .is_err(),
+            "[iter {iter}] mismatched ({nw} vs {np})"
+        );
+    }
+}
+
+// ── Fuzz: Zero winners rejected ─────────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_zero_winners() {
+    let env = Env::default();
+    let cid = env.register_contract(None, GameContract);
+    let cli = GameContractClient::new(&env, &cid);
+    let gid = seed_completed_game(
+        &env,
+        &cid,
+        &Address::generate(&env),
+        &Address::generate(&env),
+        1000,
+    );
+    let w = Vec::new(&env);
+    let p = Vec::new(&env);
+    assert!(
+        cli.mock_all_auths()
+            .try_payout_tournament(&gid, &w, &p)
+            .is_err()
+    );
+}
+
+// ── Fuzz: 50/50 even split ──────────────────────────────────────────────────
+
+#[test]
+fn fuzz_payout_even_split() {
+    let mut rng = StdRng::seed_from_u64(FUZZ_SEED.wrapping_add(8));
+    for iter in 0..FUZZ_ITERATIONS / 2 {
+        let env = Env::default();
+        let cid = env.register_contract(None, GameContract);
+        let cli = GameContractClient::new(&env, &cid);
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let wager = rng.gen_range(1i128..=1_000_000);
+        let pool = wager * 2;
+        let gid = seed_completed_game(&env, &cid, &p1, &p2, wager);
+        let w1 = Address::generate(&env);
+        let w2 = Address::generate(&env);
+        let w = Vec::from_array(&env, [w1.clone(), w2.clone()]);
+        let p = Vec::from_array(&env, [50u32, 50u32]);
+        cli.mock_all_auths().payout_tournament(&gid, &w, &p);
+        env.as_contract(&cid, || {
+            let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
+            let v1 = esc.get(w1).unwrap_or(0);
+            let v2 = esc.get(w2).unwrap_or(0);
+            let each = pool / 2;
+            let d = dust(pool, &p);
+            assert_eq!(v1, each + d, "[iter {iter}] 50/50 first");
+            assert_eq!(v2, each, "[iter {iter}] 50/50 second");
+            assert_eq!(v1 + v2, pool, "[iter {iter}] 50/50 total");
+        });
+    }
 }

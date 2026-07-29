@@ -1,3 +1,10 @@
+
+import prometheus_client
+from prometheus_client import Counter, Gauge
+
+# Prometheus Metrics for AI Worker Pool
+WORKER_COUNT = Gauge('ai_worker_pool_size', 'Number of active AI workers in the pool')
+JOBS_PROCESSED = Counter('ai_worker_jobs_processed_total', 'Total number of jobs processed by the AI worker pool')
 from __future__ import annotations
 
 import asyncio

@@ -151,6 +151,7 @@ pub async fn main() -> std::io::Result<()> {
             .unwrap();
 
         App::new()
+            .wrap(actix_web::middleware::DefaultHeaders::new().add(("Strict-Transport-Security", "max-age=31536000; includeSubDomains")))
             // Global middleware
             .wrap(cors)
             // App data

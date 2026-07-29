@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable
 
 from gpu_worker.anomaly import BotFarmAnomalyDetector
+from gpu_worker.anomaly_logger import log_anomaly_report
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo
 from gpu_worker.worker import GPUAnalysisWorker
@@ -64,7 +65,9 @@ class WorkerPool:
 
         if not self._started:
             raise RuntimeError("worker pool has not been started")
-        self.anomaly_detector.record_request(request)
+        anomaly_report = self.anomaly_detector.record_request(request)
+        if anomaly_report.findings:
+            log_anomaly_report(anomaly_report)
 
         # Check if the request is for a Maia personality.
         if request.actor_id and request.actor_id.startswith("maia-"):

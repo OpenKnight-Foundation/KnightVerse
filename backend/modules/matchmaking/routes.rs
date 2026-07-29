@@ -13,6 +13,8 @@ pub struct JoinQueueRequest {
     pub match_type: MatchType,
     pub invite_address: Option<String>,
     pub max_elo_diff: Option<u32>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +70,7 @@ async fn join_queue(
         match_type: req.match_type.clone(),
         invite_address: req.invite_address.clone(),
         max_elo_diff: req.max_elo_diff,
+        time_control: req.time_control.clone(),
     };
 
     match service.join_queue(match_request).await {

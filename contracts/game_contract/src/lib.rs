@@ -234,9 +234,9 @@ pub enum ContractError {
     /// Total prize pool would exceed the configured limit
     PrizePoolLimitExceeded = 36,
     /// claim_puzzle_rewards_batch called with an empty proof list
-    EmptyBatch = 36,
+    EmptyBatch = 37,
     /// claim_puzzle_rewards_batch called with more proofs than MAX_BATCH_SIZE
-    BatchTooLarge = 37,
+    BatchTooLarge = 38,
 }
 
 #[contract]

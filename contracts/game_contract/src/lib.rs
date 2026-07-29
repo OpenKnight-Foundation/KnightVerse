@@ -93,6 +93,7 @@ const TREASURY: Symbol = symbol_short!("TREASURY"); // i128 treasury reserve
 const BALANCES: Symbol = symbol_short!("BALANCES"); // Map<Address, i128>
 const USED_NONCE: Symbol = symbol_short!("NONCES"); // Map<u64, bool>
 const MAX_STAKE: Symbol = symbol_short!("MAXSTAKE");
+const MAX_PRIZE_POOL: Symbol = symbol_short!("MAXPOOL");
 
 // Fee / treasury  (#200)
 const FEE_BIPS: Symbol = symbol_short!("FEE_BIPS"); // u32  (0–1000, i.e. 0–10 %)
@@ -215,6 +216,8 @@ pub enum ContractError {
     EscrowStillLocked = 34,
     /// Tournament escrow already released (#532)
     EscrowAlreadyReleased = 35,
+    /// Total prize pool would exceed the configured limit
+    PrizePoolLimitExceeded = 36,
 }
 
 #[contract]
@@ -329,6 +332,18 @@ impl GameContract {
             return Err(ContractError::StakeLimitExceeded);
         }
 
+        let max_prize_pool: i128 = env
+            .storage()
+            .instance()
+            .get(&MAX_PRIZE_POOL)
+            .unwrap_or(2_000);
+        let expected_pool = wager_amount
+            .checked_mul(2)
+            .ok_or(ContractError::InvalidAmount)?;
+        if expected_pool > max_prize_pool {
+            return Err(ContractError::PrizePoolLimitExceeded);
+        }
+
         player1.require_auth();
 
         let token_client = Self::token_client(&env);
@@ -399,6 +414,19 @@ impl GameContract {
         let max_stake: i128 = env.storage().instance().get(&MAX_STAKE).unwrap_or(1_000);
         if game.wager_amount > max_stake {
             return Err(ContractError::StakeLimitExceeded);
+        }
+
+        let max_prize_pool: i128 = env
+            .storage()
+            .instance()
+            .get(&MAX_PRIZE_POOL)
+            .unwrap_or(2_000);
+        let total_pool = game
+            .wager_amount
+            .checked_mul(2)
+            .ok_or(ContractError::InvalidAmount)?;
+        if total_pool > max_prize_pool {
+            return Err(ContractError::PrizePoolLimitExceeded);
         }
 
         player2.require_auth();
@@ -938,6 +966,7 @@ impl GameContract {
             .instance()
             .set(&TREASURY_ADDR, &treasury_address);
         env.storage().instance().set(&MAX_STAKE, &1_000i128);
+        env.storage().instance().set(&MAX_PRIZE_POOL, &2_000i128);
     }
 
     pub fn set_max_stake(env: Env, admin: Address, new_limit: i128) {
@@ -954,6 +983,22 @@ impl GameContract {
             panic!("Max stake must be positive");
         }
         env.storage().instance().set(&MAX_STAKE, &new_limit);
+    }
+
+    pub fn set_max_prize_pool(env: Env, admin: Address, new_limit: i128) {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            panic!("Unauthorized admin address");
+        }
+        if new_limit <= 0 {
+            panic!("Max prize pool must be positive");
+        }
+        env.storage().instance().set(&MAX_PRIZE_POOL, &new_limit);
     }
 
     pub fn configure_fees(env: Env, admin: Address, fee_bips: u32, treasury_address: Address) {

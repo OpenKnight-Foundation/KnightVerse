@@ -95,6 +95,20 @@ def recognize_intent(user_input: str) -> IntentRecognition:
     Returns:
         IntentRecognition object with identified intent and confidence.
     """
+    # Check cache first for exact string match
+    cache_key = _get_cache_key(user_input)
+    _cleanup_expired_cache_entries()  # Clean up expired entries before checking cache
+    
+    # Return cached result if available and not expired
+    if cache_key in INTENT_CACHE:
+        cached = INTENT_CACHE[cache_key]
+        if time.time() - cached['timestamp'] < CACHE_TTL:
+            return IntentRecognition(
+                intent=cached['intent'],
+                confidence=cached['confidence'],
+                reasoning=cached['reasoning']
+            )
+    
     user_input_lower = user_input.lower()
     
     best_intent = IntentType.UNKNOWN
@@ -112,11 +126,21 @@ def recognize_intent(user_input: str) -> IntentRecognition:
                     best_intent = intent
                     best_reasoning = f"Matched pattern: {pattern} with confidence {confidence}"
     
-    return IntentRecognition(
+    # Cache the result
+    result = IntentRecognition(
         intent=best_intent,
         confidence=best_confidence,
         reasoning=best_reasoning,
     )
+    
+    INTENT_CACHE[cache_key] = {
+        'intent': best_intent,
+        'confidence': best_confidence,
+        'reasoning': best_reasoning,
+        'timestamp': time.time()
+    }
+    
+    return result
 
 
 def detect_complexity(user_input: str) -> ComplexityLevel:
@@ -128,20 +152,41 @@ def detect_complexity(user_input: str) -> ComplexityLevel:
     Returns:
         ComplexityLevel enum value.
     """
+    # Check cache first for exact string match
+    cache_key = _get_cache_key(user_input)
+    _cleanup_expired_cache_entries()  # Clean up expired entries before checking cache
+    
+    # Return cached result if available and not expired
+    if cache_key in INTENT_CACHE:
+        cached = INTENT_CACHE[cache_key]
+        if time.time() - cached['timestamp'] < CACHE_TTL and 'complexity' in cached:
+            return cached['complexity']
+    
     user_input_lower = user_input.lower()
     
     # Check for advanced keywords first
+    detected_complexity = ComplexityLevel.INTERMEDIATE  # Default
     for pattern in COMPLEXITY_KEYWORDS[ComplexityLevel.ADVANCED]:
         if re.search(pattern, user_input_lower):
-            return ComplexityLevel.ADVANCED
+            detected_complexity = ComplexityLevel.ADVANCED
+            break
+    else:
+        # Check for beginner keywords only if not already detected as advanced
+        for pattern in COMPLEXITY_KEYWORDS[ComplexityLevel.BEGINNER]:
+            if re.search(pattern, user_input_lower):
+                detected_complexity = ComplexityLevel.BEGINNER
+                break
     
-    # Check for beginner keywords
-    for pattern in COMPLEXITY_KEYWORDS[ComplexityLevel.BEGINNER]:
-        if re.search(pattern, user_input_lower):
-            return ComplexityLevel.BEGINNER
+    # Update cache with complexity if exists, or create new entry
+    if cache_key in INTENT_CACHE:
+        INTENT_CACHE[cache_key]['complexity'] = detected_complexity
+    else:
+        INTENT_CACHE[cache_key] = {
+            'complexity': detected_complexity,
+            'timestamp': time.time()
+        }
     
-    # Default to intermediate
-    return ComplexityLevel.INTERMEDIATE
+    return detected_complexity
 
 
 def extract_fen_from_input(user_input: str) -> Optional[str]:

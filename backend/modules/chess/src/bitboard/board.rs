@@ -432,22 +432,122 @@ impl Board {
     }
 
 
-    // ISSUE #1: Implement the `attackers` function.
-    pub fn attackers() -> Bitboard {
-        //Write your code here
-        Bitboard::EMPTY // Temporary placeholder
+    /// Returns a bitboard of all pieces of `attacker_color` that attack `square`.
+    pub fn attackers(&self, square: Square, attacker_color: Color) -> Bitboard {
+        let occupied = self.occupied;
+        let us = self.by_color.get(attacker_color);
+
+        let pawn_attacks = Self::pawn_attacks_to(square, attacker_color) & us;
+        let knight_attacks = Self::knight_attacks(square) & self.knights() & us;
+        let king_attacks = Self::king_attacks(square) & self.kings() & us;
+        let bishop_queen = Self::bishop_attacks(square, occupied)
+            & (self.bishops() | self.queens()) & us;
+        let rook_queen =
+            Self::rook_attacks(square, occupied) & (self.rooks() | self.queens()) & us;
+
+        pawn_attacks | knight_attacks | king_attacks | bishop_queen | rook_queen
     }
 
-    /// Returns true if there is any attack on the square.
-    pub fn attacks() -> bool {
-         //Write your code here
-         false // Temporary placeholder
+    /// Returns true if any piece of `attacker_color` attacks `square`.
+    pub fn attacks(&self, square: Square, attacker_color: Color) -> bool {
+        self.attackers(square, attacker_color).0 != 0
     }
 
-    // ISSUE #2: Implement the `slider_blockers` function.
-    pub fn slider_blockers(&self, _our_king: Square, _us: Color) -> Bitboard {
-        //Write your code here
-        Bitboard::EMPTY // Temporary placeholder
+    /// Returns a bitboard of pinned (blocking) pieces that cannot move
+    /// without exposing the king to a slider attacker.
+    pub fn slider_blockers(&self, our_king: Square, us: Color) -> Bitboard {
+        Self::find_slider_blockers(self, our_king, us)
+    }
+
+    // ── Attack-pattern helpers ───────────────────────────────────────────────
+
+    /// Squares a pawn of `color` would attack from if it stood on `square`
+    /// (i.e. the squares from which a pawn of `color` could capture `square`).
+    fn pawn_attacks_to(square: Square, color: Color) -> Bitboard {
+        let sq = square.value;
+        match color {
+            Color::White => {
+                // White pawns attack downward (rank-1), so they capture from squares
+                // one rank above-left or above-right.
+                let left = if sq < 56 { (1 << (sq + 7)) & !0x0101010101010101 } else { 0 };
+                let right = if sq < 56 { (1 << (sq + 9)) & !0x8080808080808080 } else { 0 };
+                Bitboard(left | right)
+            }
+            Color::Black => {
+                // Black pawns attack upward (rank+1).
+                let left = if sq >= 8 { (1 << (sq - 9)) & !0x0101010101010101 } else { 0 };
+                let right = if sq >= 8 { (1 << (sq - 7)) & !0x8080808080808080 } else { 0 };
+                Bitboard(left | right)
+            }
+        }
+    }
+
+    /// All squares a knight on `square` can move to.
+    fn knight_attacks(square: Square) -> Bitboard {
+        let sq = square.value as i8;
+        let offsets: [i8; 8] = [-17, -15, -10, -6, 6, 10, 15, 17];
+        let mut bb = 0u64;
+        for &offset in &offsets {
+            let target = sq + offset;
+            if target >= 0 && target < 64 {
+                let file_diff = (sq % 8 - target % 8).abs();
+                let rank_diff = (sq / 8 - target / 8).abs();
+                if (file_diff == 1 && rank_diff == 2) || (file_diff == 2 && rank_diff == 1) {
+                    bb |= 1u64 << target;
+                }
+            }
+        }
+        Bitboard(bb)
+    }
+
+    /// All squares a king on `square` can move to.
+    fn king_attacks(square: Square) -> Bitboard {
+        let sq = square.value;
+        let not_a_file = 0xFEFEFEFEFEFEFEFEu64;
+        let not_h_file = 0x7F7F7F7F7F7F7F7Fu64;
+        let bit = 1u64 << sq;
+        let west = (bit >> 1) & not_h_file;
+        let east = (bit << 1) & not_a_file;
+        let north = bit << 8;
+        let south = bit >> 8;
+        let nw = (bit << 7) & not_h_file;
+        let ne = (bit << 9) & not_a_file;
+        let sw = (bit >> 9) & not_h_file;
+        let se = (bit >> 7) & not_a_file;
+        Bitboard(west | east | north | south | nw | ne | sw | se)
+    }
+
+    /// All squares a bishop on `square` attacks with `occupied` blockers.
+    fn bishop_attacks(square: Square, occupied: Bitboard) -> Bitboard {
+        Self::ray_attacks(square, occupied, &[(1, 1), (1, -1), (-1, 1), (-1, -1)])
+    }
+
+    /// All squares a rook on `square` attacks with `occupied` blockers.
+    fn rook_attacks(square: Square, occupied: Bitboard) -> Bitboard {
+        Self::ray_attacks(square, occupied, &[(1, 0), (-1, 0), (0, 1), (0, -1)])
+    }
+
+    /// Generic ray-cast attack generator.
+    fn ray_attacks(square: Square, occupied: Bitboard, directions: &[(i8, i8)]) -> Bitboard {
+        let sq = square.value;
+        let rank = sq / 8;
+        let file = sq % 8;
+        let mut bb = 0u64;
+
+        for &(df, dr) in directions {
+            let mut cf = file as i8 + df;
+            let mut cr = rank as i8 + dr;
+            while cf >= 0 && cf < 8 && cr >= 0 && cr < 8 {
+                let idx = (cr as u8) * 8 + (cf as u8);
+                bb |= 1u64 << idx;
+                if (occupied.0 & (1u64 << idx)) != 0 {
+                    break;
+                }
+                cf += df;
+                cr += dr;
+            }
+        }
+        Bitboard(bb)
     }
 
     /// Discards the piece on a given square.

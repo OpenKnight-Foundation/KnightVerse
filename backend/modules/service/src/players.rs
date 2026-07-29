@@ -1,7 +1,7 @@
 use crate::helper::password;
 use db::db::db::get_db;
-use dto::players::{NewPlayer, UpdatePlayer};
 use db_entity::player::{self, Model};
+use dto::players::{NewPlayer, UpdatePlayer};
 use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
@@ -67,7 +67,10 @@ pub async fn add_player(payload: NewPlayer) -> Result<player::Model, ApiError> {
             id: Uuid::new_v4(),
             username: payload.username,
             email: payload.email,
-            password_hash: password::hash_password(&payload.password).ok().map(|h| h.into_bytes()).unwrap_or_default(),
+            password_hash: password::hash_password(&payload.password)
+                .ok()
+                .map(|h| h.into_bytes())
+                .unwrap_or_default(),
             biography: String::new(),
             country: String::new(),
             flair: String::new(),

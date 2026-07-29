@@ -1,14 +1,14 @@
 use actix_web::{
+    body::{BoxBody, MessageBody},
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
     error::{Error, ErrorUnauthorized},
-    body::{BoxBody, MessageBody},
     HttpMessage,
 };
 use futures_util::future::{ok, LocalBoxFuture, Ready};
-use std::task::{Context, Poll};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -46,7 +46,7 @@ pub enum TokenType {
 #[derive(Clone, Debug)]
 pub struct JwtService {
     pub secret_key: String,
-    expiration_time: usize, // in seconds
+    expiration_time: usize,           // in seconds
     reconnect_expiration_time: usize, // in seconds (shorter for reconnect tokens)
 }
 
@@ -61,7 +61,12 @@ impl JwtService {
     }
 
     /// Generate a new JWT access token for a user
-    pub fn generate_token(&self, user_id: i32, username: &str, player_id: Uuid) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_token(
+        &self,
+        user_id: i32,
+        username: &str,
+        player_id: Uuid,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -88,7 +93,13 @@ impl JwtService {
     }
 
     /// Generate a reconnection token for seamless WebSocket reconnection
-    pub fn generate_reconnect_token(&self, user_id: i32, username: &str, player_id: Uuid, session_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_reconnect_token(
+        &self,
+        user_id: i32,
+        username: &str,
+        player_id: Uuid,
+        session_id: &str,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -219,28 +230,22 @@ where
                             // Store claims in request extensions
                             req.extensions_mut().insert(claims);
                             let fut = self.service.call(req);
-                            Box::pin(async move { 
+                            Box::pin(async move {
                                 let res = fut.await?;
                                 Ok(res.map_into_boxed_body())
                             })
                         }
                         Err(_) => {
-                            Box::pin(async move {
-                                Err(ErrorUnauthorized("Invalid or expired token"))
-                            })
+                            Box::pin(
+                                async move { Err(ErrorUnauthorized("Invalid or expired token")) },
+                            )
                         }
                     }
                 } else {
-                    Box::pin(async move {
-                        Err(ErrorUnauthorized("Invalid authorization format"))
-                    })
+                    Box::pin(async move { Err(ErrorUnauthorized("Invalid authorization format")) })
                 }
             }
-            None => {
-                Box::pin(async move {
-                    Err(ErrorUnauthorized("Missing authorization header"))
-                })
-            }
+            None => Box::pin(async move { Err(ErrorUnauthorized("Missing authorization header")) }),
         }
     }
 }

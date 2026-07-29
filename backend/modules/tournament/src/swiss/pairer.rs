@@ -10,16 +10,20 @@ impl SwissPairer {
         Self { config }
     }
 
-    pub fn pair_round(&self, tournament: &mut TournamentState) -> Result<Vec<PairingResult>, PairingError> {
+    pub fn pair_round(
+        &self,
+        tournament: &mut TournamentState,
+    ) -> Result<Vec<PairingResult>, PairingError> {
         // Clone players to avoid borrow issues
         let players: Vec<Player> = tournament.players.values().cloned().collect();
         let mut player_refs: Vec<&Player> = players.iter().collect();
         player_refs.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score)
+            b.score
+                .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(b.rating.cmp(&a.rating))
         });
-        
+
         // Handle odd number of players - assign bye to lowest ranked
         let pairings = if player_refs.len() % 2 == 1 {
             let bye_player_id = self.assign_bye(&mut player_refs, tournament)?;
@@ -42,14 +46,19 @@ impl SwissPairer {
         Ok(pairings)
     }
 
-    fn assign_bye(&self, players: &mut Vec<&Player>, tournament: &mut TournamentState) -> Result<Uuid, PairingError> {
+    fn assign_bye(
+        &self,
+        players: &mut Vec<&Player>,
+        tournament: &mut TournamentState,
+    ) -> Result<Uuid, PairingError> {
         // Find the lowest ranked player who hasn't had a bye yet
         let bye_candidate = players
             .iter()
             .enumerate()
             .filter(|(_, p): &(_, &&Player)| !p.has_had_bye())
             .min_by(|(_, a), (_, b)| {
-                a.score.partial_cmp(&b.score)
+                a.score
+                    .partial_cmp(&b.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then(a.rating.cmp(&b.rating))
             });
@@ -58,26 +67,30 @@ impl SwissPairer {
             Some((index, player)) => {
                 let player_id = player.id;
                 players.remove(index);
-                
+
                 // Award 1 point for bye
                 if let Some(p) = tournament.players.get_mut(&player_id) {
                     p.score += 1.0;
                 }
-                
+
                 Ok(player_id)
             }
             None => Err(PairingError::NoValidByeCandidate),
         }
     }
 
-    fn pair_even_players(&self, players: Vec<&Player>, tournament: &mut TournamentState) -> Result<Vec<PairingResult>, PairingError> {
+    fn pair_even_players(
+        &self,
+        players: Vec<&Player>,
+        tournament: &mut TournamentState,
+    ) -> Result<Vec<PairingResult>, PairingError> {
         let mut pairings = Vec::new();
         let _unpaired_players: Vec<Uuid> = players.iter().map(|p| p.id).collect();
         let mut used_players = std::collections::HashSet::new();
 
         // Dutch System: Process score groups
         let mut score_groups = self.create_score_groups(&players);
-        
+
         for group in score_groups.iter_mut() {
             if group.len() < 2 {
                 continue;
@@ -109,25 +122,20 @@ impl SwissPairer {
     fn create_score_groups<'a>(&self, players: &[&'a Player]) -> Vec<Vec<&'a Player>> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut groups: HashMap<u64, Vec<&'a Player>> = HashMap::new();
-        
+
         for player in players {
             let mut hasher = DefaultHasher::new();
             let score_bits = player.score.to_bits();
             score_bits.hash(&mut hasher);
             let key = hasher.finish();
-            
-            groups
-                .entry(key)
-                .or_insert_with(Vec::new)
-                .push(player);
+
+            groups.entry(key).or_default().push(player);
         }
 
-        let mut sorted_groups: Vec<Vec<&'a Player>> = groups
-            .into_values()
-            .collect();
-        
+        let mut sorted_groups: Vec<Vec<&'a Player>> = groups.into_values().collect();
+
         // Sort groups by score (highest first)
         sorted_groups.sort_by(|a, b| b[0].score.partial_cmp(&a[0].score).unwrap());
         sorted_groups
@@ -150,15 +158,16 @@ impl SwissPairer {
             // Find best opponent for player1
             for (i, &player2) in group_players.iter().enumerate().skip(1) {
                 if self.can_pair(player1, player2, tournament) {
-                    let pairing = self.create_pairing(player1, player2, tournament.current_round)?;
+                    let pairing =
+                        self.create_pairing(player1, player2, tournament.current_round)?;
                     pairings.push(PairingResult::Paired(pairing));
-                    
+
                     // Update float scores
                     self.update_float_scores(player1, player2, tournament, false);
-                    
+
                     used_players.insert(player1.id);
                     used_players.insert(player2.id);
-                    
+
                     group_players.remove(i);
                     group_players.remove(0);
                     found_pair = true;
@@ -185,7 +194,8 @@ impl SwissPairer {
 
         // Sort remaining players by score then rating
         players.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score)
+            b.score
+                .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(b.rating.cmp(&a.rating))
         });
@@ -202,7 +212,7 @@ impl SwissPairer {
             if self.can_pair(player1, player2, tournament) {
                 let pairing = self.create_pairing(player1, player2, tournament.current_round)?;
                 pairings.push(PairingResult::Paired(pairing));
-                
+
                 // Update float scores (these are floaters)
                 self.update_float_scores(player1, player2, tournament, true);
             } else {
@@ -220,9 +230,9 @@ impl SwissPairer {
         }
 
         // Color balance preference
-        let color_preference_ok = self.check_color_preference(player1, player2);
+        
 
-        color_preference_ok
+        self.check_color_preference(player1, player2)
     }
 
     fn check_color_preference(&self, player1: &Player, player2: &Player) -> bool {
@@ -241,7 +251,12 @@ impl SwissPairer {
         true
     }
 
-    fn create_pairing(&self, player1: &Player, player2: &Player, round: u32) -> Result<Pairing, PairingError> {
+    fn create_pairing(
+        &self,
+        player1: &Player,
+        player2: &Player,
+        round: u32,
+    ) -> Result<Pairing, PairingError> {
         let (white_player, black_player) = if player1.should_prefer_white() {
             (player1.id, player2.id)
         } else if player2.should_prefer_white() {
@@ -272,7 +287,7 @@ impl SwissPairer {
         if is_floater {
             // Update float scores for players paired across score groups
             let _score_diff = (player1.score - player2.score).abs();
-            
+
             if player1.score > player2.score {
                 if let Some(p) = tournament.players.get_mut(&player1.id) {
                     p.float_score += 1; // Floating down

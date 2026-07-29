@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use validator::Validate;
 
@@ -40,10 +39,10 @@ pub struct PlayerUpdated {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
-pub struct PlayerDeleted{
+pub struct PlayerDeleted {
     #[schema(example = "Player deleted")]
-    pub  message: String,
-    pub body: DeletedBody
+    pub message: String,
+    pub body: DeletedBody,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]

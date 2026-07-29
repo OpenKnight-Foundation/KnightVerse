@@ -1,7 +1,5 @@
-
 use std::collections::HashMap;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bitboard(pub u64);
@@ -121,7 +119,6 @@ pub struct Piece {
     //  Write a function that, given a square, an attacking color, and an occupied bitboard,
     //   returns a Bitboard representing all pieces of that color that can attack the square.
     // - Consider all piece attack patterns: rook, bishop, knight, king, and pawn.
-    
     pub color: Color,
     pub role: Role,
 }
@@ -431,123 +428,22 @@ impl Board {
         self.king_of(color).single_square()
     }
 
-
-    /// Returns a bitboard of all pieces of `attacker_color` that attack `square`.
-    pub fn attackers(&self, square: Square, attacker_color: Color) -> Bitboard {
-        let occupied = self.occupied;
-        let us = self.by_color.get(attacker_color);
-
-        let pawn_attacks = Self::pawn_attacks_to(square, attacker_color) & us;
-        let knight_attacks = Self::knight_attacks(square) & self.knights() & us;
-        let king_attacks = Self::king_attacks(square) & self.kings() & us;
-        let bishop_queen = Self::bishop_attacks(square, occupied)
-            & (self.bishops() | self.queens()) & us;
-        let rook_queen =
-            Self::rook_attacks(square, occupied) & (self.rooks() | self.queens()) & us;
-
-        pawn_attacks | knight_attacks | king_attacks | bishop_queen | rook_queen
+    // ISSUE #1: Implement the `attackers` function.
+    pub fn attackers() -> Bitboard {
+        //Write your code here
+        Bitboard::EMPTY // Temporary placeholder
     }
 
-    /// Returns true if any piece of `attacker_color` attacks `square`.
-    pub fn attacks(&self, square: Square, attacker_color: Color) -> bool {
-        self.attackers(square, attacker_color).0 != 0
+    /// Returns true if there is any attack on the square.
+    pub fn attacks() -> bool {
+        //Write your code here
+        false // Temporary placeholder
     }
 
-    /// Returns a bitboard of pinned (blocking) pieces that cannot move
-    /// without exposing the king to a slider attacker.
-    pub fn slider_blockers(&self, our_king: Square, us: Color) -> Bitboard {
-        Self::find_slider_blockers(self, our_king, us)
-    }
-
-    // ── Attack-pattern helpers ───────────────────────────────────────────────
-
-    /// Squares a pawn of `color` would attack from if it stood on `square`
-    /// (i.e. the squares from which a pawn of `color` could capture `square`).
-    fn pawn_attacks_to(square: Square, color: Color) -> Bitboard {
-        let sq = square.value;
-        match color {
-            Color::White => {
-                // White pawns attack downward (rank-1), so they capture from squares
-                // one rank above-left or above-right.
-                let left = if sq < 56 { (1 << (sq + 7)) & !0x0101010101010101 } else { 0 };
-                let right = if sq < 56 { (1 << (sq + 9)) & !0x8080808080808080 } else { 0 };
-                Bitboard(left | right)
-            }
-            Color::Black => {
-                // Black pawns attack upward (rank+1).
-                let left = if sq >= 8 { (1 << (sq - 9)) & !0x0101010101010101 } else { 0 };
-                let right = if sq >= 8 { (1 << (sq - 7)) & !0x8080808080808080 } else { 0 };
-                Bitboard(left | right)
-            }
-        }
-    }
-
-    /// All squares a knight on `square` can move to.
-    fn knight_attacks(square: Square) -> Bitboard {
-        let sq = square.value as i8;
-        let offsets: [i8; 8] = [-17, -15, -10, -6, 6, 10, 15, 17];
-        let mut bb = 0u64;
-        for &offset in &offsets {
-            let target = sq + offset;
-            if target >= 0 && target < 64 {
-                let file_diff = (sq % 8 - target % 8).abs();
-                let rank_diff = (sq / 8 - target / 8).abs();
-                if (file_diff == 1 && rank_diff == 2) || (file_diff == 2 && rank_diff == 1) {
-                    bb |= 1u64 << target;
-                }
-            }
-        }
-        Bitboard(bb)
-    }
-
-    /// All squares a king on `square` can move to.
-    fn king_attacks(square: Square) -> Bitboard {
-        let sq = square.value;
-        let not_a_file = 0xFEFEFEFEFEFEFEFEu64;
-        let not_h_file = 0x7F7F7F7F7F7F7F7Fu64;
-        let bit = 1u64 << sq;
-        let west = (bit >> 1) & not_h_file;
-        let east = (bit << 1) & not_a_file;
-        let north = bit << 8;
-        let south = bit >> 8;
-        let nw = (bit << 7) & not_h_file;
-        let ne = (bit << 9) & not_a_file;
-        let sw = (bit >> 9) & not_h_file;
-        let se = (bit >> 7) & not_a_file;
-        Bitboard(west | east | north | south | nw | ne | sw | se)
-    }
-
-    /// All squares a bishop on `square` attacks with `occupied` blockers.
-    fn bishop_attacks(square: Square, occupied: Bitboard) -> Bitboard {
-        Self::ray_attacks(square, occupied, &[(1, 1), (1, -1), (-1, 1), (-1, -1)])
-    }
-
-    /// All squares a rook on `square` attacks with `occupied` blockers.
-    fn rook_attacks(square: Square, occupied: Bitboard) -> Bitboard {
-        Self::ray_attacks(square, occupied, &[(1, 0), (-1, 0), (0, 1), (0, -1)])
-    }
-
-    /// Generic ray-cast attack generator.
-    fn ray_attacks(square: Square, occupied: Bitboard, directions: &[(i8, i8)]) -> Bitboard {
-        let sq = square.value;
-        let rank = sq / 8;
-        let file = sq % 8;
-        let mut bb = 0u64;
-
-        for &(df, dr) in directions {
-            let mut cf = file as i8 + df;
-            let mut cr = rank as i8 + dr;
-            while cf >= 0 && cf < 8 && cr >= 0 && cr < 8 {
-                let idx = (cr as u8) * 8 + (cf as u8);
-                bb |= 1u64 << idx;
-                if (occupied.0 & (1u64 << idx)) != 0 {
-                    break;
-                }
-                cf += df;
-                cr += dr;
-            }
-        }
-        Bitboard(bb)
+    // ISSUE #2: Implement the `slider_blockers` function.
+    pub fn slider_blockers(&self, _our_king: Square, _us: Color) -> Bitboard {
+        //Write your code here
+        Bitboard::EMPTY // Temporary placeholder
     }
 
     /// Discards the piece on a given square.
@@ -636,48 +532,48 @@ impl Board {
         if self.is_occupied_square(dest) {
             return None;
         }
-        
+
         // Get the piece at the origin square
         let piece_opt = self.piece_at(orig);
-        if piece_opt.is_none() {
-            return None;
-        }
-        
+        piece_opt?;
+
         let piece = piece_opt.unwrap();
         let piece_color = piece.color;
-        
+
         // Create a new board with the piece moved
         let new_board = self.discard_by_square(orig).put_or_replace(piece, dest);
-        
+
         // Find our king's position
         let king_pos = new_board.king_pos_of(piece_color);
         if king_pos.is_none() {
             // If there's no king, just return the new board
             return Some(new_board);
         }
-        
+
         let king_square = king_pos.unwrap();
-        
+
         // Find all blockers between our king and attacking slider pieces
         let _blockers = Self::find_slider_blockers(&new_board, king_square, piece_color);
-        
+
         // Store the blockers information somewhere or use it for move validation
         // For now, we'll just return the new board
         Some(new_board)
     }
-    
+
     // Helper function to find slider blockers
     fn find_slider_blockers(board: &Board, our_king: Square, us: Color) -> Bitboard {
         let them = us.opposite();
         let mut blockers = Bitboard::EMPTY;
-        
+
         // Get enemy bishops, rooks, and queens (all slider pieces)
-        let enemy_bishops_and_queens = board.by_color.get(them) & (board.by_role.bishop | board.by_role.queen);
-        let enemy_rooks_and_queens = board.by_color.get(them) & (board.by_role.rook | board.by_role.queen);
-        
+        let enemy_bishops_and_queens =
+            board.by_color.get(them) & (board.by_role.bishop | board.by_role.queen);
+        let enemy_rooks_and_queens =
+            board.by_color.get(them) & (board.by_role.rook | board.by_role.queen);
+
         // Get all pieces except our king
         let occupied_except_king = board.occupied ^ our_king.bitboard();
-        
+
         // Check for potential bishop-like attackers (bishops and queens on diagonals)
         let mut potential_bishop_attackers = enemy_bishops_and_queens.0;
         while potential_bishop_attackers != 0 {
@@ -685,43 +581,44 @@ impl Board {
             let attacker_square = Square {
                 value: potential_bishop_attackers.trailing_zeros() as u8,
             };
-            
+
             // Check if the attacker is on the same diagonal or anti-diagonal as our king
             let king_file = our_king.value % 8;
             let king_rank = our_king.value / 8;
             let attacker_file = attacker_square.value % 8;
             let attacker_rank = attacker_square.value / 8;
-            
+
             // Check if they're on the same diagonal or anti-diagonal
             let file_diff = (attacker_file as i8 - king_file as i8).abs();
             let rank_diff = (attacker_rank as i8 - king_rank as i8).abs();
-            
+
             if file_diff == rank_diff {
                 // They're on the same diagonal or anti-diagonal
                 // Calculate the ray between them
                 let mut ray = Bitboard::EMPTY;
-                
+
                 // Determine the direction
                 let file_step = if attacker_file > king_file { 1 } else { -1 };
                 let rank_step = if attacker_rank > king_rank { 1 } else { -1 };
-                
+
                 // Start from the king and move towards the attacker
                 let mut current_file = king_file as i8 + file_step;
                 let mut current_rank = king_rank as i8 + rank_step;
-                
+
                 // Add all squares between king and attacker to the ray
-                while current_file >= 0 && current_file < 8 && 
-                      current_rank >= 0 && current_rank < 8 && 
-                      (current_file != attacker_file as i8 || current_rank != attacker_rank as i8) {
+                while (0..8).contains(&current_file)
+                    && (0..8).contains(&current_rank)
+                    && (current_file != attacker_file as i8 || current_rank != attacker_rank as i8)
+                {
                     let square = Square {
-                        value: ((current_rank as u8) * 8 + (current_file as u8)) as u8,
+                        value: ((current_rank as u8) * 8 + (current_file as u8)),
                     };
                     ray = ray | square.bitboard();
-                    
+
                     current_file += file_step;
                     current_rank += rank_step;
                 }
-                
+
                 // Check if there's exactly one piece on the ray
                 let pieces_on_ray = ray & occupied_except_king;
                 if pieces_on_ray.count() == 1 {
@@ -733,11 +630,11 @@ impl Board {
                     }
                 }
             }
-            
+
             // Clear the least significant bit
             potential_bishop_attackers &= potential_bishop_attackers - 1;
         }
-        
+
         // Check for potential rook-like attackers (rooks and queens on ranks/files)
         let mut potential_rook_attackers = enemy_rooks_and_queens.0;
         while potential_rook_attackers != 0 {
@@ -745,49 +642,53 @@ impl Board {
             let attacker_square = Square {
                 value: potential_rook_attackers.trailing_zeros() as u8,
             };
-            
+
             // Check if the attacker is on the same file or rank as our king
             let king_file = our_king.value % 8;
             let king_rank = our_king.value / 8;
             let attacker_file = attacker_square.value % 8;
             let attacker_rank = attacker_square.value / 8;
-            
+
             // Check if they're on the same file or rank
             if king_file == attacker_file || king_rank == attacker_rank {
                 // They're on the same file or rank
                 // Calculate the ray between them
                 let mut ray = Bitboard::EMPTY;
-                
+
                 if king_file == attacker_file {
                     // Same file
                     let rank_step = if attacker_rank > king_rank { 1 } else { -1 };
                     let mut current_rank = king_rank as i8 + rank_step;
-                    
+
                     // Add all squares between king and attacker to the ray
-                    while current_rank >= 0 && current_rank < 8 && current_rank != attacker_rank as i8 {
+                    while (0..8).contains(&current_rank)
+                        && current_rank != attacker_rank as i8
+                    {
                         let square = Square {
-                            value: ((current_rank as u8) * 8 + (king_file as u8)) as u8,
+                            value: ((current_rank as u8) * 8 + king_file),
                         };
                         ray = ray | square.bitboard();
-                        
+
                         current_rank += rank_step;
                     }
                 } else {
                     // Same rank
                     let file_step = if attacker_file > king_file { 1 } else { -1 };
                     let mut current_file = king_file as i8 + file_step;
-                    
+
                     // Add all squares between king and attacker to the ray
-                    while current_file >= 0 && current_file < 8 && current_file != attacker_file as i8 {
+                    while (0..8).contains(&current_file)
+                        && current_file != attacker_file as i8
+                    {
                         let square = Square {
-                            value: ((king_rank as u8) * 8 + (current_file as u8)) as u8,
+                            value: (king_rank * 8 + (current_file as u8)),
                         };
                         ray = ray | square.bitboard();
-                        
+
                         current_file += file_step;
                     }
                 }
-                
+
                 // Check if there's exactly one piece on the ray
                 let pieces_on_ray = ray & occupied_except_king;
                 if pieces_on_ray.count() == 1 {
@@ -799,11 +700,11 @@ impl Board {
                     }
                 }
             }
-            
+
             // Clear the least significant bit
             potential_rook_attackers &= potential_rook_attackers - 1;
         }
-        
+
         blockers
     }
 
@@ -831,13 +732,13 @@ impl Board {
     // ISSUE #5: Implement the `piece_map` function.
     pub fn piece_map(&self) -> HashMap<Square, Piece> {
         let mut map_of_pieces = HashMap::new();
-        
+
         for square in self.occupied.to_squares() {
             if let Some(piece) = self.piece_at(square) {
                 map_of_pieces.insert(square, piece);
             }
         }
-        
+
         map_of_pieces
     }
 
@@ -863,4 +764,3 @@ impl Board {
         self.by_color.get(color)
     }
 }
-

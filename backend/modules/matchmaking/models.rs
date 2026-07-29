@@ -1,8 +1,7 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchType {
@@ -48,7 +47,6 @@ impl Default for TimeControl {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Player {
     pub wallet_address: String,
@@ -76,7 +74,6 @@ impl MatchRequest {
         serde_json::from_str(s)
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {

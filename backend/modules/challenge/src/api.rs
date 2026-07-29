@@ -1,12 +1,12 @@
-use actix_web::{web, HttpResponse, Result, Error, HttpMessage};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use crate::puzzle_validation::{
-    PuzzleValidationService, PuzzleSubmission, PuzzleValidationResult, 
-    PuzzleRewardToken, Puzzle, ChessMove
+    ChessMove, Puzzle, PuzzleRewardToken, PuzzleSubmission, PuzzleValidationResult,
+    PuzzleValidationService,
 };
+use actix_web::{web, Error, HttpMessage, HttpResponse, Result};
 use security::jwt::Claims;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// API request/response types
 #[derive(Debug, Deserialize)]
@@ -45,10 +45,12 @@ pub async fn submit_solution(
     solution_request: web::Json<SubmitSolutionRequest>,
 ) -> Result<HttpResponse, Error> {
     // Extract user info from JWT claims
-    let claims = req.extensions().get::<Claims>()
-        .ok_or_else(|| Error::from(actix_web::error::ErrorUnauthorized("User not authenticated")))?
+    let claims = req
+        .extensions()
+        .get::<Claims>()
+        .ok_or_else(|| actix_web::error::ErrorUnauthorized("User not authenticated"))?
         .clone();
-    
+
     let user_id = claims.user_id;
     let username = claims.username;
 
@@ -62,24 +64,20 @@ pub async fn submit_solution(
 
     // Validate the solution
     match puzzle_service.validate_puzzle_solution(submission) {
-        Ok(result) => {
-            Ok(HttpResponse::Ok().json(SubmitSolutionResponse {
-                success: true,
-                result,
-            }))
-        }
-        Err(e) => {
-            Ok(HttpResponse::BadRequest().json(SubmitSolutionResponse {
+        Ok(result) => Ok(HttpResponse::Ok().json(SubmitSolutionResponse {
+            success: true,
+            result,
+        })),
+        Err(e) => Ok(HttpResponse::BadRequest().json(SubmitSolutionResponse {
+            success: false,
+            result: PuzzleValidationResult {
                 success: false,
-                result: PuzzleValidationResult {
-                    success: false,
-                    correct: false,
-                    message: format!("Validation error: {}", e),
-                    reward_token: None,
-                    reward_amount: None,
-                },
-            }))
-        }
+                correct: false,
+                message: format!("Validation error: {}", e),
+                reward_token: None,
+                reward_amount: None,
+            },
+        })),
     }
 }
 
@@ -88,7 +86,7 @@ pub async fn get_puzzles(
     puzzle_service: web::Data<Arc<PuzzleValidationService>>,
 ) -> Result<HttpResponse, Error> {
     let puzzles = puzzle_service.get_puzzles();
-    
+
     Ok(HttpResponse::Ok().json(PuzzleListResponse {
         puzzles: puzzles.clone(),
     }))
@@ -100,16 +98,12 @@ pub async fn get_puzzle_by_id(
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, Error> {
     let puzzle_id = path.into_inner();
-    
+
     match puzzle_service.get_puzzle_by_id(&puzzle_id) {
-        Ok(puzzle) => {
-            Ok(HttpResponse::Ok().json(puzzle))
-        }
-        Err(e) => {
-            Ok(HttpResponse::NotFound().json(serde_json::json!({
-                "error": format!("Puzzle not found: {}", e)
-            })))
-        }
+        Ok(puzzle) => Ok(HttpResponse::Ok().json(puzzle)),
+        Err(e) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Puzzle not found: {}", e)
+        }))),
     }
 }
 
@@ -119,20 +113,16 @@ pub async fn verify_reward_token(
     token_request: web::Json<VerifyTokenRequest>,
 ) -> Result<HttpResponse, Error> {
     match puzzle_service.verify_reward_token(&token_request.token) {
-        Ok(reward_token) => {
-            Ok(HttpResponse::Ok().json(VerifyTokenResponse {
-                success: true,
-                reward_token: Some(reward_token),
-                error: None,
-            }))
-        }
-        Err(e) => {
-            Ok(HttpResponse::BadRequest().json(VerifyTokenResponse {
-                success: false,
-                reward_token: None,
-                error: Some(format!("Token verification failed: {}", e)),
-            }))
-        }
+        Ok(reward_token) => Ok(HttpResponse::Ok().json(VerifyTokenResponse {
+            success: true,
+            reward_token: Some(reward_token),
+            error: None,
+        })),
+        Err(e) => Ok(HttpResponse::BadRequest().json(VerifyTokenResponse {
+            success: false,
+            reward_token: None,
+            error: Some(format!("Token verification failed: {}", e)),
+        })),
     }
 }
 
@@ -143,6 +133,6 @@ pub fn configure_puzzle_routes(cfg: &mut web::ServiceConfig) {
             .route("", web::get().to(get_puzzles))
             .route("/{puzzle_id}", web::get().to(get_puzzle_by_id))
             .route("/submit", web::post().to(submit_solution))
-            .route("/verify-token", web::post().to(verify_reward_token))
+            .route("/verify-token", web::post().to(verify_reward_token)),
     );
 }

@@ -1,5 +1,4 @@
-
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -24,7 +23,7 @@ impl MigrationTrait for Migration {
         // For now, I will keep it but assume it allows NULL.
         // Wait, the previous migration added `ALTER TABLE "game" ADD CONSTRAINT "check_game_result" CHECK ("result" IN ('white', 'black', 'draw'))`.
         // If result is NULL, `NULL IN (...)` is NULL, which passes. So we don't need to drop the constraint for NULL support.
-        
+
         // 3. Create composite indexes
         // idx_games_white_player_created_at_id: (white_player, created_at DESC, id DESC)
         manager
@@ -42,14 +41,14 @@ impl MigrationTrait for Migration {
         // sea-orm-migration doesn't natively support DESC in Index::create() builder easily without raw SQL or specific backend features in some versions.
         // But let's check if we can do it. Use raw SQL for safety and precision regarding DESC order which is critical for optimization.
         // The builder above creates ASC by default.
-        
+
         // Let's drop the index I just created (if it was created in a real run, but here I am writing the script).
         // Actually, I will just use raw SQL for the indexes to ensure DESC ordering.
-        
+
         // Drop the index I defined above in the builder pattern? No, I'll just replace the builder call with raw SQL.
-        
+
         // Re-doing step 3 with Raw SQL for DESC support
-         manager
+        manager
             .get_connection()
             .execute_unprepared(
                 r#"CREATE INDEX "idx_games_white_player_created_at_id" ON "game" ("white_player", "created_at" DESC, "id" DESC)"#
@@ -72,7 +71,7 @@ impl MigrationTrait for Migration {
             .get_connection()
             .execute_unprepared(r#"DROP INDEX IF EXISTS "idx_games_white_player_created_at_id""#)
             .await?;
-            
+
         manager
             .get_connection()
             .execute_unprepared(r#"DROP INDEX IF EXISTS "idx_games_black_player_created_at_id""#)

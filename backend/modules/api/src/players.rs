@@ -1,14 +1,9 @@
 use actix_web::{
-    HttpResponse, delete, get, post, put,
+    delete, get, post, put,
     web::{Json, Path},
+    HttpResponse,
 };
-use dto::{
-    players::{DisplayPlayer, NewPlayer, UpdatePlayer, UpdatedPlayer},
-    responses::{
-        InvalidCredentialsResponse, NotFoundResponse, PlayerAdded, PlayerDeleted, PlayerFound,
-        PlayerUpdated,
-    },
-};
+use dto::players::{DisplayPlayer, NewPlayer, UpdatePlayer, UpdatedPlayer};
 use error::error::ApiError;
 use serde_json::json;
 use validator::Validate;

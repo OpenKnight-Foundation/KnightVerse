@@ -1,12 +1,11 @@
-use actix_web::{
-    HttpResponse, post,
-    web::Json,
-};
+use actix_web::{post, web::Json, HttpResponse};
 use dto::{
-    ai::{AiSuggestionRequest, AiSuggestionResponse, PositionAnalysisRequest, PositionAnalysisResponse},
+    ai::{
+        AiSuggestionRequest, AiSuggestionResponse, PositionAnalysisRequest,
+        PositionAnalysisResponse,
+    },
     responses::ValidationErrorResponse,
 };
-use error::error::ApiError;
 use serde_json::json;
 use validator::Validate;
 
@@ -32,25 +31,21 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());
             let engine_service = EngineService::new(engine_path);
-            
+
             let start_time = std::time::Instant::now();
-            let result = engine_service.get_suggestion(
-                &payload.0.fen,
-                payload.0.depth,
-                payload.0.time_limit_ms
-            ).await;
+            let result = engine_service
+                .get_suggestion(&payload.0.fen, payload.0.depth, payload.0.time_limit_ms)
+                .await;
             let elapsed = u32::try_from(start_time.elapsed().as_millis()).unwrap_or(u32::MAX);
-            
+
             match result {
-                Ok(result) => {
-                    HttpResponse::Ok().json(AiSuggestionResponse {
-                        best_move: result.best_move,
-                        evaluation: result.evaluation.unwrap_or(0.0),
-                        depth: result.depth.unwrap_or(payload.0.depth.unwrap_or(10)),
-                        principal_variation: result.principal_variation,
-                        computation_time_ms: elapsed,
-                    })
-                }
+                Ok(result) => HttpResponse::Ok().json(AiSuggestionResponse {
+                    best_move: result.best_move,
+                    evaluation: result.evaluation.unwrap_or(0.0),
+                    depth: result.depth.unwrap_or(payload.0.depth.unwrap_or(10)),
+                    principal_variation: result.principal_variation,
+                    computation_time_ms: elapsed,
+                }),
                 Err(e) => {
                     log::error!("Engine error in get_ai_suggestion: {}", e);
                     HttpResponse::InternalServerError().json(json!({
@@ -62,14 +57,17 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
         Err(errors) => {
             let error_strings: Vec<String> = errors
                 .field_errors()
-                .iter()
-                .flat_map(|(_, errs)| errs.iter().map(|err| err.message.clone().unwrap_or_default().to_string()))
+                .values()
+                .flat_map(|errs| {
+                    errs.iter()
+                        .map(|err| err.message.clone().unwrap_or_default().to_string())
+                })
                 .collect();
-            
+
             HttpResponse::BadRequest().json(ValidationErrorResponse {
                 error: "Invalid FEN position or parameters".to_string(),
                 code: 400,
-                details: Some(error_strings)
+                details: Some(error_strings),
             })
         }
     }
@@ -94,8 +92,11 @@ pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpRes
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());
             let engine_service = EngineService::new(engine_path);
-            
-            match engine_service.analyze_position(&payload.0.fen, payload.0.depth).await {
+
+            match engine_service
+                .analyze_position(&payload.0.fen, payload.0.depth)
+                .await
+            {
                 Ok(result) => {
                     HttpResponse::Ok().json(PositionAnalysisResponse {
                         evaluation: result.evaluation.unwrap_or(0.0),
@@ -115,14 +116,17 @@ pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpRes
         Err(errors) => {
             let error_strings: Vec<String> = errors
                 .field_errors()
-                .iter()
-                .flat_map(|(_, errs)| errs.iter().map(|err| err.message.clone().unwrap_or_default().to_string()))
+                .values()
+                .flat_map(|errs| {
+                    errs.iter()
+                        .map(|err| err.message.clone().unwrap_or_default().to_string())
+                })
                 .collect();
-            
+
             HttpResponse::BadRequest().json(ValidationErrorResponse {
                 error: "Invalid FEN position or parameters".to_string(),
                 code: 400,
-                details: Some(error_strings)
+                details: Some(error_strings),
             })
         }
     }

@@ -1,13 +1,13 @@
+use chrono::{Duration, Utc};
+use db_entity::game::{GameVariant, ResultSide}; // Added imports
 use db_entity::prelude::*;
-use db_entity::{player, game};
-use db_entity::game::{ResultSide, GameVariant}; // Added imports
-use sea_orm::{*, prelude::*};
-use std::env;
+use db_entity::{game, player};
 use dotenv::dotenv;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use chrono::{Utc, Duration};
+use sea_orm::{prelude::*, *};
 use serde_json::json;
+use std::env;
 
 const NUM_PLAYERS: usize = 100;
 const NUM_GAMES: usize = 5000;
@@ -25,31 +25,34 @@ async fn main() -> Result<(), DbErr> {
     // Use execute_unprepared for TRUNCATE as it's not directly supported by query builder
     // Make sure the schema is correct if not using the default 'public'
     // Using CASCADE to handle foreign keys if necessary
-    db.execute_unprepared("TRUNCATE TABLE smdb.game, smdb.player CASCADE;").await?;
+    db.execute_unprepared("TRUNCATE TABLE smdb.game, smdb.player CASCADE;")
+        .await?;
     println!("Existing data cleared.");
 
     println!("Seeding database...");
 
     // --- Seed Players ---
     println!("Seeding {} players...", NUM_PLAYERS);
-    let models: Vec<player::ActiveModel> = (0..NUM_PLAYERS).map(|i| {
-        let player_id = Uuid::new_v4();
-        player::ActiveModel {
-            id: Set(player_id),
-            username: Set(format!("Player_{}", i + 1)),
-            email: Set(format!("player{}@example.com", i + 1)),
-            password_hash: Set(b"dummy_hash".to_vec()),
-            biography: Set(format!("Biography for Player {}", i + 1)),
-            country: Set("USA".to_string()),
-            flair: Set("GM".to_string()),
-            real_name: Set(format!("Real Name {}", i + 1)),
-            location: Set(Some("New York, NY".to_string())),
-            fide_rating: Set(Some(rand::thread_rng().gen_range(800..2800))),
-            social_links: Set(Some(vec!["http://twitter.com/player".to_string()])),
-            is_enabled: Set(true),
-            ..Default::default()
-        }
-    }).collect();
+    let models: Vec<player::ActiveModel> = (0..NUM_PLAYERS)
+        .map(|i| {
+            let player_id = Uuid::new_v4();
+            player::ActiveModel {
+                id: Set(player_id),
+                username: Set(format!("Player_{}", i + 1)),
+                email: Set(format!("player{}@example.com", i + 1)),
+                password_hash: Set(b"dummy_hash".to_vec()),
+                biography: Set(format!("Biography for Player {}", i + 1)),
+                country: Set("USA".to_string()),
+                flair: Set("GM".to_string()),
+                real_name: Set(format!("Real Name {}", i + 1)),
+                location: Set(Some("New York, NY".to_string())),
+                fide_rating: Set(Some(rand::thread_rng().gen_range(800..2800))),
+                social_links: Set(Some(vec!["http://twitter.com/player".to_string()])),
+                is_enabled: Set(true),
+                ..Default::default()
+            }
+        })
+        .collect();
 
     // Extract player IDs before inserting for game seeding
     let player_ids: Vec<Uuid> = models.iter().map(|m| m.id.clone().unwrap()).collect();
@@ -59,22 +62,22 @@ async fn main() -> Result<(), DbErr> {
 
     // --- Seed Games ---
     let mut rng = rand::thread_rng();
-    
+
     // We will generate random variants/results inside the loop or define vectors with new Enum variants
-    // But main's loop uses match blocks. We can stick to match blocks or arrays. 
+    // But main's loop uses match blocks. We can stick to match blocks or arrays.
     // Arrays are cleaner.
-    let variants = vec![
-        GameVariant::Standard, 
-        GameVariant::Chess960, 
-        GameVariant::ThreeCheck, 
-        GameVariant::Blitz, 
-        GameVariant::Rapid, 
-        GameVariant::Classical
+    let variants = [
+        GameVariant::Standard,
+        GameVariant::Chess960,
+        GameVariant::ThreeCheck,
+        GameVariant::Blitz,
+        GameVariant::Rapid,
+        GameVariant::Classical,
     ];
-    let results = vec![
-        ResultSide::WhiteWins, 
-        ResultSide::BlackWins, 
-        ResultSide::Draw
+    let results = [
+        ResultSide::WhiteWins,
+        ResultSide::BlackWins,
+        ResultSide::Draw,
     ];
 
     println!("Seeding {} games...", NUM_GAMES);
@@ -82,7 +85,8 @@ async fn main() -> Result<(), DbErr> {
         let white_player_id = *player_ids.choose(&mut rng).unwrap();
         let black_player_id = loop {
             let id = *player_ids.choose(&mut rng).unwrap();
-            if id != white_player_id { // Ensure players are different
+            if id != white_player_id {
+                // Ensure players are different
                 break id;
             }
         };
@@ -116,4 +120,4 @@ async fn main() -> Result<(), DbErr> {
     println!("Database seeding complete!");
 
     Ok(())
-} 
+}

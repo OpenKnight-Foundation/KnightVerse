@@ -10,6 +10,8 @@ from gpu_worker.anomaly import (
 )
 from gpu_worker.batch import BatchAnalyzer
 from gpu_worker.config import EngineBackend, GPUConfig, WorkerConfig
+from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
+from gpu_worker.elo_scaling import EngineParams, elo_to_engine_params
 from gpu_worker.models import (
     AnalysisRequest,
     AnalysisResult,
@@ -32,7 +34,11 @@ __all__ = [
     "BotFarmEvent",
     "BotFarmFinding",
     "BotFarmReport",
+    "EloAnalysisRequest",
+    "EloScalingMiddleware",
     "EngineBackend",
+    "EngineParams",
+    "elo_to_engine_params",
     "GPUAnalysisWorker",
     "GPUConfig",
     "ResourceMonitor",

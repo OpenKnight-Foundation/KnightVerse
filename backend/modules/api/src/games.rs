@@ -277,6 +277,14 @@ pub async fn join_game(
         Ok(id) => id,
         Err(resp) => return resp,
     };
+
+    // Reject if the JWT does not carry a valid player identity.
+    if player_id.is_nil() {
+        return HttpResponse::Unauthorized().json(json!({
+            "message": "Player identity could not be resolved from token"
+        }));
+    }
+
     let game_id = id.into_inner();
 
     match GameService::join_game(db.get_ref(), game_id, player_id).await {

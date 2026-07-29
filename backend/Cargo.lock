@@ -3521,6 +3521,7 @@ dependencies = [
  "dto",
  "engine",
  "error",
+ "log",
  "rand 0.8.6",
  "sea-orm",
  "serde_json",

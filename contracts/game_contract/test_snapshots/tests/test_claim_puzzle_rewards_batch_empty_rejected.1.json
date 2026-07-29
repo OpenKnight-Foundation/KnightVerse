@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                 },
                 {
                   "i128": {
@@ -38,7 +38,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -79,27 +78,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "BALANCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 300
-                                }
-                              }
-                            }
-                          ]
+                          "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                         }
                       },
                       {
@@ -131,29 +110,12 @@
                       },
                       {
                         "key": {
-                          "symbol": "NONCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "u64": 42
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "TREASURY"
                         },
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 9700
+                            "lo": 10000
                           }
                         }
                       },
@@ -256,7 +218,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                 },
                 {
                   "i128": {
@@ -313,53 +275,11 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 300
-                  }
-                },
-                {
-                  "u64": 42
-                },
-                {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "pzl_rwd"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-              }
-            ],
-            "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 300
-              }
+              "vec": []
             }
           }
         }
@@ -378,75 +298,12 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
-              }
-            ],
-            "data": "void"
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
-                "symbol": "claim_puzzle_reward"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 300
-                  }
-                },
-                {
-                  "u64": 42
-                },
-                {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
               "error": {
-                "contract": 14
+                "contract": 36
               }
             }
           }
@@ -467,7 +324,7 @@
               },
               {
                 "error": {
-                  "contract": 14
+                  "contract": 36
                 }
               }
             ],
@@ -492,7 +349,7 @@
               },
               {
                 "error": {
-                  "contract": 14
+                  "contract": 36
                 }
               }
             ],
@@ -502,24 +359,12 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "claim_puzzle_rewards_batch"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 300
-                      }
-                    },
-                    {
-                      "u64": 42
-                    },
-                    {
-                      "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                      "vec": []
                     }
                   ]
                 }

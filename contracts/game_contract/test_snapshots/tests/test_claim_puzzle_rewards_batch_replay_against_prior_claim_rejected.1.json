@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
                 },
                 {
                   "i128": {
@@ -79,7 +79,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                          "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
                         }
                       },
                       {
@@ -95,7 +95,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 300
+                                  "lo": 500
                                 }
                               }
                             }
@@ -137,7 +137,7 @@
                           "map": [
                             {
                               "key": {
-                                "u64": 42
+                                "u64": 1
                               },
                               "val": {
                                 "bool": true
@@ -153,7 +153,7 @@
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 9700
+                            "lo": 9500
                           }
                         }
                       },
@@ -256,7 +256,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
                 },
                 {
                   "i128": {
@@ -324,14 +324,14 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 300
+                    "lo": 500
                   }
                 },
                 {
-                  "u64": 42
+                  "u64": 1
                 },
                 {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                  "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
                 }
               ]
             }
@@ -358,7 +358,7 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 300
+                "lo": 500
               }
             }
           }
@@ -402,25 +402,49 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 300
-                  }
-                },
-                {
-                  "u64": 42
-                },
-                {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 500
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -441,7 +465,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
@@ -502,24 +526,52 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "claim_puzzle_rewards_batch"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 300
-                      }
-                    },
-                    {
-                      "u64": 42
-                    },
-                    {
-                      "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 1
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 500
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }

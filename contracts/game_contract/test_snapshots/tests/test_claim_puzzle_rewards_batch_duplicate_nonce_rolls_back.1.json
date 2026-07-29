@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                 },
                 {
                   "i128": {
@@ -38,6 +38,8 @@
         }
       ]
     ],
+    [],
+    [],
     [],
     []
   ],
@@ -79,27 +81,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "BALANCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 300
-                                }
-                              }
-                            }
-                          ]
+                          "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                         }
                       },
                       {
@@ -131,29 +113,12 @@
                       },
                       {
                         "key": {
-                          "symbol": "NONCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "u64": 42
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "TREASURY"
                         },
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 9700
+                            "lo": 10000
                           }
                         }
                       },
@@ -256,7 +221,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                 },
                 {
                   "i128": {
@@ -313,25 +278,88 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                      }
+                    }
+                  ]
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 300
-                  }
-                },
-                {
-                  "u64": 42
-                },
-                {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 200
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -358,13 +386,13 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 300
+                "lo": 100
               }
             }
           }
         }
       },
-      "failed_call": false
+      "failed_call": true
     },
     {
       "event": {
@@ -378,70 +406,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
-              }
-            ],
-            "data": "void"
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
-                "symbol": "claim_puzzle_reward"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 300
-                  }
-                },
-                {
-                  "u64": 42
-                },
-                {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
@@ -502,28 +467,249 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "claim_puzzle_rewards_batch"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 300
-                      }
-                    },
-                    {
-                      "u64": 42
-                    },
-                    {
-                      "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 9
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 100
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 9
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 200
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
               ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "i128": {
+                "hi": 0,
+                "lo": 0
+              }
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "i128": {
+                "hi": 0,
+                "lo": 0
+              }
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "treasury_balance"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "treasury_balance"
+              }
+            ],
+            "data": {
+              "i128": {
+                "hi": 0,
+                "lo": 10000
+              }
             }
           }
         }

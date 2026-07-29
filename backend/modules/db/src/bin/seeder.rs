@@ -66,19 +66,15 @@ async fn main() -> Result<(), DbErr> {
     // We will generate random variants/results inside the loop or define vectors with new Enum variants
     // But main's loop uses match blocks. We can stick to match blocks or arrays.
     // Arrays are cleaner.
-    let variants = [
-        GameVariant::Standard,
+    let variants = [GameVariant::Standard,
         GameVariant::Chess960,
         GameVariant::ThreeCheck,
         GameVariant::Blitz,
         GameVariant::Rapid,
-        GameVariant::Classical,
-    ];
-    let results = [
-        ResultSide::WhiteWins,
+        GameVariant::Classical];
+    let results = [ResultSide::WhiteWins,
         ResultSide::BlackWins,
-        ResultSide::Draw,
-    ];
+        ResultSide::Draw];
 
     println!("Seeding {} games...", NUM_GAMES);
     for i in 0..NUM_GAMES {

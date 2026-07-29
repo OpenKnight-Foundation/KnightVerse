@@ -161,11 +161,11 @@ display_decimals=7
         // Validate URL format if provided
         if !metadata.url.is_empty()
             && !metadata.url.starts_with("http://")
-            && !metadata.url.starts_with("https://")
-            && !metadata.url.starts_with("ipfs://")
-        {
-            return Err(anyhow!("URL must start with http://, https://, or ipfs://"));
-        }
+                && !metadata.url.starts_with("https://")
+                && !metadata.url.starts_with("ipfs://")
+            {
+                return Err(anyhow!("URL must start with http://, https://, or ipfs://"));
+            }
 
         Ok(metadata)
     }

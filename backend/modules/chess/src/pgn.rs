@@ -35,7 +35,8 @@ pub enum PgnError {
 }
 
 /// Represents the result of a chess game
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum GameResult {
     WhiteWins,
     BlackWins,

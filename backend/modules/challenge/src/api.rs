@@ -48,7 +48,11 @@ pub async fn submit_solution(
     let claims = req
         .extensions()
         .get::<Claims>()
-        .ok_or_else(|| actix_web::error::ErrorUnauthorized("User not authenticated"))?
+        .ok_or_else(|| {
+            actix_web::error::ErrorUnauthorized(
+                "User not authenticated",
+            )
+        })?
         .clone();
 
     let user_id = claims.user_id;

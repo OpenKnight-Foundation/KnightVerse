@@ -56,9 +56,7 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
         }
         Err(errors) => {
             let error_strings: Vec<String> = errors
-                .field_errors()
-                .values()
-                .flat_map(|errs| {
+                .field_errors().values().flat_map(|errs| {
                     errs.iter()
                         .map(|err| err.message.clone().unwrap_or_default().to_string())
                 })
@@ -115,9 +113,7 @@ pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpRes
         }
         Err(errors) => {
             let error_strings: Vec<String> = errors
-                .field_errors()
-                .values()
-                .flat_map(|errs| {
+                .field_errors().values().flat_map(|errs| {
                     errs.iter()
                         .map(|err| err.message.clone().unwrap_or_default().to_string())
                 })

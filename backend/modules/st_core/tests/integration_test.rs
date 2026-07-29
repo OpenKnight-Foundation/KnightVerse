@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::*;
     use st_core::{AIMetadata, NFTMintRequest, NFTService};
 
     #[tokio::test]

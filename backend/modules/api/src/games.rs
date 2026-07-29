@@ -4,9 +4,9 @@ use actix_web::{
     HttpMessage, HttpRequest, HttpResponse,
 };
 use dto::games::{
-    CompleteGameRequest, CompleteGameResponse, CreateGameRequest, GameStatus, ImportGameRequest,
-    ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
-};
+        CompleteGameRequest, CompleteGameResponse, CreateGameRequest, GameStatus,
+        ImportGameRequest, ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
+    };
 use error::error::ApiError;
 use sea_orm::DatabaseConnection;
 use security::jwt::Claims;

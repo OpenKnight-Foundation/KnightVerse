@@ -73,7 +73,9 @@ pub async fn main() -> std::io::Result<()> {
         }
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);
-            return Err(std::io::Error::other("Database connection failed"));
+            return Err(std::io::Error::other(
+                "Database connection failed",
+            ));
         }
     };
 

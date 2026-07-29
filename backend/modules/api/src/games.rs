@@ -83,7 +83,7 @@ pub async fn create_game(
     get,
     path = "/v1/games/{id}",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     responses(
         (status = 200, description = "Game found",     body = GameDisplayDTO),
@@ -123,7 +123,7 @@ pub async fn get_game(
     put,
     path = "/v1/games/{id}/move",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = MakeMoveRequest,
     responses(
@@ -183,7 +183,7 @@ pub async fn make_move(
     path = "/v1/games",
     params(
         ("status"    = Option<String>, Query, description = "Filter by status (waiting, in_progress, completed, aborted)"),
-        ("player_id" = Option<String>, Query, description = "Filter by player UUID", format = "uuid"),
+        ("player_id" = Option<Uuid>, Query, description = "Filter by player UUID", format = "uuid"),
         ("page"      = Option<i32>,    Query, description = "Page number"),
         ("limit"     = Option<i32>,    Query, description = "Items per page")
     ),
@@ -265,7 +265,7 @@ pub async fn list_games(
     post,
     path = "/v1/games/{id}/join",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = JoinGameRequest,
     responses(
@@ -320,7 +320,7 @@ pub async fn join_game(
     delete,
     path = "/v1/games/{id}",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     responses(
         (status = 200, description = "Game abandoned successfully"),
@@ -463,7 +463,7 @@ pub async fn import_game(
     put,
     path = "/v1/games/{id}/complete",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = CompleteGameRequest,
     responses(

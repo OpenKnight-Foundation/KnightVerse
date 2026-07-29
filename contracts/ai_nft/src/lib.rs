@@ -76,7 +76,7 @@ impl AINFTContract {
             owner: minter.clone(),
             nft_id: nft_counter,
             metadata_hash: metadata_hash.clone(),
-            personality_traits,
+            personality_traits: personality_traits.clone(),
             created_at: env.ledger().sequence() as u64,
             minter: minter.clone(),
         };
@@ -105,10 +105,16 @@ impl AINFTContract {
             .instance()
             .get(&MINTER_REGISTRY)
             .unwrap_or(Map::new(&env));
-        minter_registry.set(nft_counter, minter);
+        minter_registry.set(nft_counter, minter.clone());
         env.storage()
             .instance()
             .set(&MINTER_REGISTRY, &minter_registry);
+
+        // Emit NFT minted event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("mint")),
+            (nft_counter, minter, metadata_hash),
+        );
 
         nft_counter
     }
@@ -135,9 +141,15 @@ impl AINFTContract {
             .get(&NFT_METADATA)
             .ok_or(ContractError::NFTNotFound)?;
         let mut nft = nft_metadata.get(nft_id).ok_or(ContractError::NFTNotFound)?;
-        nft.owner = to;
+        nft.owner = to.clone();
         nft_metadata.set(nft_id, nft);
         env.storage().instance().set(&NFT_METADATA, &nft_metadata);
+
+        // Emit NFT transferred event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("transfer")),
+            (nft_id, current_owner, to),
+        );
 
         Ok(())
     }

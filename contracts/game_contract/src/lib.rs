@@ -371,8 +371,14 @@ impl GameContract {
             .get(&ESCROW)
             .unwrap_or(Map::new(&env));
         let current_escrow = escrow.get(player1.clone()).unwrap_or(0);
-        escrow.set(player1, current_escrow + wager_amount);
+        escrow.set(player1.clone(), current_escrow + wager_amount);
         env.storage().instance().set(&ESCROW, &escrow);
+
+        // Emit tournament created event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("created")),
+            (game_counter, player1, wager_amount),
+        );
 
         Ok(game_counter)
     }
@@ -422,11 +428,17 @@ impl GameContract {
             .get(&ESCROW)
             .unwrap_or(Map::new(&env));
         let current_escrow = escrow.get(player2.clone()).unwrap_or(0);
-        escrow.set(player2, current_escrow + game.wager_amount);
+        escrow.set(player2.clone(), current_escrow + game.wager_amount);
         env.storage().instance().set(&ESCROW, &escrow);
 
-        games.set(game_id, game);
+        games.set(game_id, game.clone());
         env.storage().instance().set(&GAMES, &games);
+
+        // Emit escrow created event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("joined")),
+            (game_id, game.player1, player2),
+        );
 
         Ok(())
     }
@@ -526,6 +538,12 @@ impl GameContract {
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
+        // Emit draw claimed event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("drawn")),
+            (game_id, player),
+        );
+
         Ok(())
     }
 
@@ -584,6 +602,12 @@ impl GameContract {
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
+        // Emit win claimed event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("won")),
+            (game_id, winner),
+        );
+
         Ok(())
     }
 
@@ -625,6 +649,12 @@ impl GameContract {
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
+        // Emit game cancelled event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("cancelled")),
+            (game_id, player),
+        );
+
         Ok(())
     }
 
@@ -662,6 +692,12 @@ impl GameContract {
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
+        // Emit forfeit event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("forfeited")),
+            (game_id, player, winner),
+        );
+
         Ok(())
     }
 
@@ -691,6 +727,12 @@ impl GameContract {
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
+
+        // Emit payout event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("payout")),
+            (game_id, winner),
+        );
 
         Ok(())
     }
@@ -779,6 +821,12 @@ impl GameContract {
         env.storage().instance().set(&ESCROW, &escrow);
         games.set(game_id, settled_game);
         env.storage().instance().set(&GAMES, &games);
+
+        // Emit tournament payout event
+        env.events().publish(
+            (symbol_short!("game"), symbol_short!("tournament_payout")),
+            (game_id, winners.len() as u32),
+        );
 
         Ok(())
     }

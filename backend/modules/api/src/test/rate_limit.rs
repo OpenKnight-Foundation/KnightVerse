@@ -1,7 +1,5 @@
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{test, web, App, HttpResponse, Responder};
-use std::thread;
-use std::time::Duration;
 
 async fn mock_handler() -> impl Responder {
     HttpResponse::Ok().body("OK")

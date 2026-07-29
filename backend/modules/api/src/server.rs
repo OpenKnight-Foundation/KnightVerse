@@ -3,6 +3,8 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use actix_cors::Cors;
 use dotenv::dotenv;
+use tracing::{info, warn, error};
+use tracing_actix_web::TracingLogger;
 use sea_orm::{Database, DatabaseConnection};
 use std::env;
 use std::sync::Arc;
@@ -44,8 +46,24 @@ pub async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenv().ok();
 
-    // Initialize logger
-    env_logger::init();
+    // Initialize structured logger with JSON output in release builds
+    {
+        use tracing_subscriber::EnvFilter;
+
+        let env_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(env_filter);
+
+        #[cfg(debug_assertions)]
+        let subscriber = subscriber.pretty();
+
+        #[cfg(not(debug_assertions))]
+        let subscriber = subscriber.json();
+
+        subscriber.init();
+    }
 
     // Load configuration from environment
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
@@ -59,17 +77,17 @@ pub async fn main() -> std::io::Result<()> {
 
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    eprintln!("Initializing KnightVerse Backend Server");
-    eprintln!("Server address: {}", server_addr);
+    info!("Initializing KnightVerse Backend Server");
+    info!("Server address: {}", server_addr);
 
     // Connect to database
     let db = match Database::connect(&database_url).await {
         Ok(conn) => {
-            eprintln!("Database connection successful");
+            info!("Database connection successful");
             conn
         }
         Err(e) => {
-            eprintln!("Failed to connect to database: {}", e);
+            error!("Failed to connect to database: {}", e);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Database connection failed",
@@ -88,12 +106,12 @@ pub async fn main() -> std::io::Result<()> {
     let config = AppConfig::from_env();
 
     // Initialize Matchmaking
-    eprintln!("Connecting to Redis for matchmaking at {}", redis_url);
+    info!("Connecting to Redis for matchmaking at {}", redis_url);
     let redis_pool = create_redis_pool(&redis_url).expect("Failed to create Redis pool");
     
     // Optional: test connection
     if let Err(e) = test_redis_connection(&redis_pool).await {
-        eprintln!("Warning: Redis connection test failed: {}", e);
+        warn!("Warning: Redis connection test failed: {}", e);
     }
     
     let matchmaking_service = MatchmakingService::new(redis_pool);
@@ -101,7 +119,7 @@ pub async fn main() -> std::io::Result<()> {
     // Initialize Puzzle Validation Service
     let puzzle_service = Arc::new(PuzzleValidationService::new(jwt_secret.clone()));
 
-    eprintln!("Starting HTTP server on {}", server_addr);
+    info!("Starting HTTP server on {}", server_addr);
 
     // Define the app factory closure
     let app_factory = move || {
@@ -151,6 +169,7 @@ pub async fn main() -> std::io::Result<()> {
             .unwrap();
 
         App::new()
+            .wrap(TracingLogger::default())
             .wrap(actix_web::middleware::DefaultHeaders::new().add(("Strict-Transport-Security", "max-age=31536000; includeSubDomains")))
             // Global middleware
             .wrap(cors)
@@ -241,7 +260,7 @@ pub async fn main() -> std::io::Result<()> {
 
     if let Ok(workers_str) = env::var("WORKERS") {
         if let Ok(workers) = workers_str.parse::<usize>() {
-            println!("Setting worker count to {}", workers);
+            info!("Setting worker count to {}", workers);
             server = server.workers(workers);
         }
     }

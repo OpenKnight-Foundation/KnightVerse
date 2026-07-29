@@ -5,8 +5,9 @@ edition = "2021"
 
 [dependencies]
 dotenv = "0.15.0"
-env_logger = "0.11.8"
-log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
 actix-web = "4"
 actix = "0.13"
 actix-web-actors = "4"

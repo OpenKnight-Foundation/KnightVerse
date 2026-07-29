@@ -824,7 +824,7 @@ impl GameContract {
 
         // Emit tournament payout event
         env.events().publish(
-            (symbol_short!("game"), symbol_short!("tournament_payout")),
+            (symbol_short!("game"), symbol_short!("payout_t")),
             (game_id, winners.len() as u32),
         );
 

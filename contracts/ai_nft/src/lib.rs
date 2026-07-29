@@ -22,6 +22,7 @@ const NFT_COUNTER: Symbol = symbol_short!("NFT_CNT");
 const NFT_OWNERS: Symbol = symbol_short!("OWNERS");
 const NFT_METADATA: Symbol = symbol_short!("METADATA");
 const MINTER_REGISTRY: Symbol = symbol_short!("MINTER");
+const CIRCUIT_BREAKER: Symbol = symbol_short!("CB_ADDR"); // Emergency circuit-breaker contract address
 
 // Contract errors
 #[contracterror]
@@ -33,6 +34,8 @@ pub enum ContractError {
     AlreadyTransferred = 4,
     InvalidOwner = 5,
     MinterMismatch = 6,
+    /// Emergency circuit breaker is tripped — mint and transfer are halted
+    CircuitBreakerTripped = 7,
 }
 
 #[contract]
@@ -55,16 +58,56 @@ impl AINFTContract {
         env.storage().instance().get(&ADMIN).expect("Admin not set")
     }
 
+    /// Register the emergency circuit breaker contract address.
+    ///
+    /// Only callable by the current admin.  Subsequent calls overwrite the
+    /// previous address, allowing the breaker to be upgraded by governance.
+    pub fn initialize_circuit_breaker(env: Env, admin: Address, circuit_breaker: Address) {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN)
+            .expect("Admin not set");
+        current_admin.require_auth();
+        if admin != current_admin {
+            panic!("Not admin");
+        }
+        env.storage()
+            .instance()
+            .set(&CIRCUIT_BREAKER, &circuit_breaker);
+    }
+
+    /// Cross-contract check: if a circuit-breaker address is registered and
+    /// its `paused()` function returns `true`, return
+    /// `Err(CircuitBreakerTripped)`.  If no breaker is configured the check is
+    /// a no-op (opt-in guard).
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        let cb_opt: Option<Address> = env.storage().instance().get(&CIRCUIT_BREAKER);
+        if let Some(cb_addr) = cb_opt {
+            let paused: bool = env.invoke_contract(
+                &cb_addr,
+                &soroban_sdk::symbol_short!("paused"),
+                soroban_sdk::Vec::new(env),
+            );
+            if paused {
+                return Err(ContractError::CircuitBreakerTripped);
+            }
+        }
+        Ok(())
+    }
+
     /// Mint a new AI NFT with metadata hash
     pub fn mint(
         env: Env,
         minter: Address,
         metadata_hash: BytesN<32>,
         personality_traits: String,
-    ) -> u64 {
+    ) -> Result<u64, ContractError> {
         let admin = Self::admin(env.clone());
         admin.require_auth();
         minter.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         // Increment NFT counter
         let mut nft_counter: u64 = env.storage().instance().get(&NFT_COUNTER).unwrap_or(0);
@@ -110,7 +153,7 @@ impl AINFTContract {
             .instance()
             .set(&MINTER_REGISTRY, &minter_registry);
 
-        nft_counter
+        Ok(nft_counter)
     }
 
     /// Transfer NFT from current owner to a new owner
@@ -123,6 +166,8 @@ impl AINFTContract {
 
         let current_owner = owners.get(nft_id).ok_or(ContractError::NFTNotFound)?;
         current_owner.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         // Update owner in NFT_OWNERS
         owners.set(nft_id, to.clone());
@@ -314,5 +359,103 @@ mod tests {
         assert_eq!(retrieved.minter, minter);
         assert_eq!(retrieved.owner, minter);
         assert_eq!(retrieved.personality_traits, personality);
+    }
+
+    // ── Circuit Breaker Tests ─────────────────────────────────────────────────
+
+    fn setup_breaker<'a>(
+        env: &'a Env,
+        client: &AINFTContractClient<'a>,
+        admin: &Address,
+    ) -> emergency_circuit_breaker::PausableContractClient<'a> {
+        use emergency_circuit_breaker::PausableContract;
+        let cb_id = env.register_contract(None, PausableContract);
+        let cb_client = emergency_circuit_breaker::PausableContractClient::new(env, &cb_id);
+        cb_client.initialize(admin);
+        client.initialize_circuit_breaker(admin, &cb_id);
+        cb_client
+    }
+
+    /// mint is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_mint() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+        let personality = String::from_str(&env, "blocked_bot");
+
+        let result = client.try_mint(&minter, &metadata_hash, &personality);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// transfer is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        // Mint while breaker is not yet paused
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "live_bot"));
+
+        // Now wire up and trip the breaker
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let result = client.try_transfer(&nft_id, &new_owner);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// After unpausing, mint and transfer work again.
+    #[test]
+    fn test_circuit_breaker_unpause_resumes_mint_and_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+        // mint blocked while paused
+        assert!(client
+            .try_mint(&minter, &metadata_hash, &String::from_str(&env, "bot"))
+            .is_err());
+
+        cb_client.unpause(&admin);
+
+        // Now mint succeeds
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "bot"));
+        assert_eq!(client.owner_of(&nft_id), minter);
+
+        // And transfer succeeds
+        client.transfer(&nft_id, &new_owner);
+        assert_eq!(client.owner_of(&nft_id), new_owner);
     }
 }

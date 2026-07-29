@@ -14,6 +14,8 @@ from gpu_worker.config import WorkerConfig
 from gpu_worker.pool import WorkerPool
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
+from gpu_worker.nl_agent import NaturalLanguageAgent
+from gpu_worker.nl_models import NLAnalysisRequest, NLAnalysisResponse
 from gpu_worker.resource_optimizer import ResourceOptimizer, ResourceTier, ResourceLimits
 from gpu_worker.deployment_pipeline import (
     DeploymentPipelineOrchestrator,
@@ -62,26 +64,115 @@ class AgentEngineOrchestrator:
         self.config = WorkerConfig()
         self.bot_farm_detector = BotFarmAnomalyDetector()
         self.pool = WorkerPool([self.config], anomaly_detector=self.bot_farm_detector)
+        self.nl_agent = NaturalLanguageAgent(self.pool)
         self.decentralized = DecentralizedOrchestrator(self.pool, node_id=node_id)
         self.resource_optimizer = ResourceOptimizer()
         self.deployment_pipeline = DeploymentPipelineOrchestrator()
         self._active_engines: Dict[str, Dict[str, Any]] = {}
         self._pipelines: Dict[str, DeploymentStatus] = {}
         self._resource_allocations: Dict[str, ResourceLimits] = {}
+        # Track active WebSocket connections to push updates
+        self._active_connections: Dict[str, Any] = {}
 
     async def websocket_handler(self, websocket, path):
-        """Handle incoming WebSocket connections."""
+        """Handle incoming WebSocket connections with real-time push updates.
+        
+        Supports both analysis requests and natural language requests,
+        pushing thinking state updates and final results without client polling.
+        """
+        connection_id = str(uuid.uuid4())
+        self._active_connections[connection_id] = websocket
+        logger.info(f"New WebSocket connection: {connection_id}")
+        
         try:
             async for message in websocket:
                 try:
                     request_data = json.loads(message)
-                    request = AnalysisRequest(**request_data)
-                    result = await self.decentralized.submit_task(request)
-                    await websocket.send(result.model_dump_json())
+                    request_type = request_data.get("type", "analysis")
+                    
+                    if request_type == "nl_request":
+                        # Handle natural language request with real-time updates
+                        nl_request = NLAnalysisRequest(**request_data["payload"])
+                        request_id = nl_request.request_id
+                        
+                        # Push initial thinking state
+                        await websocket.send(json.dumps({
+                            "type": "nl_thinking",
+                            "payload": {
+                                "request_id": request_id,
+                                "status": "processing",
+                                "message": "Analyzing your request..."
+                            }
+                        }))
+                        
+                        # Process the NL request asynchronously
+                        asyncio.create_task(self._process_nl_request(websocket, nl_request))
+                        
+                    elif request_type == "analysis":
+                        # Standard analysis request
+                        request = AnalysisRequest(**request_data["payload"])
+                        result = await self.decentralized.submit_task(request)
+                        await websocket.send(json.dumps({
+                            "type": "analysis_complete",
+                            "payload": result.model_dump()
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "error": f"Unknown request type: {request_type}"
+                        }))
+                        
                 except (json.JSONDecodeError, TypeError, ValueError) as e:
                     await websocket.send(json.dumps({"error": str(e)}))
+                    
         except websockets.exceptions.ConnectionClosed:
-            pass
+            logger.info(f"WebSocket connection closed: {connection_id}")
+        finally:
+            # Clean up connection
+            if connection_id in self._active_connections:
+                del self._active_connections[connection_id]
+    
+    async def _process_nl_request(self, websocket, request: NLAnalysisRequest):
+        """Process a natural language request and push all updates through WebSocket."""
+        request_id = request.request_id
+        
+        try:
+            # Push intermediate status update
+            await websocket.send(json.dumps({
+                "type": "nl_thinking",
+                "payload": {
+                    "request_id": request_id,
+                    "status": "analyzing",
+                    "message": "Running chess engine analysis..."
+                }
+            }))
+            
+            # Process the request using the NL agent
+            response = await self.nl_agent.process_request(
+                user_input=request.user_input,
+                fen=request.fen,
+                move_history=request.move_history,
+                complexity=request.complexity,
+                context=request.context
+            )
+            
+            # Push final completion status
+            await websocket.send(json.dumps({
+                "type": "nl_complete",
+                "payload": response.to_dict()
+            }))
+            
+            logger.info(f"Completed NL request {request_id}: intent={response.intent.value}")
+            
+        except Exception as e:
+            logger.error(f"Error processing NL request {request_id}: {e}", exc_info=True)
+            # Push error status
+            await websocket.send(json.dumps({
+                "type": "nl_error",
+                "payload": {
+                    "request_id": request_id,
+                    "error": str(e)
+                }
+            }))
 
     async def start(self):
         """Start the orchestrator services."""

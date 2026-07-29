@@ -1,4 +1,4 @@
-use chess::{TimeControl, PlayerClock};
+use chess::{PlayerClock, TimeControl};
 use std::time::Duration;
 
 #[cfg(test)]

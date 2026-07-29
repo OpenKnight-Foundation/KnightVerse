@@ -8,10 +8,7 @@ pub mod db {
         )
         .to_owned();
 
-        let db: DatabaseConnection =
-            Database::connect(connect_options)
-                .await
-                .unwrap();
+        let db: DatabaseConnection = Database::connect(connect_options).await.unwrap();
 
         db
     }

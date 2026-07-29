@@ -1,5 +1,11 @@
 pub struct Lc0Orchestrator;
 
+impl Default for Lc0Orchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Lc0Orchestrator {
     pub fn new() -> Self {
         Lc0Orchestrator

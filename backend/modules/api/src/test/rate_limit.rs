@@ -1,7 +1,7 @@
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{test, web, App, HttpResponse, Responder};
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 async fn mock_handler() -> impl Responder {
     HttpResponse::Ok().body("OK")
@@ -19,13 +19,13 @@ async fn test_auth_rate_limiting() {
         .unwrap();
 
     let app = test::init_service(
-        App::new()
-            .service(
-                web::scope("/v1/auth")
-                    .wrap(Governor::new(&auth_governor_conf))
-                    .route("/login", web::post().to(mock_handler))
-            )
-    ).await;
+        App::new().service(
+            web::scope("/v1/auth")
+                .wrap(Governor::new(&auth_governor_conf))
+                .route("/login", web::post().to(mock_handler)),
+        ),
+    )
+    .await;
 
     // Request 1: Should pass
     let req = test::TestRequest::post()
@@ -64,13 +64,13 @@ async fn test_game_rate_limiting() {
         .unwrap();
 
     let app = test::init_service(
-        App::new()
-            .service(
-                web::scope("/v1/games")
-                    .wrap(Governor::new(&game_governor_conf))
-                    .route("/create", web::post().to(mock_handler))
-            )
-    ).await;
+        App::new().service(
+            web::scope("/v1/games")
+                .wrap(Governor::new(&game_governor_conf))
+                .route("/create", web::post().to(mock_handler)),
+        ),
+    )
+    .await;
 
     // Send 3 requests, all should pass
     for _ in 0..3 {

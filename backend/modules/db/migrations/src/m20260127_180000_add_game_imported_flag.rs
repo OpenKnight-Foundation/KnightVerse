@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -17,11 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(false),
                     )
-                    .add_column(
-                        ColumnDef::new(Game::OriginalPgn)
-                            .text()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(Game::OriginalPgn).text().null())
                     .to_owned(),
             )
             .await?;

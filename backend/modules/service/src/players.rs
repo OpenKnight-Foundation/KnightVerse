@@ -6,16 +6,15 @@ use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
-async fn is_username_taken(username: String) -> bool {
+async fn is_username_taken(username: String) -> Result<bool, ApiError> {
     let db = get_db().await;
 
     let user = player::Entity::find()
         .filter(player::Column::Username.eq(username))
         .one(&db)
-        .await
-        .unwrap();
+        .await?;
 
-    user.is_some()
+    Ok(user.is_some())
 }
 
 async fn is_email_taken(email: String) -> bool {
@@ -84,11 +83,12 @@ pub async fn add_player(payload: NewPlayer) -> Result<player::Model, ApiError> {
         return Ok(model);
     }
 
-    let email_available = is_email_taken(payload.email.clone()).await;
-    let username_available = is_username_taken(payload.username.clone()).await;
-    if email_available && username_available {
-        return Err(ApiError::InvalidCredentials);
-    }
+let email_taken = is_email_taken(payload.email.clone()).await;
+let username_taken = is_username_taken(payload.username.clone()).await?;
+
+if email_taken && username_taken {
+    return Err(ApiError::InvalidCredentials);
+            }
     let new_player = player::ActiveModel {
         id: Set(Uuid::new_v4()),
         username: Set(payload.username),

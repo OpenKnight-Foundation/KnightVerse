@@ -441,3 +441,17 @@ class TestEdgeCases(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_en_passant_parsing(self):
+        pgn_text = "[Event \"Casual Game\"]\n\n1. e4 e6 2. e5 d5 3. exd6 *"
+        converter = PGNConverter()
+        games = list(converter.parse_pgn_string(pgn_text))
+        self.assertEqual(len(games), 1)
+        self.assertEqual(len(list(games[0].mainline_moves())), 5)
+        # Ensure en passant was parsed successfully
+
+    def test_pawn_promotion(self):
+        pgn_text = "[Event \"Casual Game\"]\n\n1. e4 d5 2. exd5 Nf6 3. d6 Nd5 4. d7+ Kd7 5. d8=Q+ *"
+        converter = PGNConverter()
+        games = list(converter.parse_pgn_string(pgn_text))
+        self.assertEqual(len(games), 1)

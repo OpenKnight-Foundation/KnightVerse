@@ -10,6 +10,7 @@ dependencies = [
     "psutil>=5.9",
     "chess>=1.10",
     "numpy>=1.24",
+    "prometheus-client>=0.17.0",
 ]
 
 [project.optional-dependencies]

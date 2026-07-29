@@ -1,22 +1,19 @@
 use actix_web::{
-    HttpResponse, HttpRequest, HttpMessage, delete, get, post, put,
+    delete, get, post, put,
     web::{self, Json, Path, Query},
+    HttpMessage, HttpRequest, HttpResponse,
 };
-use dto::{
-    games::{
-        CreateGameRequest, GameDisplayDTO, MakeMoveRequest, JoinGameRequest,
-        GameStatus, ListGamesQuery, ImportGameRequest, ImportGameResponse,
-        CompleteGameRequest, CompleteGameResponse,
-    },
-    responses::{InvalidCredentialsResponse, NotFoundResponse},
-};
+use dto::games::{
+        CompleteGameRequest, CompleteGameResponse, CreateGameRequest, GameStatus,
+        ImportGameRequest, ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
+    };
 use error::error::ApiError;
+use sea_orm::DatabaseConnection;
 use security::jwt::Claims;
 use serde_json::json;
-use validator::Validate;
-use uuid::Uuid;
-use sea_orm::DatabaseConnection;
 use service::games::GameService;
+use uuid::Uuid;
+use validator::Validate;
 
 // ---------------------------------------------------------------------------
 // Helper: extract authenticated player UUID from JWT claims.
@@ -93,10 +90,7 @@ pub async fn create_game(
     tag = "Games"
 )]
 #[get("/{id}")]
-pub async fn get_game(
-    id: Path<Uuid>,
-    db: web::Data<DatabaseConnection>,
-) -> HttpResponse {
+pub async fn get_game(id: Path<Uuid>, db: web::Data<DatabaseConnection>) -> HttpResponse {
     let game_id = id.into_inner();
 
     match GameService::get_game(db.get_ref(), game_id).await {
@@ -199,25 +193,17 @@ pub async fn list_games(
     db: web::Data<DatabaseConnection>,
 ) -> HttpResponse {
     let status_enum: Option<GameStatus> = query.status.as_deref().and_then(|s| match s {
-        "waiting"     => Some(GameStatus::Waiting),
+        "waiting" => Some(GameStatus::Waiting),
         "in_progress" => Some(GameStatus::InProgress),
-        "completed"   => Some(GameStatus::Completed),
-        "aborted"     => Some(GameStatus::Aborted),
-        _             => None,
+        "completed" => Some(GameStatus::Completed),
+        "aborted" => Some(GameStatus::Aborted),
+        _ => None,
     });
 
-    let limit  = query.limit.unwrap_or(10);
+    let limit = query.limit.unwrap_or(10);
     let cursor = query.cursor.clone();
 
-    match GameService::list_games(
-        db.get_ref(),
-        cursor,
-        limit,
-        query.player_id,
-        status_enum,
-    )
-    .await
-    {
+    match GameService::list_games(db.get_ref(), cursor, limit, query.player_id, status_enum).await {
         Ok((games, next_cursor)) => {
             let game_dtos: Vec<serde_json::Value> = games
                 .into_iter()
@@ -291,7 +277,7 @@ pub async fn join_game(
         Ok(id) => id,
         Err(resp) => return resp,
     };
-    let game_id   = id.into_inner();
+    let game_id = id.into_inner();
 
     match GameService::join_game(db.get_ref(), game_id, player_id).await {
         Ok(game_dto) => HttpResponse::Ok().json(json!({
@@ -397,14 +383,14 @@ pub async fn import_game(
         Ok(p) => p,
         Err(e) => {
             return HttpResponse::BadRequest().json(ImportGameResponse {
-                success:      false,
-                game_id:      None,
+                success: false,
+                game_id: None,
                 white_player: String::new(),
                 black_player: String::new(),
-                result:       String::new(),
-                move_count:   0,
-                final_fen:    None,
-                error:        Some(e.to_string()),
+                result: String::new(),
+                move_count: 0,
+                final_fen: None,
+                error: Some(e.to_string()),
             });
         }
     };
@@ -414,14 +400,14 @@ pub async fn import_game(
         Ok(v) => v,
         Err(e) => {
             return HttpResponse::UnprocessableEntity().json(ImportGameResponse {
-                success:      false,
-                game_id:      None,
+                success: false,
+                game_id: None,
                 white_player: parsed.headers.white.clone(),
                 black_player: parsed.headers.black.clone(),
-                result:       String::new(),
-                move_count:   0,
-                final_fen:    None,
-                error:        Some(e.to_string()),
+                result: String::new(),
+                move_count: 0,
+                final_fen: None,
+                error: Some(e.to_string()),
             });
         }
     };
@@ -431,26 +417,26 @@ pub async fn import_game(
     // Persist in DB with is_imported = true.
     match GameService::import_game(db.get_ref(), importer_id, &validated).await {
         Ok(game_id) => HttpResponse::Created().json(ImportGameResponse {
-            success:      true,
-            game_id:      Some(game_id),
+            success: true,
+            game_id: Some(game_id),
             white_player: validated.headers.white,
             black_player: validated.headers.black,
-            result:       result_str,
-            move_count:   validated.ply_count,
-            final_fen:    Some(validated.final_fen),
-            error:        None,
+            result: result_str,
+            move_count: validated.ply_count,
+            final_fen: Some(validated.final_fen),
+            error: None,
         }),
         Err(e) => {
             eprintln!("import_game DB error: {e}");
             HttpResponse::InternalServerError().json(ImportGameResponse {
-                success:      false,
-                game_id:      None,
+                success: false,
+                game_id: None,
                 white_player: validated.headers.white,
                 black_player: validated.headers.black,
-                result:       result_str,
-                move_count:   validated.ply_count,
-                final_fen:    Some(validated.final_fen),
-                error:        Some("Failed to persist imported game".to_string()),
+                result: result_str,
+                move_count: validated.ply_count,
+                final_fen: Some(validated.final_fen),
+                error: Some("Failed to persist imported game".to_string()),
             })
         }
     }
@@ -513,10 +499,12 @@ pub async fn complete_game(
 
     // Get current ratings before update for calculating changes
     let white_old_rating = match service::games::GameService::get_player_rating_for_game(
-        db.get_ref(), 
-        game_id, 
-        true // white player
-    ).await {
+        db.get_ref(),
+        game_id,
+        true, // white player
+    )
+    .await
+    {
         Ok(rating) => rating,
         Err(e) => {
             eprintln!("Failed to get white player rating: {e}");
@@ -527,10 +515,12 @@ pub async fn complete_game(
     };
 
     let black_old_rating = match service::games::GameService::get_player_rating_for_game(
-        db.get_ref(), 
-        game_id, 
-        false // black player
-    ).await {
+        db.get_ref(),
+        game_id,
+        false, // black player
+    )
+    .await
+    {
         Ok(rating) => rating,
         Err(e) => {
             eprintln!("Failed to get black player rating: {e}");
@@ -541,7 +531,14 @@ pub async fn complete_game(
     };
 
     // Complete the game and update ratings
-    match GameService::complete_game(db.get_ref(), game_id, result_enum.clone(), Some(rating_config)).await {
+    match GameService::complete_game(
+        db.get_ref(),
+        game_id,
+        result_enum.clone(),
+        Some(rating_config),
+    )
+    .await
+    {
         Ok((white_new_rating, black_new_rating)) => {
             let white_change = white_new_rating - white_old_rating;
             let black_change = black_new_rating - black_old_rating;

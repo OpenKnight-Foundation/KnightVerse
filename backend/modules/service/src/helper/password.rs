@@ -1,4 +1,4 @@
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
 use rand::rngs::OsRng;
 
@@ -13,7 +13,7 @@ pub fn verify_password<'a>(
     password: &'a str,
     hashed_password: &'a str,
 ) -> Result<(), argon2::password_hash::Error> {
-    let password_hash = PasswordHash::new(&hashed_password)?;
+    let password_hash = PasswordHash::new(hashed_password)?;
     // Trait objects for algorithms to support
     let algs: &[&dyn PasswordVerifier] = &[&Argon2::default()];
 

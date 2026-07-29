@@ -27,19 +27,14 @@ impl MatchmakingService {
         }
     }
 
-    async fn get_redis_connection(
-        &self,
-    ) -> Result<deadpool_redis::Connection, String> {
+    async fn get_redis_connection(&self) -> Result<deadpool_redis::Connection, String> {
         self.redis_pool
             .get()
             .await
             .map_err(|e| format!("Redis connection failed: {}", e))
     }
 
-    pub async fn join_queue(
-        &self,
-        request: MatchRequest,
-    ) -> Result<MatchmakingResponse, String> {
+    pub async fn join_queue(&self, request: MatchRequest) -> Result<MatchmakingResponse, String> {
         let request_id = request.id;
 
         match request.match_type {
@@ -65,8 +60,7 @@ impl MatchmakingService {
                     });
                 } else {
                     return Ok(MatchmakingResponse {
-                        status: "Invalid private match request: missing invite address"
-                            .to_string(),
+                        status: "Invalid private match request: missing invite address".to_string(),
                         match_id: None,
                         request_id,
                     });
@@ -105,7 +99,6 @@ impl MatchmakingService {
 
         Ok(())
     }
-
 
     async fn add_private_invite(
         &self,
@@ -192,6 +185,7 @@ impl MatchmakingService {
                     player2: accepting_player,
                     match_type: MatchType::Private,
                     created_at: Utc::now(),
+                    time_control: invite_request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();
@@ -206,7 +200,6 @@ impl MatchmakingService {
         }
 
         Ok(None)
-
     }
 
     pub async fn cancel_request(&self, request_id: Uuid) -> Result<bool, String> {
@@ -273,10 +266,7 @@ impl MatchmakingService {
         Ok(false)
     }
 
-    pub async fn get_queue_status(
-        &self,
-        request_id: Uuid,
-    ) -> Result<Option<QueueStatus>, String> {
+    pub async fn get_queue_status(&self, request_id: Uuid) -> Result<Option<QueueStatus>, String> {
         let mut conn = self.get_redis_connection().await?;
 
         // Check rated queue
@@ -404,6 +394,7 @@ impl MatchmakingService {
                     player2: request.player.clone(),
                     match_type: MatchType::Rated,
                     created_at: Utc::now(),
+                    time_control: request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();
@@ -432,7 +423,7 @@ impl MatchmakingService {
             .zpopmin(key, 1)
             .await
             .map_err(|e| format!("Redis ZPOPMIN failed: {}", e))?;
-        
+
         let result = result.into_iter().next();
 
         if let Some((member, _score)) = result {
@@ -444,6 +435,7 @@ impl MatchmakingService {
                     player2: request.player.clone(),
                     match_type: MatchType::Casual,
                     created_at: Utc::now(),
+                    time_control: request.time_control.clone(),
                 };
 
                 let mut active_matches = self.active_matches.lock().unwrap();

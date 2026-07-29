@@ -38,18 +38,25 @@
     "@playwright/test": "^1.62.0",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/postcss": "^4",
+
+    "@testing-library/dom": "^10.4.1",
+
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/chess.js": "^0.13.7",
-    "@types/node": "^20",
+    "@types/node": "^20.19.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/webpack": "^5.28.5",
+
+    "@vitejs/plugin-react": "^6.0.4",
+
     "eslint": "^9",
     "eslint-config-next": "15.2.3",
     "jsdom": "^29.0.2",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^8.1.5",
     "vitest": "^4.1.5"
   }
 }

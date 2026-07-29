@@ -1,6 +1,5 @@
 use sea_orm_migration::{prelude::*, MigrationTrait};
 
-
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -30,7 +29,9 @@ impl MigrationTrait for Migration {
         // Create GIN index using raw SQL as IndexType::Gin is not available/standard in all sea-orm versions or requires specific features
         manager
             .get_connection()
-            .execute_unprepared(r#"CREATE INDEX IF NOT EXISTS "idx_game_pgn" ON "smdb"."game" USING GIN ("pgn")"#)
+            .execute_unprepared(
+                r#"CREATE INDEX IF NOT EXISTS "idx_game_pgn" ON "smdb"."game" USING GIN ("pgn")"#,
+            )
             .await?;
         manager
             .create_index(
@@ -59,13 +60,28 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_index(Index::drop().name("idx_game_white_player").table(Game::Table).to_owned())
+            .drop_index(
+                Index::drop()
+                    .name("idx_game_white_player")
+                    .table(Game::Table)
+                    .to_owned(),
+            )
             .await?;
         manager
-            .drop_index(Index::drop().name("idx_game_black_player").table(Game::Table).to_owned())
+            .drop_index(
+                Index::drop()
+                    .name("idx_game_black_player")
+                    .table(Game::Table)
+                    .to_owned(),
+            )
             .await?;
         manager
-            .drop_index(Index::drop().name("idx_game_pgn").table(Game::Table).to_owned())
+            .drop_index(
+                Index::drop()
+                    .name("idx_game_pgn")
+                    .table(Game::Table)
+                    .to_owned(),
+            )
             .await?;
         manager
             .drop_index(

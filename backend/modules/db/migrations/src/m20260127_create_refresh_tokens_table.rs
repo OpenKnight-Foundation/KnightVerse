@@ -31,9 +31,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(RefreshTokens::UsedAt)
-                        .timestamp_with_time_zone()
-                        .null())
+                    .col(
+                        ColumnDef::new(RefreshTokens::UsedAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(RefreshTokens::ExpiresAt)
                             .timestamp_with_time_zone()
@@ -52,15 +54,21 @@ impl MigrationTrait for Migration {
                             .to(Players::Table, Players::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
-                    .index(Index::create()
-                        .name("idx_refresh_tokens_family_id")
-                        .col(RefreshTokens::FamilyId))
-                    .index(Index::create()
-                        .name("idx_refresh_tokens_player_id")
-                        .col(RefreshTokens::PlayerId))
-                    .index(Index::create()
-                        .name("idx_refresh_tokens_token_hash")
-                        .col(RefreshTokens::TokenHash))
+                    .index(
+                        Index::create()
+                            .name("idx_refresh_tokens_family_id")
+                            .col(RefreshTokens::FamilyId),
+                    )
+                    .index(
+                        Index::create()
+                            .name("idx_refresh_tokens_player_id")
+                            .col(RefreshTokens::PlayerId),
+                    )
+                    .index(
+                        Index::create()
+                            .name("idx_refresh_tokens_token_hash")
+                            .col(RefreshTokens::TokenHash),
+                    )
                     .to_owned(),
             )
             .await

@@ -1,11 +1,24 @@
 [package]
-name = "validate"
+name = "knightverse-core"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+actix-web = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+lazy_static = "1.4"
+api = { path = "../modules/api" }
+
 [dev-dependencies]
-criterion = "0.5"
+tokio = { version = "1", features = ["full"] }
 
 [lib]
-name = "validate"
-path = "src/lib.rs"
+name = "knightverse_core"
+path = "lib.rs"
+
+[[bin]]
+name = "knightverse-server"
+path = "main.rs"

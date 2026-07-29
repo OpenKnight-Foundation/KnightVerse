@@ -141,6 +141,9 @@ const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle co
 const TOURNAMENT_TIMELOCK: Symbol = symbol_short!("TL_DUR"); // u64 - lock duration in ledger sequences
 const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, TournamentEscrow>
 
+// Pausable extension (SC-11)
+const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -237,6 +240,8 @@ pub enum ContractError {
     EmptyBatch = 37,
     /// claim_puzzle_rewards_batch called with more proofs than MAX_BATCH_SIZE
     BatchTooLarge = 38,
+    /// Contract is paused for emergency halt (SC-11)
+    ContractPaused = 39,
 }
 
 #[contract]
@@ -265,6 +270,60 @@ impl GameContract {
         TokenClient::new(env, &Self::token_contract_address(env))
     }
 
+    // ── Pausable extension (SC-11) ────────────────────────────────────────────
+
+    /// Pause the contract — blocks all state-mutating operations.
+    /// Only the contract admin may call this.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Already paused");
+        }
+        env.storage().instance().set(&PAUSED, &true);
+        env.events()
+            .publish((symbol_short!("paused"),), caller);
+    }
+
+    /// Unpause the contract — resumes normal operations.
+    /// Only the contract admin may call this.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Not paused");
+        }
+        env.storage().instance().set(&PAUSED, &false);
+        env.events()
+            .publish((symbol_short!("unpaused"),), caller);
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&PAUSED).unwrap_or(false)
+    }
+
+    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    fn check_not_paused(env: &Env) {
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Contract is paused");
+        }
+    }
+
     /// Gas-optimized tournament payout — single pass, no redundant map reads.
     /// Validates percentages and distributes atomically.
     pub fn payout_tournament_optimized(
@@ -273,6 +332,7 @@ impl GameContract {
         winners: Vec<Address>,
         percentages: Vec<u32>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -346,6 +406,7 @@ impl GameContract {
         player1: Address,
         wager_amount: i128,
     ) -> Result<u64, ContractError> {
+        Self::check_not_paused(&env);
         let max_stake: i128 = env.storage().instance().get(&MAX_STAKE).unwrap_or(1_000);
         if wager_amount > max_stake {
             return Err(ContractError::StakeLimitExceeded);
@@ -412,6 +473,7 @@ impl GameContract {
     }
 
     pub fn join_game(env: Env, game_id: u64, player2: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -484,6 +546,7 @@ impl GameContract {
         player: Address,
         move_data: Vec<u32>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -535,6 +598,7 @@ impl GameContract {
         player: Address,
         signature: BytesN<64>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -587,6 +651,7 @@ impl GameContract {
         winner: Address,
         signature: BytesN<64>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -640,6 +705,7 @@ impl GameContract {
     }
 
     pub fn cancel_game(env: Env, game_id: u64, player: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -681,6 +747,7 @@ impl GameContract {
     }
 
     pub fn forfeit(env: Env, game_id: u64, player: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -718,6 +785,7 @@ impl GameContract {
     }
 
     pub fn payout(env: Env, game_id: u64, winner: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -753,6 +821,7 @@ impl GameContract {
         winners: Vec<Address>,
         percentages: Vec<u32>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -1076,6 +1145,7 @@ impl GameContract {
         nonce: u64,
         signature: BytesN<64>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         if reward_amount <= 0 || reward_amount > i64::MAX as i128 {
             return Err(ContractError::InvalidAmount);
         }
@@ -1189,6 +1259,7 @@ impl GameContract {
     //   • All proofs valid        → every recipient balance incremented,
     //                                treasury decremented by the sum, in one TX
     pub fn claim_puzzle_rewards_batch(env: Env, proofs: Vec<Proof>) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         if proofs.is_empty() {
             return Err(ContractError::EmptyBatch);
         }
@@ -1360,6 +1431,7 @@ impl GameContract {
         against: Address,
         reason: Bytes,
     ) -> Result<u64, ContractError> {
+        Self::check_not_paused(&env);
         let games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -1437,6 +1509,7 @@ impl GameContract {
         game_id: u64,
         claimant: Address,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -1523,6 +1596,7 @@ impl GameContract {
         winner: Option<Address>,
         resolution: Bytes,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let stored_arbitrator: Address = env
             .storage()
             .instance()
@@ -1601,6 +1675,7 @@ impl GameContract {
         arbitrator: Address,
         reason: Bytes,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         // Verify arbitrator
         let stored_arbitrator: Address = env
             .storage()
@@ -1690,6 +1765,7 @@ impl GameContract {
         nonce: BytesN<32>,
         expiry: u64,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let current_admin: Address = env
             .storage()
             .instance()
@@ -1739,6 +1815,7 @@ impl GameContract {
         nonce: BytesN<32>,
         signature: BytesN<64>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         // 1. Load and validate the challenge
         let mut challenges: Map<BytesN<32>, u64> = env
             .storage()
@@ -1838,6 +1915,7 @@ impl GameContract {
         signers: Vec<Address>,
         threshold: u32,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let current_admin: Address = env
             .storage()
             .instance()
@@ -1871,6 +1949,7 @@ impl GameContract {
         new_fee_bips: u32,
         new_treasury_address: Address,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         if new_fee_bips > 1000 {
             return Err(ContractError::InvalidAmount);
         }
@@ -1918,6 +1997,7 @@ impl GameContract {
     ///
     /// When approvals reach the threshold the fee change is applied immediately.
     pub fn approve_fee_proposal(env: Env, signer: Address) -> Result<bool, ContractError> {
+        Self::check_not_paused(&env);
         let signers: Vec<Address> = env
             .storage()
             .instance()
@@ -1990,6 +2070,7 @@ impl GameContract {
 
     /// Cancel the pending fee proposal (any signer may cancel).
     pub fn cancel_fee_proposal(env: Env, signer: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let signers: Vec<Address> = env
             .storage()
             .instance()
@@ -2094,6 +2175,7 @@ impl GameContract {
         admin: Address,
         duration: u64,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let current_admin: Address = env
             .storage()
             .instance()
@@ -2117,6 +2199,7 @@ impl GameContract {
     /// Locks the total prize pool until `current_ledger + timelock_duration`.
     /// Returns the escrow ID.
     pub fn create_tournament_escrow(env: Env, game_id: u64) -> Result<u64, ContractError> {
+        Self::check_not_paused(&env);
         let games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -2181,6 +2264,7 @@ impl GameContract {
         winners: Vec<Address>,
         percentages: Vec<u32>,
     ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let current_admin: Address = env
             .storage()
             .instance()

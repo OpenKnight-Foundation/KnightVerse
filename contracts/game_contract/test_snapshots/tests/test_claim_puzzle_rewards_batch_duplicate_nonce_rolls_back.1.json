@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
+                  "bytes": "3a48bb6674abae11f8ed4212baeb3a837ff617891c82395dd00ee74f3228a640"
                 },
                 {
                   "i128": {
@@ -81,7 +81,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
+                          "bytes": "3a48bb6674abae11f8ed4212baeb3a837ff617891c82395dd00ee74f3228a640"
                         }
                       },
                       {
@@ -98,6 +98,17 @@
                         },
                         "val": {
                           "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {
@@ -221,7 +232,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
+                  "bytes": "3a48bb6674abae11f8ed4212baeb3a837ff617891c82395dd00ee74f3228a640"
                 },
                 {
                   "i128": {
@@ -317,7 +328,7 @@
                         "symbol": "signature"
                       },
                       "val": {
-                        "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                        "bytes": "ef88b7018ba41ff00aab1e5b65f27f1e7890bb2d81f4d84a2ce9a1bf202e65f093a66527af629799b45711892ff21dd86b5f4716f5a670b8a743734067b1ad08"
                       }
                     }
                   ]
@@ -356,7 +367,7 @@
                         "symbol": "signature"
                       },
                       "val": {
-                        "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                        "bytes": "f6fb96feb2fc4facda605555d481f385f69c32c7ba018307db3696a34ee3a2a252ab14ae2c18c01d692be7cab0d4f337da11aa6904d2dd94b04b22cfde8d730d"
                       }
                     }
                   ]
@@ -507,7 +518,7 @@
                                 "symbol": "signature"
                               },
                               "val": {
-                                "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                                "bytes": "ef88b7018ba41ff00aab1e5b65f27f1e7890bb2d81f4d84a2ce9a1bf202e65f093a66527af629799b45711892ff21dd86b5f4716f5a670b8a743734067b1ad08"
                               }
                             }
                           ]
@@ -546,7 +557,7 @@
                                 "symbol": "signature"
                               },
                               "val": {
-                                "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                                "bytes": "f6fb96feb2fc4facda605555d481f385f69c32c7ba018307db3696a34ee3a2a252ab14ae2c18c01d692be7cab0d4f337da11aa6904d2dd94b04b22cfde8d730d"
                               }
                             }
                           ]

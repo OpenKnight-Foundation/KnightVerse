@@ -246,11 +246,37 @@ async def main() -> None:
     
     logger.info(f"Decentralized Engine Orchestrator started on node {orchestrator.decentralized.node_id}")
     
+    # Set up shutdown event to trigger graceful shutdown
+    shutdown_event = asyncio.Event()
+    
+    # Define signal handler to trigger graceful shutdown
+    def handle_shutdown_signal():
+        logger.info("Received shutdown signal, initiating graceful shutdown")
+        shutdown_event.set()
+    
+    # Register signal handlers for SIGINT and SIGTERM
+    loop = asyncio.get_running_loop()
+    for signal_name in ('SIGINT', 'SIGTERM'):
+        loop.add_signal_handler(
+            getattr(asyncio, signal_name),
+            handle_shutdown_signal
+        )
+    
     try:
-        await asyncio.Event().wait()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        await orchestrator.shutdown()
-        logger.info("Orchestrator shut down")
+        # Wait for shutdown signal
+        await shutdown_event.wait()
+    finally:
+        # Wait for active evaluations to complete with a 30 second timeout
+        logger.info("Waiting for active evaluations to complete (timeout: 30s)")
+        try:
+            await asyncio.wait_for(orchestrator.shutdown(), timeout=30)
+            logger.info("Orchestrator shut down gracefully")
+        except asyncio.TimeoutError:
+            logger.error("Timed out waiting for active evaluations to complete, forcing shutdown")
+            # Force shutdown even if tasks are still running
+            await orchestrator.shutdown()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
 
 async def run_demonstration():
     orchestrator = AgentEngineOrchestrator(node_id="demo-node")

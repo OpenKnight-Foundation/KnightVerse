@@ -1,7 +1,7 @@
 use crate::helper::password;
 use db::db::db::get_db;
-use dto::players::{NewPlayer, UpdatePlayer};
 use db_entity::player::{self, Model};
+use dto::players::{NewPlayer, UpdatePlayer};
 use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
@@ -67,7 +67,10 @@ pub async fn add_player(payload: NewPlayer) -> Result<player::Model, ApiError> {
             id: Uuid::new_v4(),
             username: payload.username,
             email: payload.email,
-            password_hash: password::hash_password(&payload.password).ok().map(|h| h.into_bytes()).unwrap_or_default(),
+            password_hash: password::hash_password(&payload.password)
+                .ok()
+                .map(|h| h.into_bytes())
+                .unwrap_or_default(),
             biography: String::new(),
             country: String::new(),
             flair: String::new(),
@@ -151,6 +154,31 @@ pub async fn update_player(id: Uuid, payload: UpdatePlayer) -> Result<player::Mo
         .map_err(ApiError::DatabaseError)?;
 
     Ok(updated_player)
+}
+
+pub async fn authenticate_player(
+    username: String,
+    password: &str,
+) -> Result<player::Model, ApiError> {
+    let db = get_db().await;
+
+    let user = player::Entity::find()
+        .filter(player::Column::Username.eq(username))
+        .filter(player::Column::IsEnabled.eq(true))
+        .one(&db)
+        .await?;
+
+    match user {
+        Some(usr) => {
+            let stored_hash = String::from_utf8(usr.password_hash.clone())
+                .map_err(|_| ApiError::InvalidCredentials)?;
+            match password::verify_password(password, &stored_hash) {
+                Ok(()) => Ok(usr),
+                Err(_) => Err(ApiError::InvalidCredentials),
+            }
+        }
+        None => Err(ApiError::InvalidCredentials),
+    }
 }
 
 pub async fn delete_player(id: Uuid) -> Result<(), ApiError> {

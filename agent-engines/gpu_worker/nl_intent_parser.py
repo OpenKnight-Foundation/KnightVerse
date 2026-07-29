@@ -7,9 +7,33 @@ for chess analysis requests.
 from __future__ import annotations
 
 import re
-from typing import Optional
+import hashlib
+import time
+from typing import Optional, Dict, Any
 
 from gpu_worker.nl_models import ComplexityLevel, IntentRecognition, IntentType
+
+
+# In-memory cache for intent recognition results, TTL 24 hours (86400 seconds)
+INTENT_CACHE: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL = 86400  # 24 hours in seconds
+
+
+def _cleanup_expired_cache_entries() -> None:
+    """Remove expired cache entries to prevent memory leaks."""
+    current_time = time.time()
+    expired_keys = [
+        key for key, value in INTENT_CACHE.items()
+        if current_time - value['timestamp'] > CACHE_TTL
+    ]
+    for key in expired_keys:
+        del INTENT_CACHE[key]
+
+
+def _get_cache_key(user_input: str) -> str:
+    """Generate a consistent cache key from user input."""
+    # Use hash to keep keys manageable regardless of input length
+    return hashlib.sha256(user_input.lower().strip().encode()).hexdigest()
 
 
 # Pattern definitions for intent recognition

@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "ce4115343a41e3c567bf5ae3829eadcb240f7eb775e39591e67a1329fe4095fa"
+                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                 },
                 {
                   "i128": {
@@ -38,6 +38,7 @@
         }
       ]
     ],
+    [],
     [],
     [],
     []
@@ -80,27 +81,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "ce4115343a41e3c567bf5ae3829eadcb240f7eb775e39591e67a1329fe4095fa"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "BALANCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 500
-                                }
-                              }
-                            }
-                          ]
+                          "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                         }
                       },
                       {
@@ -121,17 +102,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "MAXPOOL"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 2000
-                          }
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "MAXSTAKE"
                         },
                         "val": {
@@ -143,29 +113,12 @@
                       },
                       {
                         "key": {
-                          "symbol": "NONCES"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "u64": 1
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "TREASURY"
                         },
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 9500
+                            "lo": 10000
                           }
                         }
                       },
@@ -268,7 +221,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "ce4115343a41e3c567bf5ae3829eadcb240f7eb775e39591e67a1329fe4095fa"
+                  "bytes": "9b07e1dc926b3b6eb9691a739f3f0c2039ef933eea49049e84f645ca1172596a"
                 },
                 {
                   "i128": {
@@ -325,25 +278,88 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                      }
+                    }
+                  ]
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 500
-                  }
-                },
-                {
-                  "u64": 1
-                },
-                {
-                  "bytes": "2a7d66af9a919c8247bd86adba4c8a44736470b360b84d62c68406c10c37ce8f0f71bb17710cb3727688de5c896af13a445a88ae1cc1068b132d639bad240609"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 200
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -370,13 +386,13 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 500
+                "lo": 100
               }
             }
           }
         }
       },
-      "failed_call": false
+      "failed_call": true
     },
     {
       "event": {
@@ -390,10 +406,157 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
-            "data": "void"
+            "data": {
+              "error": {
+                "contract": 14
+              }
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 14
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 14
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract try_call failed"
+                },
+                {
+                  "symbol": "claim_puzzle_rewards_batch"
+                },
+                {
+                  "vec": [
+                    {
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 9
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 100
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "95b974c4966313869c001a43775631d7fced624023cd56da89f5448901005c617f2e4162df6d8a4e94aa4ca56ae3d7e5ed4faf5861eeb775a70137c9c3164008"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 9
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 200
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "f213f8aa48f1dc5629a7595801952149957202c1dcc424bb56eebc2afc527f1644ca394ccb802f4d9d2067cb0a03a756042bf0edd1ac2889fef62bf61f9b5b04"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           }
         }
       },
@@ -443,7 +606,59 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 500
+                "lo": 0
+              }
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "reward_balance"
+              }
+            ],
+            "data": {
+              "i128": {
+                "hi": 0,
+                "lo": 0
               }
             }
           }
@@ -493,7 +708,7 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 9500
+                "lo": 10000
               }
             }
           }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from asyncio.subprocess import PIPE
 from collections.abc import Callable
 from contextlib import suppress
@@ -10,6 +11,8 @@ import re
 from typing import Protocol
 
 from gpu_worker.config import EngineBackend, WorkerConfig
+
+logger = logging.getLogger("KnightVerse.UciBridge")
 
 
 class UciBridgeError(RuntimeError):
@@ -85,10 +88,14 @@ class AsyncUciBridge:
         startup_timeout_seconds: float = 5.0,
         command_timeout_seconds: float = 30.0,
         process_factory: Callable[..., object] | None = None,
+        max_retries: int = 3,
+        initial_backoff: float = 0.5,
     ) -> None:
         self.config = config
         self.startup_timeout_seconds = startup_timeout_seconds
         self.command_timeout_seconds = command_timeout_seconds
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
         self._process_factory = process_factory
         self._process: UciProcess | None = None
         self._command_lock = asyncio.Lock()
@@ -184,8 +191,33 @@ class AsyncUciBridge:
             best_move = parse_bestmove_line(line)
             return best_move
 
-        best_move = await self._wait_for(matcher, timeout_seconds=self._search_timeout(time_limit_ms))
-        return best_move, info
+        # Retry the search with backoff if it times out
+        search_timeout = self._search_timeout(time_limit_ms)
+        for attempt in range(self.max_retries + 1):
+            try:
+                best_move = await self._wait_for_with_retry(
+                    matcher, 
+                    timeout_seconds=search_timeout,
+                    max_retries=0,  # We're handling retries at this level for search operations
+                    initial_backoff=self.initial_backoff
+                )
+                return best_move, info
+            except UciBridgeError as e:
+                if attempt < self.max_retries:
+                    backoff = self.initial_backoff * (2 ** attempt)
+                    logger.warning(
+                        f"Search timeout on attempt {attempt + 1}/{self.max_retries + 1}, "
+                        f"restarting search after {backoff:.1f}s backoff"
+                    )
+                    # Send stop to terminate any ongoing search before retrying
+                    with suppress(Exception):
+                        await self.stop()
+                    await asyncio.sleep(backoff)
+                    # Resend the go command to retry the search
+                    await self._send_command(" ".join(command))
+                else:
+                    logger.error(f"All {self.max_retries + 1} search attempts failed")
+                    raise
 
     async def stop(self) -> None:
         """Stop the current search if the engine is still running."""
@@ -195,12 +227,20 @@ class AsyncUciBridge:
         await self._send_command("stop")
 
     async def quit(self) -> None:
-        """Gracefully terminate the engine process."""
+        """Gracefully terminate the engine process, first stopping any ongoing search."""
 
         if self._process is None:
             return
         process = self._process
         self._process = None
+        
+        # First send stop to terminate any ongoing search
+        with suppress(UciBridgeError):
+            await self._send_command("stop", process=process)
+            # Wait a short time for the engine to stop the current search
+            await asyncio.sleep(0.5)
+        
+        # Then send quit to properly terminate the process
         with suppress(UciBridgeError):
             await self._send_command("quit", process=process)
         try:
@@ -252,29 +292,63 @@ class AsyncUciBridge:
             raise UciBridgeError("engine process closed its stdout")
         return raw_line.decode().strip()
 
+    async def _wait_for_with_retry(
+        self,
+        matcher: Callable[[str], object],
+        *,
+        timeout_seconds: float | None = None,
+        max_retries: int = 3,
+        initial_backoff: float = 0.5,
+    ) -> object:
+        """Read stdout lines until the matcher returns a non-None value with retries and exponential backoff."""
+        timeout_value = timeout_seconds or self.command_timeout_seconds
+        last_exception = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                async def loop() -> object:
+                    while True:
+                        line = await self._read_line()
+                        result = matcher(line)
+                        if asyncio.iscoroutine(result):
+                            result = await result
+                        if result is not None:
+                            return result
+
+                return await asyncio.wait_for(loop(), timeout=timeout_value)
+            except asyncio.TimeoutError as exc:
+                last_exception = exc
+                if attempt < max_retries:
+                    backoff = initial_backoff * (2 ** attempt)  # Exponential backoff
+                    logger.warning(
+                        f"Engine timeout on attempt {attempt + 1}/{max_retries + 1}, "
+                        f"retrying after {backoff:.1f}s backoff"
+                    )
+                    await asyncio.sleep(backoff)
+                    # Send isready to check if engine is still responsive
+                    try:
+                        await self.ensure_ready()
+                    except Exception as e:
+                        logger.warning(f"Failed to verify engine readiness after timeout: {str(e)}")
+        
+        # If all retries failed
+        logger.error(f"All {max_retries + 1} attempts failed waiting for engine response")
+        raise UciBridgeError("timed out waiting for engine response after all retries") from last_exception
+
+    # Maintain backward compatibility with original method name
     async def _wait_for(
         self,
         matcher: Callable[[str], object],
         *,
         timeout_seconds: float | None = None,
     ) -> object:
-        """Read stdout lines until the matcher returns a non-None value."""
-
-        timeout_value = timeout_seconds or self.command_timeout_seconds
-
-        async def loop() -> object:
-            while True:
-                line = await self._read_line()
-                result = matcher(line)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                if result is not None:
-                    return result
-
-        try:
-            return await asyncio.wait_for(loop(), timeout=timeout_value)
-        except asyncio.TimeoutError as exc:
-            raise UciBridgeError("timed out waiting for engine response") from exc
+        """Read stdout lines until the matcher returns a non-None value (delegates to retry version)."""
+        return await self._wait_for_with_retry(
+            matcher, 
+            timeout_seconds=timeout_seconds,
+            max_retries=self.max_retries,
+            initial_backoff=self.initial_backoff
+        )
 
     def _search_timeout(self, time_limit_ms: int | None) -> float:
         """Derive a search timeout with slack beyond movetime."""

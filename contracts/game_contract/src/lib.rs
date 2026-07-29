@@ -77,6 +77,17 @@ pub struct PlayerRating {
     pub last_updated: u64, // Ledger sequence
 }
 
+/// A single backend-signed puzzle-reward claim, as accepted by
+/// `claim_puzzle_reward` / `claim_puzzle_rewards_batch`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Proof {
+    pub recipient: Address,
+    pub reward_amount: i128,
+    pub nonce: u64,
+    pub signature: BytesN<64>,
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Storage keys
 // ────────────────────────────────────────────────────────────────────────────
@@ -94,6 +105,10 @@ const BALANCES: Symbol = symbol_short!("BALANCES"); // Map<Address, i128>
 const USED_NONCE: Symbol = symbol_short!("NONCES"); // Map<u64, bool>
 const MAX_STAKE: Symbol = symbol_short!("MAXSTAKE");
 const MAX_PRIZE_POOL: Symbol = symbol_short!("MAXPOOL");
+
+// Maximum number of proofs accepted by a single claim_puzzle_rewards_batch call.
+// Keeps per-invocation resource usage (CPU/memory/events) bounded.
+const MAX_BATCH_SIZE: u32 = 20;
 
 // Fee / treasury  (#200)
 const FEE_BIPS: Symbol = symbol_short!("FEE_BIPS"); // u32  (0–1000, i.e. 0–10 %)
@@ -218,6 +233,10 @@ pub enum ContractError {
     EscrowAlreadyReleased = 35,
     /// Total prize pool would exceed the configured limit
     PrizePoolLimitExceeded = 36,
+    /// claim_puzzle_rewards_batch called with an empty proof list
+    EmptyBatch = 36,
+    /// claim_puzzle_rewards_batch called with more proofs than MAX_BATCH_SIZE
+    BatchTooLarge = 37,
 }
 
 #[contract]
@@ -1131,6 +1150,138 @@ impl GameContract {
         // 7. Emit event
         env.events()
             .publish((symbol_short!("pzl_rwd"), recipient.clone()), reward_amount);
+
+        Ok(())
+    }
+
+    // ── claim_puzzle_rewards_batch ──────────────────────────────────────────
+    //
+    // Batches multiple puzzle-reward proofs into a single transaction so a
+    // player redeeming several puzzle rewards pays one base fee instead of
+    // one per claim, AND one resource-fee-bearing read/write of the
+    // nonce/balance/treasury storage entries instead of N. `claim_puzzle_reward`
+    // reads and rewrites the *entire* USED_NONCE and BALANCES maps on every
+    // call (Soroban (de)serializes a Map storage entry in full on get/set),
+    // so that cost otherwise scales linearly with batch size; here it's paid
+    // once for the whole batch. Each `Proof` is still validated exactly like
+    // a call to `claim_puzzle_reward` (same signature scheme, same replay
+    // protection) — signature verification itself is inherently per-proof
+    // and cannot be batched.
+    //
+    // Atomicity: proofs are applied in order against in-memory copies of the
+    // nonce/balance/treasury maps, which are only written back to storage
+    // once the whole batch has validated successfully. If any proof is
+    // invalid (bad amount, reused nonce — including duplicates within the
+    // same batch — or bad signature), the function returns/panics before the
+    // storage writes happen, and Soroban rolls back the entire invocation, so
+    // a batch never partially applies.
+    //
+    // Acceptance criteria
+    //   • Empty proof list        → Err(ContractError::EmptyBatch)
+    //   • More than MAX_BATCH_SIZE → Err(ContractError::BatchTooLarge)
+    //   • Any invalid signature   → panics (same as claim_puzzle_reward)
+    //   • Any reused/duplicate nonce → Err(ContractError::Unauthorized)
+    //   • All proofs valid        → every recipient balance incremented,
+    //                                treasury decremented by the sum, in one TX
+    pub fn claim_puzzle_rewards_batch(env: Env, proofs: Vec<Proof>) -> Result<(), ContractError> {
+        if proofs.is_empty() {
+            return Err(ContractError::EmptyBatch);
+        }
+        if proofs.len() > MAX_BATCH_SIZE {
+            return Err(ContractError::BatchTooLarge);
+        }
+
+        // 1. Load admin ED25519 public key (shared across all proofs)
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        let mut nonces: Map<u64, bool> = env
+            .storage()
+            .instance()
+            .get(&USED_NONCE)
+            .unwrap_or(Map::new(&env));
+
+        let mut balances: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&BALANCES)
+            .unwrap_or(Map::new(&env));
+
+        let mut treasury: i128 = env.storage().instance().get(&TREASURY).unwrap_or(0);
+
+        let mut total_claimed: i128 = 0;
+
+        for proof in proofs.iter() {
+            let Proof {
+                recipient,
+                reward_amount,
+                nonce,
+                signature,
+            } = proof;
+
+            if reward_amount <= 0 || reward_amount > i64::MAX as i128 {
+                return Err(ContractError::InvalidAmount);
+            }
+
+            // Replay protection — also rejects duplicate nonces within the
+            // same batch, since `nonces` is updated as we go.
+            if nonces.get(nonce).unwrap_or(false) {
+                return Err(ContractError::Unauthorized);
+            }
+
+            // Build canonical payload and verify ED25519 signature — same
+            // scheme as claim_puzzle_reward.
+            let mut payload_bytes = Bytes::new(&env);
+
+            let recipient_str = recipient.clone().to_string();
+            let str_len = recipient_str.len() as usize;
+            let mut addr_buf = [0u8; 64];
+            recipient_str.copy_into_slice(&mut addr_buf[..str_len]);
+            payload_bytes.append(&Bytes::from_slice(&env, &addr_buf[..str_len]));
+
+            let amount_le: [u8; 8] = (reward_amount as i64).to_le_bytes();
+            payload_bytes.append(&Bytes::from_slice(&env, &amount_le));
+
+            let nonce_le: [u8; 8] = nonce.to_le_bytes();
+            payload_bytes.append(&Bytes::from_slice(&env, &nonce_le));
+
+            let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload_bytes).into();
+            let digest_bytes: Bytes = digest_bytesn.into();
+            env.crypto()
+                .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+
+            if treasury < reward_amount {
+                panic!("Insufficient treasury");
+            }
+            treasury -= reward_amount;
+
+            nonces.set(nonce, true);
+
+            let prev_balance = balances.get(recipient.clone()).unwrap_or(0);
+            balances.set(recipient.clone(), prev_balance + reward_amount);
+
+            total_claimed += reward_amount;
+
+            env.events()
+                .publish((symbol_short!("pzl_rwd"), recipient.clone()), reward_amount);
+        }
+
+        // Commit all state changes atomically, once every proof has passed.
+        env.storage().instance().set(&USED_NONCE, &nonces);
+        env.storage().instance().set(&BALANCES, &balances);
+        env.storage().instance().set(&TREASURY, &treasury);
+
+        env.events().publish(
+            (symbol_short!("pzlbatch"),),
+            (proofs.len(), total_claimed),
+        );
 
         Ok(())
     }
@@ -2402,6 +2553,199 @@ mod tests {
         let sig = sign_payload(&env, &signing_key, &recipient, -1, 7);
         let result = client.try_claim_puzzle_reward(&recipient, &-1, &7, &sig);
         assert_eq!(result, Err(Ok(ContractError::InvalidAmount)));
+    }
+
+    // ── claim_puzzle_rewards_batch tests ───────────────────────────────────
+
+    /// Happy path: multiple valid proofs in one call → all balances credited,
+    /// treasury decremented by the sum, in a single transaction.
+    #[test]
+    fn test_claim_puzzle_rewards_batch_valid() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+        let recipient3 = Address::generate(&env);
+
+        let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
+        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 2);
+        let sig3 = sign_payload(&env, &signing_key, &recipient3, 300, 3);
+
+        let proofs = Vec::from_array(
+            &env,
+            [
+                Proof {
+                    recipient: recipient1.clone(),
+                    reward_amount: 100,
+                    nonce: 1,
+                    signature: sig1,
+                },
+                Proof {
+                    recipient: recipient2.clone(),
+                    reward_amount: 200,
+                    nonce: 2,
+                    signature: sig2,
+                },
+                Proof {
+                    recipient: recipient3.clone(),
+                    reward_amount: 300,
+                    nonce: 3,
+                    signature: sig3,
+                },
+            ],
+        );
+
+        client.claim_puzzle_rewards_batch(&proofs);
+
+        assert_eq!(client.reward_balance(&recipient1), 100);
+        assert_eq!(client.reward_balance(&recipient2), 200);
+        assert_eq!(client.reward_balance(&recipient3), 300);
+        assert_eq!(client.treasury_balance(), 10_000 - 600);
+    }
+
+    /// Empty proof list is rejected up front.
+    #[test]
+    fn test_claim_puzzle_rewards_batch_empty_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _signing_key) = setup(&env, 10_000);
+        let proofs: Vec<Proof> = Vec::new(&env);
+
+        let result = client.try_claim_puzzle_rewards_batch(&proofs);
+        assert_eq!(result, Err(Ok(ContractError::EmptyBatch)));
+    }
+
+    /// More proofs than MAX_BATCH_SIZE is rejected up front.
+    #[test]
+    fn test_claim_puzzle_rewards_batch_too_large_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 1_000_000);
+        let mut proofs: Vec<Proof> = Vec::new(&env);
+        for i in 0..(MAX_BATCH_SIZE + 1) as u64 {
+            let recipient = Address::generate(&env);
+            let sig = sign_payload(&env, &signing_key, &recipient, 1, i);
+            proofs.push_back(Proof {
+                recipient,
+                reward_amount: 1,
+                nonce: i,
+                signature: sig,
+            });
+        }
+
+        let result = client.try_claim_puzzle_rewards_batch(&proofs);
+        assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
+    }
+
+    /// A duplicate nonce within the same batch is rejected, and the whole
+    /// batch is rolled back — the first (otherwise-valid) proof must not be
+    /// applied either.
+    #[test]
+    fn test_claim_puzzle_rewards_batch_duplicate_nonce_rolls_back() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+
+        let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 9);
+        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 9); // reused nonce
+
+        let proofs = Vec::from_array(
+            &env,
+            [
+                Proof {
+                    recipient: recipient1.clone(),
+                    reward_amount: 100,
+                    nonce: 9,
+                    signature: sig1,
+                },
+                Proof {
+                    recipient: recipient2.clone(),
+                    reward_amount: 200,
+                    nonce: 9,
+                    signature: sig2,
+                },
+            ],
+        );
+
+        let result = client.try_claim_puzzle_rewards_batch(&proofs);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+        // Rolled back entirely — neither recipient was credited.
+        assert_eq!(client.reward_balance(&recipient1), 0);
+        assert_eq!(client.reward_balance(&recipient2), 0);
+        assert_eq!(client.treasury_balance(), 10_000);
+    }
+
+    /// A single bad signature anywhere in the batch panics and rolls back
+    /// every proof in the batch, including the valid ones before it.
+    #[test]
+    #[should_panic]
+    fn test_claim_puzzle_rewards_batch_invalid_sig_rolls_back() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+
+        let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
+        let wrong_key = SigningKey::generate(&mut OsRng);
+        let bad_sig = sign_payload(&env, &wrong_key, &recipient2, 200, 2);
+
+        let proofs = Vec::from_array(
+            &env,
+            [
+                Proof {
+                    recipient: recipient1.clone(),
+                    reward_amount: 100,
+                    nonce: 1,
+                    signature: sig1,
+                },
+                Proof {
+                    recipient: recipient2.clone(),
+                    reward_amount: 200,
+                    nonce: 2,
+                    signature: bad_sig,
+                },
+            ],
+        );
+
+        client.claim_puzzle_rewards_batch(&proofs);
+    }
+
+    /// Replaying a nonce already consumed by a prior `claim_puzzle_reward`
+    /// call is rejected inside a batch too.
+    #[test]
+    fn test_claim_puzzle_rewards_batch_replay_against_prior_claim_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient = Address::generate(&env);
+
+        let sig = sign_payload(&env, &signing_key, &recipient, 500, 1);
+        client.claim_puzzle_reward(&recipient, &500, &1, &sig);
+
+        let sig2 = sign_payload(&env, &signing_key, &recipient, 500, 1);
+        let proofs = Vec::from_array(
+            &env,
+            [Proof {
+                recipient: recipient.clone(),
+                reward_amount: 500,
+                nonce: 1,
+                signature: sig2,
+            }],
+        );
+
+        let result = client.try_claim_puzzle_rewards_batch(&proofs);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
     }
 
     // ── Timeout Tests ──────────────────────────────────────────────────────

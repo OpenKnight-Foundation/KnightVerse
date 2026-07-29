@@ -60,6 +60,37 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn test_login_fails_with_wrong_password() {
+        let db = web::Data::new(setup_test_db().await);
+        let jwt_service = web::Data::new(JwtService::new(
+            "test_secret_key".to_string(),
+            3600,
+        ));
+
+        let app = test::init_service(
+            App::new()
+                .app_data(db)
+                .app_data(jwt_service)
+                .service(login),
+        )
+        .await;
+
+        // Non-existent user should get 401
+        let login_request = LoginRequest {
+            username: "nonexistent_user".to_string(),
+            password: "SomePass123".to_string(),
+        };
+
+        let req = test::TestRequest::post()
+            .uri("/login")
+            .set_json(&login_request)
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
     async fn test_refresh_rotates_tokens() {
         // This test would:
         // 1. Login to get initial tokens

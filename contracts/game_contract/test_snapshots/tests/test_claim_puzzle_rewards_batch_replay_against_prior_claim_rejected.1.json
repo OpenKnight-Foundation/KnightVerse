@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
                 },
                 {
                   "i128": {
@@ -38,6 +38,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -78,7 +79,27 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                          "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "BALANCES"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 500
+                                }
+                              }
+                            }
+                          ]
                         }
                       },
                       {
@@ -99,17 +120,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "MAXPOOL"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 2000
-                          }
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "MAXSTAKE"
                         },
                         "val": {
@@ -121,12 +131,29 @@
                       },
                       {
                         "key": {
+                          "symbol": "NONCES"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "u64": 1
+                              },
+                              "val": {
+                                "bool": true
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "TREASURY"
                         },
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 10000
+                            "lo": 9500
                           }
                         }
                       },
@@ -229,7 +256,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "072b6c7f5b339bd7af69ea42ec50f3d0825634664aa04e56158838f3233c7f2b"
                 },
                 {
                   "i128": {
@@ -296,17 +323,43 @@
                 },
                 {
                   "i128": {
-                    "hi": -1,
-                    "lo": 18446744073709551615
+                    "hi": 0,
+                    "lo": 500
                   }
                 },
                 {
-                  "u64": 7
+                  "u64": 1
                 },
                 {
-                  "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
+                  "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
                 }
               ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "pzl_rwd"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+              }
+            ],
+            "data": {
+              "i128": {
+                "hi": 0,
+                "lo": 500
+              }
             }
           }
         }
@@ -328,9 +381,96 @@
                 "symbol": "claim_puzzle_reward"
               }
             ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "claim_puzzle_rewards_batch"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 500
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "claim_puzzle_rewards_batch"
+              }
+            ],
             "data": {
               "error": {
-                "contract": 24
+                "contract": 14
               }
             }
           }
@@ -351,7 +491,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 14
                 }
               }
             ],
@@ -376,7 +516,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 14
                 }
               }
             ],
@@ -386,24 +526,52 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "claim_puzzle_rewards_batch"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "i128": {
-                        "hi": -1,
-                        "lo": 18446744073709551615
-                      }
-                    },
-                    {
-                      "u64": 7
-                    },
-                    {
-                      "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 1
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 500
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "a5d40e7ce433640aae9a6c1c89509eb258bbee85ba340b52de720063ac4cdf5394a50e66561ea0c0f2526ccc88b0d6f434601700493614c7d5c5fdbbf25ace03"
+                              }
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }

@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                 },
                 {
                   "i128": {
@@ -78,7 +78,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                          "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                         }
                       },
                       {
@@ -95,17 +95,6 @@
                         },
                         "val": {
                           "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "MAXPOOL"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 2000
-                          }
                         }
                       },
                       {
@@ -229,7 +218,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
                 },
                 {
                   "i128": {
@@ -286,27 +275,11 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": -1,
-                    "lo": 18446744073709551615
-                  }
-                },
-                {
-                  "u64": 7
-                },
-                {
-                  "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
-                }
-              ]
+              "vec": []
             }
           }
         }
@@ -325,12 +298,12 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "claim_puzzle_rewards_batch"
               }
             ],
             "data": {
               "error": {
-                "contract": 24
+                "contract": 36
               }
             }
           }
@@ -351,7 +324,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 36
                 }
               }
             ],
@@ -376,7 +349,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 36
                 }
               }
             ],
@@ -386,24 +359,12 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "claim_puzzle_rewards_batch"
                 },
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "i128": {
-                        "hi": -1,
-                        "lo": 18446744073709551615
-                      }
-                    },
-                    {
-                      "u64": 7
-                    },
-                    {
-                      "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
+                      "vec": []
                     }
                   ]
                 }

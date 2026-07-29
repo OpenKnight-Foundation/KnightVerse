@@ -7,6 +7,7 @@ use dto::auth::{RegisterRequest, LoginRequest, AuthResponse, ErrorResponse, Refr
 use security::{JwtService, TokenService, TokenServiceError};
 use sea_orm::{DatabaseConnection, EntityTrait, ColumnTrait, QueryFilter};
 use db_entity::player;
+use service::helper::password;
 
 /// Register a new user
 #[utoipa::path(
@@ -72,22 +73,31 @@ pub async fn login(
 
     let username = payload.username.clone();
 
-    // Look up the player UUID from the player table
-    let player_id = match player::Entity::find()
+    // Look up the player and verify password
+    let player = match player::Entity::find()
         .filter(player::Column::Username.eq(&username))
         .one(db.get_ref())
         .await
     {
-        Ok(Some(p)) => p.id,
+        Ok(Some(p)) => p,
         _ => {
-            // No player record found — not strictly an auth failure;
-            // generate a namespaced UUID so downstream calls still work.
-            Uuid::new_v4()
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid username or password".to_string(),
+                code: "INVALID_CREDENTIALS".to_string(),
+            });
         }
     };
 
-    // For MVP: mock user with ID 1
-    let user_id = 1;
+    let stored_hash = String::from_utf8_lossy(&player.password_hash);
+    if password::verify_password(&payload.password, &stored_hash).is_err() {
+        return HttpResponse::Unauthorized().json(ErrorResponse {
+            message: "Invalid username or password".to_string(),
+            code: "INVALID_CREDENTIALS".to_string(),
+        });
+    }
+
+    let player_id = player.id;
+    let user_id = (player_id.as_u128() & 0x7F_FF_FF_FF) as i32;
 
     // Generate access token
     let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
@@ -299,6 +309,7 @@ pub async fn refresh(
 pub async fn logout(
     db: web::Data<DatabaseConnection>,
     req: HttpRequest,
+    jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
     // Extract user from access token
     let auth_header = match req.headers().get("Authorization") {
@@ -328,10 +339,18 @@ pub async fn logout(
         });
     };
 
-    // We would validate token here, but for now just extract user_id from the request
-    // In a real implementation, we'd use a JWT service to validate and extract claims
-    // For MVP, we'll accept it and revoke for user_id 1
-    let user_id = 1;
+    // Validate the token and extract the actual user ID
+    let claims = match jwt_service.validate_token(token) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid or expired access token".to_string(),
+                code: "INVALID_ACCESS_TOKEN".to_string(),
+            });
+        }
+    };
+
+    let user_id = claims.user_id;
 
     // Revoke all tokens for this player
     if let Err(e) = TokenService::revoke_player_tokens(db.get_ref(), user_id).await {

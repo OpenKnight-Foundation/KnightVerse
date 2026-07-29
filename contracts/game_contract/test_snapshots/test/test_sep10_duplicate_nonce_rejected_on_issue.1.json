@@ -17,12 +17,12 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10000
+                    "lo": 0
                   }
                 },
                 {
@@ -30,6 +30,34 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "issue_sep10_challenge",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                },
+                {
+                  "u64": 1000
                 }
               ]
             }
@@ -78,7 +106,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                          "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                         }
                       },
                       {
@@ -99,17 +127,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "MAXPOOL"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 2000
-                          }
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "MAXSTAKE"
                         },
                         "val": {
@@ -121,12 +138,29 @@
                       },
                       {
                         "key": {
+                          "symbol": "S10_CHAL"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                              },
+                              "val": {
+                                "u64": 1000
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "TREASURY"
                         },
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 10000
+                            "lo": 0
                           }
                         }
                       },
@@ -170,6 +204,39 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5541220902715666415
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5541220902715666415
                   }
                 },
                 "durability": "temporary",
@@ -229,12 +296,12 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "42bec24ad134eec8884469bfaa9d72b0336e3596ee5ff7e21a0c7d755edbc621"
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 10000
+                    "lo": 0
                   }
                 },
                 {
@@ -286,7 +353,43 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "issue_sep10_challenge"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                },
+                {
+                  "u64": 1000
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "sep10"
+              },
+              {
+                "symbol": "issued"
               }
             ],
             "data": {
@@ -295,16 +398,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": {
-                    "hi": -1,
-                    "lo": 18446744073709551615
-                  }
-                },
-                {
-                  "u64": 7
-                },
-                {
-                  "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
+                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
                 }
               ]
             }
@@ -325,12 +419,72 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "claim_puzzle_reward"
+                "symbol": "issue_sep10_challenge"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "issue_sep10_challenge"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                },
+                {
+                  "u64": 1000
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "issue_sep10_challenge"
               }
             ],
             "data": {
               "error": {
-                "contract": 24
+                "contract": 26
               }
             }
           }
@@ -351,7 +505,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 26
                 }
               }
             ],
@@ -376,7 +530,7 @@
               },
               {
                 "error": {
-                  "contract": 24
+                  "contract": 26
                 }
               }
             ],
@@ -386,24 +540,21 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "claim_puzzle_reward"
+                  "symbol": "issue_sep10_challenge"
                 },
                 {
                   "vec": [
                     {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    },
+                    {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     },
                     {
-                      "i128": {
-                        "hi": -1,
-                        "lo": 18446744073709551615
-                      }
+                      "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
                     },
                     {
-                      "u64": 7
-                    },
-                    {
-                      "bytes": "b373c4af0181fd9413860752b7b3c19d7dbd2f2bf000d99b8bd34d63695c993c9885f129c08b072b964d1e351e6803c971d83223ec8e0fd3b808bd3a4084eb09"
+                      "u64": 1000
                     }
                   ]
                 }

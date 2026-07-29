@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_format_ai_metadata() {
-        let mut metadata = AIMetadata {
+        let metadata = AIMetadata {
             name: "  Test AI  ".to_string(),
             description: "  Test Description  ".to_string(),
             code: "testai".to_string(),

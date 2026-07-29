@@ -367,7 +367,6 @@ fn validate_reconnect_token(token: &str) -> Result<Claims, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix::prelude::*;
     use tokio::sync::mpsc::unbounded_channel;
 
     struct TestRecipient {

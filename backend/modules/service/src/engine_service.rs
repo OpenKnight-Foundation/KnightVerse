@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub struct EngineService {
+    #[allow(dead_code)]
     engines: Arc<Mutex<HashMap<Uuid, Box<dyn Engine>>>>,
     engine_path: String,
 }

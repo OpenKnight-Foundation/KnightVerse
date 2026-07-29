@@ -32,7 +32,7 @@ impl TimeControl {
             "bullet" => 60,
             "blitz" => 180,
             "rapid" => 480,
-            "standard" | _ => 600,
+            _ => 600,
         }
     }
 

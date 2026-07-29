@@ -37,7 +37,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ai_metadata_formatting() {
-        let mut metadata = AIMetadata {
+        let metadata = AIMetadata {
             name: "  Test AI  ".to_string(),
             description: "  Test Description  ".to_string(),
             url: "ipfs://QmTest123".to_string(),

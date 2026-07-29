@@ -2,6 +2,7 @@ use super::*;
 use std::collections::HashMap;
 
 pub struct SwissPairer {
+    #[allow(dead_code)]
     config: SwissConfig,
 }
 
@@ -230,7 +231,6 @@ impl SwissPairer {
         }
 
         // Color balance preference
-        
 
         self.check_color_preference(player1, player2)
     }

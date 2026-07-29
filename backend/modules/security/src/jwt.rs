@@ -138,11 +138,7 @@ impl JwtService {
 
     /// Extract token from Authorization header
     pub fn extract_token_from_header(auth_header: &str) -> Option<String> {
-        if auth_header.starts_with("Bearer ") {
-            Some(auth_header[7..].to_string())
-        } else {
-            None
-        }
+        auth_header.strip_prefix("Bearer ").map(|s| s.to_string())
     }
 }
 

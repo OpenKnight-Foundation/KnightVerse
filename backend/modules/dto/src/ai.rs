@@ -2,21 +2,31 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
-// Define a regex for validating FEN chess position notation
-static FEN_REGEX: Lazy<Regex> = Lazy::new(|| {
+static FEN_STRUCTURE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-      r"^(?=\S*K)(?=\S*k)([rnbqkpRNBQKP1-8]+/){7}[rnbqkpRNBQKP1-8]+\s[bw]\s(-|[KQkq]+)\s(-|[a-h][36])\s\d+\s\d+$"
-    ).unwrap()
+        r"^([rnbqkpRNBQKP1-8]+/){7}[rnbqkpRNBQKP1-8]+\s[bw]\s(-|[KQkq]+)\s(-|[a-h][36])\s\d+\s\d+$",
+    )
+    .unwrap()
 });
+
+fn validate_fen(fen: &str) -> Result<(), ValidationError> {
+    if !FEN_STRUCTURE.is_match(fen) {
+        return Err(ValidationError::new("Must be a valid FEN string"));
+    }
+    if !fen.contains('K') {
+        return Err(ValidationError::new("FEN must contain a white king"));
+    }
+    if !fen.contains('k') {
+        return Err(ValidationError::new("FEN must contain a black king"));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct AiSuggestionRequest {
-    #[validate(regex(
-        path = "FEN_REGEX",
-        message = "Must be a valid FEN string in format: [piece placement] [active color] [castling] [en passant] [halfmove clock] [fullmove number]"
-    ))]
+    #[validate(custom(function = "validate_fen"))]
     #[schema(example = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]
     pub fen: String,
 
@@ -52,10 +62,7 @@ pub struct AiSuggestionResponse {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct PositionAnalysisRequest {
-    #[validate(regex(
-        path = "FEN_REGEX",
-        message = "Must be a valid FEN string in format: [piece placement] [active color] [castling] [en passant] [halfmove clock] [fullmove number]"
-    ))]
+    #[validate(custom(function = "validate_fen"))]
     #[schema(example = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]
     pub fen: String,
 

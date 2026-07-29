@@ -501,7 +501,12 @@ impl GameContract {
         Ok(())
     }
 
-    pub fn claim_draw(env: Env, game_id: u64, player: Address, signature: BytesN<64>) -> Result<(), ContractError> {
+    pub fn claim_draw(
+        env: Env,
+        game_id: u64,
+        player: Address,
+        signature: BytesN<64>,
+    ) -> Result<(), ContractError> {
         let mut games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -1233,10 +1238,8 @@ impl GameContract {
         env.storage().instance().set(&BALANCES, &balances);
         env.storage().instance().set(&TREASURY, &treasury);
 
-        env.events().publish(
-            (symbol_short!("pzlbatch"),),
-            (proofs.len(), total_claimed),
-        );
+        env.events()
+            .publish((symbol_short!("pzlbatch"),), (proofs.len(), total_claimed));
 
         Ok(())
     }
@@ -1751,10 +1754,8 @@ impl GameContract {
         verified.set(account.clone(), true);
         env.storage().instance().set(&SEP10_VERIFIED, &verified);
 
-        env.events().publish(
-            (symbol_short!("sep10"), symbol_short!("verified")),
-            account,
-        );
+        env.events()
+            .publish((symbol_short!("sep10"), symbol_short!("verified")), account);
 
         Ok(())
     }
@@ -1808,7 +1809,9 @@ impl GameContract {
         }
 
         env.storage().instance().set(&MULTISIG_SIGNERS, &signers);
-        env.storage().instance().set(&MULTISIG_THRESHOLD, &threshold);
+        env.storage()
+            .instance()
+            .set(&MULTISIG_THRESHOLD, &threshold);
 
         Ok(())
     }
@@ -1952,11 +1955,7 @@ impl GameContract {
             return Err(ContractError::NotASigner);
         }
 
-        if !env
-            .storage()
-            .instance()
-            .has(&PENDING_FEE_PROPOSAL)
-        {
+        if !env.storage().instance().has(&PENDING_FEE_PROPOSAL) {
             return Err(ContractError::NoProposal);
         }
 
@@ -1965,10 +1964,8 @@ impl GameContract {
         env.storage().instance().remove(&PENDING_FEE_PROPOSAL);
         env.storage().instance().remove(&FEE_PROPOSAL_APPROVALS);
 
-        env.events().publish(
-            (symbol_short!("multisig"), symbol_short!("cancel")),
-            signer,
-        );
+        env.events()
+            .publish((symbol_short!("multisig"), symbol_short!("cancel")), signer);
 
         Ok(())
     }
@@ -1995,7 +1992,11 @@ impl GameContract {
     // to get a trusted timestamp for game clock synchronization.
 
     /// Configure the SEP-40 oracle contract address for clock sync.
-    pub fn configure_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
+    pub fn configure_oracle(
+        env: Env,
+        admin: Address,
+        oracle: Address,
+    ) -> Result<(), ContractError> {
         let current_admin: Address = env
             .storage()
             .instance()
@@ -2060,7 +2061,9 @@ impl GameContract {
         if duration == 0 {
             panic!("Timelock duration must be greater than 0");
         }
-        env.storage().instance().set(&TOURNAMENT_TIMELOCK, &duration);
+        env.storage()
+            .instance()
+            .set(&TOURNAMENT_TIMELOCK, &duration);
         Ok(())
     }
 
@@ -2068,10 +2071,7 @@ impl GameContract {
     ///
     /// Locks the total prize pool until `current_ledger + timelock_duration`.
     /// Returns the escrow ID.
-    pub fn create_tournament_escrow(
-        env: Env,
-        game_id: u64,
-    ) -> Result<u64, ContractError> {
+    pub fn create_tournament_escrow(env: Env, game_id: u64) -> Result<u64, ContractError> {
         let games: Map<u64, Game> = env
             .storage()
             .instance()
@@ -2125,33 +2125,35 @@ impl GameContract {
         Ok(escrow_id)
     }
 
-   /// Release a time-locked tournament escrow to the specified winners.
-///
-/// Can only be called after the lock period has expired, and only by the
-/// contract admin.
-pub fn release_tournament_escrow(
-    env: Env,
-    admin: Address,
-    escrow_id: u64,
-    winners: Vec<Address>,
-    percentages: Vec<u32>,
-) -> Result<(), ContractError> {
-    let current_admin: Address = env
-        .storage()
-        .instance()
-        .get(&CONTRACT_ADMIN)
-        .expect("Not initialized");
-    current_admin.require_auth();
-    if admin != current_admin {
-        return Err(ContractError::Unauthorized);
-    }
+    /// Release a time-locked tournament escrow to the specified winners.
+    ///
+    /// Can only be called after the lock period has expired, and only by the
+    /// contract admin.
+    pub fn release_tournament_escrow(
+        env: Env,
+        admin: Address,
+        escrow_id: u64,
+        winners: Vec<Address>,
+        percentages: Vec<u32>,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
         let mut escrows: Map<u64, TournamentEscrow> = env
             .storage()
             .instance()
             .get(&TOURNAMENT_ESCROWS)
             .ok_or(ContractError::EscrowNotFound)?;
 
-        let escrow = escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)?;
+        let escrow = escrows
+            .get(escrow_id)
+            .ok_or(ContractError::EscrowNotFound)?;
 
         if escrow.released {
             return Err(ContractError::EscrowAlreadyReleased);
@@ -2213,7 +2215,10 @@ pub fn release_tournament_escrow(
     }
 
     /// Query a tournament escrow by ID.
-    pub fn get_tournament_escrow(env: Env, escrow_id: u64) -> Result<TournamentEscrow, ContractError> {
+    pub fn get_tournament_escrow(
+        env: Env,
+        escrow_id: u64,
+    ) -> Result<TournamentEscrow, ContractError> {
         let escrows: Map<u64, TournamentEscrow> = env
             .storage()
             .instance()

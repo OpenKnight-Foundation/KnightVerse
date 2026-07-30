@@ -2889,6 +2889,13 @@ impl GameContract {
             return Err(ContractError::GameNotInProgress);
         }
 
+        // Prevent a player from creating a tournament escrow against themselves (#933)
+        if let Some(ref player2) = game.player2 {
+            if game.player1 == *player2 {
+                return Err(ContractError::AlreadyJoined);
+            }
+        }
+
         game.player1.require_auth();
 
         let duration: u64 = env

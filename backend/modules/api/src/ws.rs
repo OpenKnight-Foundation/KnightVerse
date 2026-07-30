@@ -229,9 +229,12 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                 self.hb = std::time::Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                // Try to parse as WsMessage
-                if let Ok(_ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    // Redis publishing disabled in tests/CI environment
+                // Parse and broadcast the move to all connected clients in this game.
+                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
+                    self.lobby.do_send(Broadcast {
+                        game_id: self.game_id.clone(),
+                        message: ws_msg,
+                    });
                 }
             }
             Ok(ws::Message::Binary(_)) => {}

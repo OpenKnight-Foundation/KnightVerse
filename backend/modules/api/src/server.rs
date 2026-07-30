@@ -52,17 +52,19 @@ pub async fn main() -> std::io::Result<()> {
     // Initialize logger
     env_logger::init();
 
-    // Load configuration from environment
+    // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
-    let jwt_secret = env::var("JWT_SECRET_KEY")
-        .unwrap_or_else(|_| "knightverse_dev_secret_key_change_in_production".to_string());
-    let jwt_expiration = env::var("JWT_EXPIRATION_SECS")
-        .unwrap_or_else(|_| "3600".to_string())
-        .parse::<usize>()
-        .unwrap_or(3600);
 
-    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    // JWT: strict env — crash on missing/insecure secret
+    let jwt_service = JwtService::from_env();
+    let jwt_secret = jwt_service.secret_key.clone();
+    let jwt_expiration = jwt_service.expiration_time();
+
+    // Redis: strict env — no localhost fallback that could mask misconfiguration
+    let redis_url = env::var("REDIS_URL").expect(
+        "REDIS_URL must be set. Refusing to start with a hardcoded fallback.",
+    );
 
     eprintln!("Initializing KnightVerse Backend Server");
     eprintln!("Server address: {}", server_addr);
@@ -91,8 +93,6 @@ pub async fn main() -> std::io::Result<()> {
         }
     }
 
-    // Initialize JWT service
-    let jwt_service = JwtService::new(jwt_secret.clone(), jwt_expiration);
     let db = std::sync::Arc::new(db); // Wrap db in Arc
 
     // Create a shared LobbyState actor
@@ -262,14 +262,47 @@ pub async fn main() -> std::io::Result<()> {
             )
     };
 
-    let mut server = HttpServer::new(app_factory).bind(&server_addr)?;
+    let mut http_server = HttpServer::new(app_factory).bind(&server_addr)?;
 
     if let Ok(workers_str) = env::var("WORKERS") {
         if let Ok(workers) = workers_str.parse::<usize>() {
             println!("Setting worker count to {}", workers);
-            server = server.workers(workers);
+            http_server = http_server.workers(workers);
         }
     }
 
-    server.run().await
+    // BE-26: Graceful shutdown on SIGTERM / SIGINT
+    // stop(true) waits for in-flight requests and drains the worker thread pool
+    // so active WebSocket connections and DB transactions can complete cleanly.
+    let server = http_server.run();
+    let server_handle = server.handle();
+
+    actix_web::rt::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+            let mut sigint = signal(SignalKind::interrupt())
+                .expect("failed to install SIGINT handler");
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    eprintln!("Received SIGTERM — initiating graceful shutdown...");
+                }
+                _ = sigint.recv() => {
+                    eprintln!("Received SIGINT — initiating graceful shutdown...");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            eprintln!("Received Ctrl+C — initiating graceful shutdown...");
+        }
+        // true = graceful: finish active connections, then drain workers
+        server_handle.stop(true).await;
+        eprintln!("Server stopped gracefully");
+    });
+
+    server.await
 }

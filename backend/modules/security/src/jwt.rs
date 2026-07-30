@@ -60,6 +60,50 @@ impl JwtService {
         }
     }
 
+    /// Create a JWT service from environment variables.
+    ///
+    /// Requires `JWT_SECRET` (preferred) or `JWT_SECRET_KEY`. The process will
+    /// panic on startup if neither is set — no hardcoded fallback is allowed.
+    /// Optional: `JWT_EXPIRATION_SECS` (default 3600).
+    pub fn from_env() -> Self {
+        let secret_key = std::env::var("JWT_SECRET")
+            .or_else(|_| std::env::var("JWT_SECRET_KEY"))
+            .expect(
+                "JWT_SECRET (or JWT_SECRET_KEY) must be set. Refusing to start with a hardcoded fallback secret.",
+            );
+
+        if secret_key.trim().is_empty() {
+            panic!("JWT_SECRET must not be empty");
+        }
+
+        // Reject well-known insecure defaults that might still be in .env templates
+        const INSECURE_DEFAULTS: &[&str] = &[
+            "knightverse_dev_secret_key_change_in_production",
+            "xlmate_super_secret_jwt_key_change_in_production",
+            "your_secret_key_here",
+            "your_secret_key_change_this_in_production",
+            "change_me",
+            "secret",
+        ];
+        if INSECURE_DEFAULTS.iter().any(|d| secret_key == *d) {
+            panic!(
+                "JWT_SECRET appears to be an insecure default value. Set a strong, unique secret before starting the server."
+            );
+        }
+
+        let expiration_time = std::env::var("JWT_EXPIRATION_SECS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(3600);
+
+        Self::new(secret_key, expiration_time)
+    }
+
+    /// Token expiration time in seconds
+    pub fn expiration_time(&self) -> usize {
+        self.expiration_time
+    }
+
     /// Generate a new JWT access token for a user
     pub fn generate_token(
         &self,

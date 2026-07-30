@@ -8,6 +8,7 @@ use crate::games::{
     make_move,
 };
 use crate::players::{add_player, delete_player, find_player_by_id, update_player};
+use crate::rate_limiter::RedisRateLimiter;
 use crate::ws::{ws_route, LobbyState};
 use actix::Actor;
 use actix_cors::Cors;
@@ -109,6 +110,7 @@ pub async fn main() -> std::io::Result<()> {
         eprintln!("Warning: Redis connection test failed: {}", e);
     }
 
+    let rate_limiter_pool = redis_pool.clone();
     let matchmaking_service = MatchmakingService::new(redis_pool);
 
     // Initialize Puzzle Validation Service
@@ -147,7 +149,7 @@ pub async fn main() -> std::io::Result<()> {
             cors
         };
 
-        // Configure Governor for Auth (Strict)
+        // Configure Governor for Auth (Strict per-second burst protection)
         let auth_governor_conf = GovernorConfigBuilder::default()
             .per_second(config.auth_rate_limit_per_sec)
             .burst_size(config.auth_rate_limit_burst)
@@ -155,13 +157,26 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
-        // Configure Governor for Games/General (Loose)
+        // Configure Governor for Games/General (Loose per-second burst protection)
         let game_governor_conf = GovernorConfigBuilder::default()
             .per_second(config.game_rate_limit_per_sec)
             .burst_size(config.game_rate_limit_burst)
             .use_headers()
             .finish()
             .unwrap();
+
+        // Create Redis-backed rate limiters (shared across workers via Redis)
+        let auth_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_auth_rate_limit,
+            config.redis_auth_rate_limit_window,
+        );
+
+        let game_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_game_rate_limit,
+            config.redis_game_rate_limit_window,
+        );
 
         App::new()
             .wrap(actix_web::middleware::DefaultHeaders::new().add((
@@ -194,6 +209,7 @@ pub async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/games")
                     .wrap(Governor::new(&game_governor_conf))
+                    .wrap(game_redis_limiter)
                     .wrap(JwtAuthMiddleware::new(jwt_secret.clone(), jwt_expiration))
                     .service(create_game)
                     .service(get_game)
@@ -208,6 +224,7 @@ pub async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/auth")
                     .wrap(Governor::new(&auth_governor_conf))
+                    .wrap(auth_redis_limiter)
                     .service(login)
                     .service(register)
                     .service(refresh)

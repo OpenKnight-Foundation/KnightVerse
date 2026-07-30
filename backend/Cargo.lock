@@ -400,6 +400,7 @@ dependencies = [
  "chrono",
  "db",
  "db_entity",
+ "deadpool-redis",
  "dotenv",
  "dto",
  "env_logger",

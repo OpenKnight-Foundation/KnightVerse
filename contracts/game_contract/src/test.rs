@@ -289,6 +289,7 @@ fn test_set_max_stake() {
     // Initialize game contract with token
     let admin = Address::generate(&env);
     let treasury_addr = Address::generate(&env);
+    client.add_whitelisted_token(&admin, &token_address);
     client.initialize_token(&admin, &token_address);
     let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
     client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &treasury_addr);
@@ -341,6 +342,7 @@ fn test_payout_with_fee() {
     let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
 
     // Initialize Game Contract with token
+    client.add_whitelisted_token(&admin, &token_address);
     client.initialize_token(&admin, &token_address);
 
     // Initialize Puzzle Rewards/Fees
@@ -695,6 +697,7 @@ fn setup_in_progress_game<'a>(
     let token_address = stellar_token.address();
     let stellar_asset_client = StellarAssetClient::new(env, &token_address);
 
+    client.add_whitelisted_token(&admin, &token_address);
     client.initialize_token(&admin, &token_address);
     client.initialize_puzzle_rewards(
         &admin,
@@ -782,6 +785,7 @@ fn test_submit_move_game_not_in_progress() {
     let token_address = stellar_token.address();
     let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
 
+    client.add_whitelisted_token(&admin, &token_address);
     client.initialize_token(&admin, &token_address);
     client.initialize_puzzle_rewards(
         &admin,

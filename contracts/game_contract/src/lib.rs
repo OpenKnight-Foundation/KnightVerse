@@ -144,6 +144,9 @@ const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, Tourname
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
 
+// Token whitelist (SC-17)
+const ALLOWED_TOKENS: Symbol = symbol_short!("ALLWD_T"); // Vec<Address> - whitelisted token addresses
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -242,6 +245,8 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// Token address is not in the admin-maintained whitelist (SC-17)
+    TokenNotWhitelisted = 40,
 }
 
 #[contract]
@@ -265,9 +270,75 @@ impl GameContract {
             panic!("Contract already initialized");
         }
         admin.require_auth();
+        Self::require_token_whitelisted(&env, &token_contract);
         env.storage()
             .instance()
             .set(&TOKEN_CONTRACT, &token_contract);
+    }
+
+    /// Add a token address to the whitelist.
+    /// Authorised by the `admin` address — the contract admin once
+    /// `initialize_puzzle_rewards` has been called, or any authorised caller
+    /// before that.
+    pub fn add_whitelisted_token(env: Env, admin: Address, token: Address) {
+        admin.require_auth();
+        if let Some(stored_admin) = env.storage().instance().get::<_, Address>(&CONTRACT_ADMIN) {
+            if admin != stored_admin {
+                panic!("Not admin");
+            }
+        }
+        let mut tokens: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&ALLOWED_TOKENS)
+            .unwrap_or(Vec::new(&env));
+        if !tokens.contains(&token) {
+            tokens.push_back(token);
+        }
+        env.storage().instance().set(&ALLOWED_TOKENS, &tokens);
+    }
+
+    /// Remove a token address from the whitelist.
+    /// Only the contract admin may call this.
+    pub fn remove_whitelisted_token(env: Env, admin: Address, token: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        if admin != stored_admin {
+            panic!("Not admin");
+        }
+        let mut tokens: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&ALLOWED_TOKENS)
+            .unwrap_or(Vec::new(&env));
+        if let Some(pos) = tokens.iter().position(|t| t == token) {
+            tokens.remove(pos);
+        }
+        env.storage().instance().set(&ALLOWED_TOKENS, &tokens);
+    }
+
+    /// Return the current whitelist of permitted token contract addresses.
+    pub fn get_whitelisted_tokens(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&ALLOWED_TOKENS)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Internal helper — panics if `token` is not in the whitelist.
+    fn require_token_whitelisted(env: &Env, token: &Address) {
+        let tokens: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&ALLOWED_TOKENS)
+            .unwrap_or(Vec::new(env));
+        if !tokens.contains(token) {
+            panic!("TokenNotWhitelisted");
+        }
     }
 
     fn token_contract_address(env: &Env) -> Address {
@@ -480,6 +551,7 @@ impl GameContract {
 
         player1.require_auth();
 
+        Self::require_token_whitelisted(&env, &Self::token_contract_address(&env));
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
 
@@ -586,8 +658,9 @@ impl GameContract {
         if total_pool > max_prize_pool {
             return Err(ContractError::PrizePoolLimitExceeded);
         }
-
         player2.require_auth();
+
+        Self::require_token_whitelisted(&env, &Self::token_contract_address(&env));
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
 
@@ -3167,6 +3240,7 @@ mod tests {
         let client = GameContractClient::new(&env, &contract_id);
 
         // Initialize token then puzzle/fee config (fee_bips=20 → 2 %)
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         let dummy_key = Bytes::from_slice(&env, &[0u8; 32]);
         client.initialize_puzzle_rewards(
@@ -3224,6 +3298,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         let dummy_key = Bytes::from_slice(&env, &[0u8; 32]);
         client.initialize_puzzle_rewards(
@@ -3274,6 +3349,7 @@ mod tests {
         let client = GameContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
 
         let initial_wager: i128 = 100;
@@ -3587,6 +3663,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3638,6 +3715,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3678,6 +3756,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3730,6 +3809,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3779,6 +3859,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3831,6 +3912,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3874,6 +3956,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3925,6 +4008,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -3975,6 +4059,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -4041,6 +4126,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -4087,6 +4173,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -4140,6 +4227,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -4189,6 +4277,7 @@ mod tests {
         let token_address = stellar_token.address();
         let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
         client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &treasury_addr);
@@ -4235,6 +4324,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -4301,6 +4391,7 @@ mod tests {
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
 
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,

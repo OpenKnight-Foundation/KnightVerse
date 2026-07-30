@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, String, Symbol, token};
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Symbol, token};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -14,6 +14,8 @@ pub enum RegistryError {
     InsufficientEntryFee = 7,
     TournamentNotFound = 8,
     TournamentAlreadyExists = 9,
+    /// Contract is paused for emergency halt (SC-11)
+    ContractPaused = 10,
 }
 
 #[contracttype]
@@ -42,6 +44,7 @@ pub enum DataKey {
     Game(String),
     Tournament(String),
     Registration(String, Address),
+    Paused,
 }
 
 #[contract]
@@ -63,6 +66,62 @@ impl GameRegistry {
         Ok(())
     }
 
+    // ── Pausable extension (SC-11) ────────────────────────────────────────────
+
+    /// Pause the contract — blocks all state-mutating operations.
+    /// Only the contract admin may call this.
+    pub fn pause(env: Env, caller: Address) -> Result<(), RegistryError> {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(RegistryError::NotInitialized)?;
+        caller.require_auth();
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            panic!("Already paused");
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("paused"),), caller);
+        Ok(())
+    }
+
+    /// Unpause the contract — resumes normal operations.
+    /// Only the contract admin may call this.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), RegistryError> {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(RegistryError::NotInitialized)?;
+        caller.require_auth();
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if !env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            panic!("Not paused");
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("unpaused"),), caller);
+        Ok(())
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    fn check_not_paused(env: &Env) {
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            panic!("Contract is paused");
+        }
+    }
+
     /// Records a game result. Only the authorized server can call this.
     pub fn record_game(
         env: Env,
@@ -72,6 +131,7 @@ impl GameRegistry {
         black: Address,
         timestamp: u64,
     ) -> Result<(), RegistryError> {
+        Self::check_not_paused(&env);
         let server: Address = env.storage().persistent().get(&DataKey::Server).ok_or(RegistryError::NotInitialized)?;
         server.require_auth();
 
@@ -110,6 +170,7 @@ impl GameRegistry {
 
     /// Updates the authorized server address. Only the admin can call this.
     pub fn set_server(env: Env, new_server: Address) -> Result<(), RegistryError> {
+        Self::check_not_paused(&env);
         let admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(RegistryError::NotInitialized)?;
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Server, &new_server);
@@ -119,6 +180,7 @@ impl GameRegistry {
 
     /// Updates the admin address. Only the current admin can call this.
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), RegistryError> {
+        Self::check_not_paused(&env);
         let admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(RegistryError::NotInitialized)?;
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
@@ -134,6 +196,7 @@ impl GameRegistry {
         entry_fee: i128, 
         token_address: Address
     ) -> Result<(), RegistryError> {
+        Self::check_not_paused(&env);
         let admin: Address = env.storage().persistent().get(&DataKey::Admin).ok_or(RegistryError::NotInitialized)?;
         admin.require_auth();
 
@@ -161,6 +224,7 @@ impl GameRegistry {
         player: Address, 
         tournament_id: String
     ) -> Result<(), RegistryError> {
+        Self::check_not_paused(&env);
         player.require_auth();
 
         let t_key = DataKey::Tournament(tournament_id.clone());

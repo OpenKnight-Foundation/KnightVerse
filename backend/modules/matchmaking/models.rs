@@ -1,8 +1,7 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchType {
@@ -33,7 +32,7 @@ impl TimeControl {
             "bullet" => 60,
             "blitz" => 180,
             "rapid" => 480,
-            "standard" | _ => 600,
+            _ => 600,
         }
     }
 
@@ -47,7 +46,6 @@ impl Default for TimeControl {
         TimeControl("standard".to_string())
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Player {
@@ -76,7 +74,6 @@ impl MatchRequest {
         serde_json::from_str(s)
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {

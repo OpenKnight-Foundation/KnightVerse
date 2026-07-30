@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "96ab47c0a55322190d1314a62ac29ce642d25d039d3ab2f24980741f514c02e8"
                 },
                 {
                   "i128": {
@@ -79,7 +79,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                          "bytes": "96ab47c0a55322190d1314a62ac29ce642d25d039d3ab2f24980741f514c02e8"
                         }
                       },
                       {
@@ -116,6 +116,17 @@
                         },
                         "val": {
                           "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {
@@ -256,7 +267,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "e79ff7a04f7804284d47811d1a90b393f73e44b98a6e899bcbf6ebe2f840d814"
+                  "bytes": "96ab47c0a55322190d1314a62ac29ce642d25d039d3ab2f24980741f514c02e8"
                 },
                 {
                   "i128": {
@@ -331,7 +342,7 @@
                   "u64": 42
                 },
                 {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                  "bytes": "efc7dd08e1a19e10b2d4440d58325c7fc99e30df229b45d7379f050e0fee3a2f963713a7e88886968bc1b2a0e16dd98aa36e11f4736ca151659857a32a627b07"
                 }
               ]
             }
@@ -420,7 +431,7 @@
                   "u64": 42
                 },
                 {
-                  "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                  "bytes": "efc7dd08e1a19e10b2d4440d58325c7fc99e30df229b45d7379f050e0fee3a2f963713a7e88886968bc1b2a0e16dd98aa36e11f4736ca151659857a32a627b07"
                 }
               ]
             }
@@ -519,7 +530,7 @@
                       "u64": 42
                     },
                     {
-                      "bytes": "a101fe32675feef807880e2df5a1b3cd907507e3328c84a6131b516265ff0d6bc6e7c6d0f8153d3d564941a6492e9747665f492f9051e34cf8574fc5a61a6e09"
+                      "bytes": "efc7dd08e1a19e10b2d4440d58325c7fc99e30df229b45d7379f050e0fee3a2f963713a7e88886968bc1b2a0e16dd98aa36e11f4736ca151659857a32a627b07"
                     }
                   ]
                 }

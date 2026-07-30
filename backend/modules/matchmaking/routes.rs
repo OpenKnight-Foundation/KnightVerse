@@ -141,7 +141,10 @@ async fn accept_invite(
         join_time: Utc::now(),
     };
 
-    match service.accept_private_invite(req.inviter_request_id, player).await {
+    match service
+        .accept_private_invite(req.inviter_request_id, player)
+        .await
+    {
         Ok(Some(response)) => HttpResponse::Ok().json(response),
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
             "status": "Invite not found"

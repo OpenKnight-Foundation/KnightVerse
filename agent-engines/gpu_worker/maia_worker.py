@@ -6,8 +6,15 @@ import uuid
 from collections.abc import Callable
 
 import chess
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    torch = None  # type: ignore[assignment]
+    AutoModelForCausalLM = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment]
+    _TORCH_AVAILABLE = False
 
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo, WorkerStatus

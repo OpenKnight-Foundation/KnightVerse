@@ -1,4 +1,4 @@
-use crate::{EngineResult};
+use crate::EngineResult;
 
 pub fn parse_uci_line(line: &str) -> Option<UciMessage> {
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -38,7 +38,7 @@ pub fn parse_uci_line(line: &str) -> Option<UciMessage> {
             let mut score_cp = None;
             let mut score_mate = None;
             let mut pv = Vec::new();
-            
+
             let mut i = 1;
             while i < parts.len() {
                 match parts[i] {
@@ -46,7 +46,9 @@ pub fn parse_uci_line(line: &str) -> Option<UciMessage> {
                         if i + 1 < parts.len() {
                             depth = parts[i + 1].parse::<u8>().ok();
                             i += 2;
-                        } else { i += 1; }
+                        } else {
+                            i += 1;
+                        }
                     }
                     "score" => {
                         if i + 2 < parts.len() {
@@ -59,9 +61,13 @@ pub fn parse_uci_line(line: &str) -> Option<UciMessage> {
                                     score_mate = parts[i + 2].parse::<i32>().ok();
                                     i += 3;
                                 }
-                                _ => { i += 1; }
+                                _ => {
+                                    i += 1;
+                                }
                             }
-                        } else { i += 1; }
+                        } else {
+                            i += 1;
+                        }
                     }
                     "pv" => {
                         i += 1;
@@ -70,10 +76,17 @@ pub fn parse_uci_line(line: &str) -> Option<UciMessage> {
                             i += 1;
                         }
                     }
-                    _ => { i += 1; }
+                    _ => {
+                        i += 1;
+                    }
                 }
             }
-            Some(UciMessage::Info { depth, score_cp, score_mate, pv })
+            Some(UciMessage::Info {
+                depth,
+                score_cp,
+                score_mate,
+                pv,
+            })
         }
         _ => Some(UciMessage::Unknown(line.to_string())),
     }
@@ -85,8 +98,16 @@ pub enum UciMessage {
     IdAuthor(String),
     UciOk,
     ReadyOk,
-    BestMove { best_move: String, ponder: Option<String> },
-    Info { depth: Option<u8>, score_cp: Option<i32>, score_mate: Option<i32>, pv: Vec<String> },
+    BestMove {
+        best_move: String,
+        ponder: Option<String>,
+    },
+    Info {
+        depth: Option<u8>,
+        score_cp: Option<i32>,
+        score_mate: Option<i32>,
+        pv: Vec<String>,
+    },
     Unknown(String),
 }
 
@@ -134,7 +155,13 @@ mod tests {
     #[test]
     fn test_parse_info() {
         let msg = parse_uci_line("info depth 12 score cp 35 pv e2e4 e7e5 Ng1f3").unwrap();
-        if let UciMessage::Info { depth, score_cp, score_mate, pv } = msg {
+        if let UciMessage::Info {
+            depth,
+            score_cp,
+            score_mate,
+            pv,
+        } = msg
+        {
             assert_eq!(depth, Some(12));
             assert_eq!(score_cp, Some(35));
             assert_eq!(score_mate, None);
@@ -147,7 +174,13 @@ mod tests {
     #[test]
     fn test_parse_info_mate() {
         let msg = parse_uci_line("info depth 12 score mate 3 pv e2e4 e7e5 Ng1f3").unwrap();
-        if let UciMessage::Info { depth, score_cp, score_mate, pv } = msg {
+        if let UciMessage::Info {
+            depth,
+            score_cp,
+            score_mate,
+            pv,
+        } = msg
+        {
             assert_eq!(depth, Some(12));
             assert_eq!(score_cp, None);
             assert_eq!(score_mate, Some(3));

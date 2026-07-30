@@ -12,8 +12,18 @@ impl MigrationTrait for Migration {
                     .table(Player::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Player::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Player::Username).string().not_null().unique_key())
-                    .col(ColumnDef::new(Player::Email).string().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(Player::Username)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Player::Email)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(Player::PasswordHash).binary().not_null())
                     .col(ColumnDef::new(Player::Biography).text().not_null())
                     .col(ColumnDef::new(Player::Country).string().not_null())
@@ -22,7 +32,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Player::Location).string().null())
                     .col(ColumnDef::new(Player::FideRating).integer().null())
                     // Storing vector of strings as Array of text
-                    .col(ColumnDef::new(Player::SocialLinks).array(ColumnType::Text).null())
+                    .col(
+                        ColumnDef::new(Player::SocialLinks)
+                            .array(ColumnType::Text)
+                            .null(),
+                    )
                     .col(ColumnDef::new(Player::IsEnabled).boolean().not_null())
                     .to_owned(),
             )

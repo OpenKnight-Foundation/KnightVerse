@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
+                  "bytes": "c52309c715d187c04e7105dc08f3459629a0d313f2e35ea3998d54e6ee73e4ed"
                 },
                 {
                   "i128": {
@@ -78,7 +78,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
+                          "bytes": "c52309c715d187c04e7105dc08f3459629a0d313f2e35ea3998d54e6ee73e4ed"
                         }
                       },
                       {
@@ -95,6 +95,17 @@
                         },
                         "val": {
                           "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {
@@ -218,7 +229,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "0238f799a8f64751760110d2c1ce35ba3b6da7f082d3541b62fe44213bebc0a4"
+                  "bytes": "c52309c715d187c04e7105dc08f3459629a0d313f2e35ea3998d54e6ee73e4ed"
                 },
                 {
                   "i128": {
@@ -303,7 +314,7 @@
             ],
             "data": {
               "error": {
-                "contract": 36
+                "contract": 37
               }
             }
           }
@@ -324,7 +335,7 @@
               },
               {
                 "error": {
-                  "contract": 36
+                  "contract": 37
                 }
               }
             ],
@@ -349,7 +360,7 @@
               },
               {
                 "error": {
-                  "contract": 36
+                  "contract": 37
                 }
               }
             ],

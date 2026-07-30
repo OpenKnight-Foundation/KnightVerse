@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use validator::Validate;
 use uuid::Uuid;
+use validator::Validate;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct RegisterRequest {
-    #[validate(length(min = 3, max = 32, message = "Username must be between 3 and 32 characters"))]
+    #[validate(length(
+        min = 3,
+        max = 32,
+        message = "Username must be between 3 and 32 characters"
+    ))]
     #[schema(example = "chess_master")]
     pub username: String,
 
@@ -72,10 +76,10 @@ pub struct ErrorResponse {
 pub struct UserInfo {
     #[schema(value_type = String, format = "uuid", example = "123e4567-e89b-12d3-a456-426614174000")]
     pub id: Uuid,
-    
+
     #[schema(example = "chess_master")]
     pub username: String,
-    
+
     #[schema(example = "chess@example.com")]
     pub email: String,
 }
@@ -84,13 +88,13 @@ pub struct UserInfo {
 pub struct TokenResponse {
     #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub access_token: String,
-    
+
     #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub refresh_token: String,
-    
+
     #[schema(example = "Bearer")]
     pub token_type: String,
-    
+
     #[schema(example = 3600)]
     pub expires_in: i32,
 }
@@ -99,13 +103,13 @@ pub struct TokenResponse {
 pub struct RefreshResponse {
     #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub access_token: String,
-    
+
     #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub refresh_token: String,
-    
+
     #[schema(example = "Bearer")]
     pub token_type: String,
-    
+
     #[schema(example = 3600)]
     pub expires_in: i32,
 }

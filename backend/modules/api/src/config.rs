@@ -6,6 +6,10 @@ pub struct AppConfig {
     pub auth_rate_limit_burst: u32,
     pub game_rate_limit_per_sec: u64,
     pub game_rate_limit_burst: u32,
+    pub redis_auth_rate_limit: u64,
+    pub redis_auth_rate_limit_window: u64,
+    pub redis_game_rate_limit: u64,
+    pub redis_game_rate_limit_window: u64,
 }
 
 impl AppConfig {
@@ -27,6 +31,22 @@ impl AppConfig {
                 .unwrap_or_else(|_| "20".to_string())
                 .parse()
                 .unwrap_or(20),
+            redis_auth_rate_limit: env::var("REDIS_AUTH_RATE_LIMIT")
+                .unwrap_or_else(|_| "5".to_string())
+                .parse()
+                .unwrap_or(5),
+            redis_auth_rate_limit_window: env::var("REDIS_AUTH_RATE_LIMIT_WINDOW")
+                .unwrap_or_else(|_| "60".to_string())
+                .parse()
+                .unwrap_or(60),
+            redis_game_rate_limit: env::var("REDIS_GAME_RATE_LIMIT")
+                .unwrap_or_else(|_| "30".to_string())
+                .parse()
+                .unwrap_or(30),
+            redis_game_rate_limit_window: env::var("REDIS_GAME_RATE_LIMIT_WINDOW")
+                .unwrap_or_else(|_| "60".to_string())
+                .parse()
+                .unwrap_or(60),
         }
     }
 }

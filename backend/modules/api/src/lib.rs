@@ -4,6 +4,7 @@ pub mod config;
 pub mod games;
 pub mod openapi;
 pub mod players;
+pub mod rate_limiter;
 pub mod server;
 mod test;
 pub mod ws;

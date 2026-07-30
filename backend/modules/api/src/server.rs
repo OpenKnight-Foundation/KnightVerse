@@ -18,6 +18,7 @@ use challenge::puzzle_validation::PuzzleValidationService;
 use dotenv::dotenv;
 use matchmaking::redis::{create_redis_pool, test_redis_connection};
 use matchmaking::service::MatchmakingService;
+use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use security::JwtAuthMiddleware;
 use security::JwtService;
@@ -78,6 +79,16 @@ pub async fn main() -> std::io::Result<()> {
             ));
         }
     };
+
+    // Run database migrations automatically on startup
+    eprintln!("Running database migrations...");
+    match Migrator::up(&db, None).await {
+        Ok(_) => eprintln!("Database migrations completed successfully"),
+        Err(e) => {
+            eprintln!("Warning: Failed to run database migrations: {}", e);
+            // Don't abort server startup — allow running with existing schema
+        }
+    }
 
     // Initialize JWT service
     let jwt_service = JwtService::new(jwt_secret.clone(), jwt_expiration);

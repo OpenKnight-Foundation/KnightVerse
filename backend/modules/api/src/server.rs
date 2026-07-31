@@ -17,9 +17,14 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use challenge::api::configure_puzzle_routes;
 use challenge::puzzle_validation::PuzzleValidationService;
 use dotenv::dotenv;
+use matchmaking::redis::{create_redis_pool, test_redis_connection};
+use matchmaking::MatchmakingService;
+use migration::Migrator;
+use migration::MigratorTrait;
+use security::jwt::{JwtAuthMiddleware, JwtService};
 use tracing::{info, warn, error};
 use tracing_actix_web::TracingLogger;
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::Database;
 use std::env;
 use std::sync::Arc;
 use utoipa::OpenApi;
@@ -252,8 +257,8 @@ pub async fn main() -> std::io::Result<()> {
                     .service(get_ai_suggestion)
                     .service(analyze_position),
             )
-            // NFT routes
-            .service(web::scope("/api/v1").configure(configure_nft_routes))
+            // NFT routes (placeholder — not yet implemented)
+            // .service(web::scope("/api/v1").configure(configure_nft_routes))
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")
@@ -278,7 +283,7 @@ pub async fn main() -> std::io::Result<()> {
     if let Ok(workers_str) = env::var("WORKERS") {
         if let Ok(workers) = workers_str.parse::<usize>() {
             info!("Setting worker count to {}", workers);
-            server = server.workers(workers);
+            http_server = http_server.workers(workers);
         }
     }
 

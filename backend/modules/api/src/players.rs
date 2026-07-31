@@ -45,7 +45,7 @@ pub async fn add_player(payload: Json<NewPlayer>) -> HttpResponse {
     get,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player found", body=PlayerFound),
@@ -71,7 +71,7 @@ pub async fn find_player_by_id(id: Path<Uuid>) -> HttpResponse {
     put,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player updated", body=PlayerUpdated),
@@ -121,7 +121,7 @@ pub async fn update_player(
     delete,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player deleted", body=PlayerDeleted),

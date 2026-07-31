@@ -22,10 +22,8 @@ pub struct Model {
     pub fide_rating: Option<i32>,
     pub elo_rating: i32,
     pub social_links: Option<Vec<String>>,
-    pub is_enabled: bool
+    pub is_enabled: bool,
 }
-
-
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}

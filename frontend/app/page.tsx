@@ -28,7 +28,10 @@ import { FaUser } from "react-icons/fa";
 import { RiAliensFill } from "react-icons/ri";
 import { useChessSocket } from "@/hook/useChessSocket";
 import { useMatchmaking } from "@/hook/useMatchmaking";
-import { useStockfishWASM, AnalysisResult } from "@/components/chess/StockfishWASM";
+import {
+  useStockfishWASM,
+  AnalysisResult,
+} from "@/components/chess/StockfishWASM";
 import { useRouter } from "next/navigation";
 import { useMatchmakingContext } from "@/context/matchmakingContext";
 import { ChessVariantSelector } from "@/components/ChessVariantSelector";
@@ -40,6 +43,8 @@ import { WalletConnectModal } from "@/components/WalletConnectModal";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { endpoints } from "@/lib/api";
 
 export default function Home() {
   const [game] = useState(new Chess());
@@ -47,9 +52,12 @@ export default function Home() {
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [gameMode, setGameMode] = useState<"online" | "bot" | null>(null);
   const router = useRouter();
-  const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const PLAYER_COUNT_ENDPOINT = `${API_BASE}/v1/players/online`;
+
+  const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(
+    null,
+  );
+  const PLAYER_COUNT_ENDPOINT = endpoints.players.online();
+
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);
   const [isMatchmakingModalOpen, setIsMatchmakingModalOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
@@ -81,7 +89,11 @@ export default function Home() {
     reconnect: reconnectSocket,
   } = useChessSocket(gameId);
 
-  const { analyzePosition, isReady: stockfishReady, isAnalyzing } = useStockfishWASM({
+  const {
+    analyzePosition,
+    isReady: stockfishReady,
+    isAnalyzing,
+  } = useStockfishWASM({
     jsBridgePath: "/assets/stockfish.js",
     defaultTimeLimit: 250,
   });
@@ -91,14 +103,19 @@ export default function Home() {
     const tempGame = new Chess();
     const history = game.history();
     for (let i = 0; i <= viewIndex; i++) {
-      try { tempGame.move(history[i]); } catch {}
+      try {
+        tempGame.move(history[i]);
+      } catch {}
     }
     return tempGame.fen();
   }, [position, viewIndex, game]);
 
-  const handleMoveClick = useCallback((index: number) => {
-    setViewIndex(index === game.history().length - 1 ? null : index);
-  }, [game]);
+  const handleMoveClick = useCallback(
+    (index: number) => {
+      setViewIndex(index === game.history().length - 1 ? null : index);
+    },
+    [game],
+  );
 
   // Choose which sendMove to use based on game state
   const sendMove = useCallback(
@@ -149,7 +166,9 @@ export default function Home() {
           setOnlinePlayerCount(data.count);
         }
       } catch {
-        console.warn("[KnightVerse] Could not fetch online player count — backend offline?");
+        console.warn(
+          "[KnightVerse] Could not fetch online player count — backend offline?",
+        );
         if (isMounted) setOnlinePlayerCount(null);
       }
     };
@@ -199,7 +218,9 @@ export default function Home() {
           const from = result.bestMove.substring(0, 2);
           const to = result.bestMove.substring(2, 4);
           const promotion =
-            result.bestMove.length > 4 ? result.bestMove.substring(4, 5) : undefined;
+            result.bestMove.length > 4
+              ? result.bestMove.substring(4, 5)
+              : undefined;
           game.move({ from, to, promotion });
           setPosition(game.fen());
           setViewIndex(null);
@@ -216,7 +237,15 @@ export default function Home() {
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
+  }, [
+    position,
+    gameMode,
+    analyzePosition,
+    aiPersonality,
+    game,
+    stockfishReady,
+    isAnalyzing,
+  ]);
 
   // ─── DETECT GAME OVER for hero / bot mode ───
   useEffect(() => {
@@ -282,7 +311,7 @@ export default function Home() {
         if (gameMode === "online") {
           sendMove(sourceSquare, targetSquare, "q");
         }
-        
+
         setPosition(game.fen());
         setViewIndex(null);
         return true;
@@ -330,7 +359,7 @@ export default function Home() {
 
   const handleMatchmakingConfirm = (type: "Rated" | "Casual") => {
     setIsMatchmakingModalOpen(false);
-    joinMatchmaking(type);
+    joinMatchmaking(type, chessVariant);
   };
 
   const handleMatchmakingClose = () => {
@@ -440,11 +469,13 @@ export default function Home() {
             <div className="w-full min-w-[320px] flex flex-row items-stretch justify-center gap-2 md:gap-4">
               <EvaluationBar evaluation={botAnalysis?.evaluation ?? null} />
               <div className="w-full">
-                <ChessboardComponent
-                  position={currentDisplayPosition}
-                  onDrop={handleMove}
-                  aria-label="Chess board. You play as White. Click or drag pieces to move."
-                />
+                <ErrorBoundary componentName="Chessboard">
+                  <ChessboardComponent
+                    position={currentDisplayPosition}
+                    onDrop={handleMove}
+                    aria-label="Chess board. You play as White. Click or drag pieces to move."
+                  />
+                </ErrorBoundary>
               </div>
             </div>
 
@@ -477,10 +508,10 @@ export default function Home() {
 
           {/* Move History */}
           <div className="w-full max-w-[280px] order-3 flex justify-center mt-4 lg:mt-0">
-            <MoveHistory 
-              history={game.history()} 
-              onMoveClick={handleMoveClick} 
-              currentMoveIndex={viewIndex ?? game.history().length - 1} 
+            <MoveHistory
+              history={game.history()}
+              onMoveClick={handleMoveClick}
+              currentMoveIndex={viewIndex ?? game.history().length - 1}
             />
           </div>
 
@@ -549,9 +580,7 @@ export default function Home() {
             </div>
             <div>
               <h2 className="text-base font-bold text-white">
-                {gameMode === "online"
-                  ? onlineStatusLabel()
-                  : "Playing vs Bot"}
+                {gameMode === "online" ? onlineStatusLabel() : "Playing vs Bot"}
               </h2>
               <p className="text-xs text-cyan-100/70">
                 {selectedVariant.label} / {selectedVariant.averageGameTime}

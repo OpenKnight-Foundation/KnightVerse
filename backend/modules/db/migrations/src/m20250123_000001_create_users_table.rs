@@ -30,11 +30,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .unique_key(),
                     )
-                    .col(
-                        ColumnDef::new(Users::PasswordHash)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Users::PasswordHash).string().not_null())
                     .col(
                         ColumnDef::new(Users::CreatedAt)
                             .timestamp()

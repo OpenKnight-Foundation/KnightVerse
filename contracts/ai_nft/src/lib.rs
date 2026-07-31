@@ -22,6 +22,8 @@ const NFT_COUNTER: Symbol = symbol_short!("NFT_CNT");
 const NFT_OWNERS: Symbol = symbol_short!("OWNERS");
 const NFT_METADATA: Symbol = symbol_short!("METADATA");
 const MINTER_REGISTRY: Symbol = symbol_short!("MINTER");
+// Pausable extension (SC-11)
+const PAUSED: Symbol = symbol_short!("PAUSED");
 
 // Contract errors
 #[contracterror]
@@ -33,6 +35,8 @@ pub enum ContractError {
     AlreadyTransferred = 4,
     InvalidOwner = 5,
     MinterMismatch = 6,
+    /// Contract is paused for emergency halt (SC-11)
+    ContractPaused = 7,
 }
 
 #[contract]
@@ -55,6 +59,52 @@ impl AINFTContract {
         env.storage().instance().get(&ADMIN).expect("Admin not set")
     }
 
+    // ── Pausable extension (SC-11) ────────────────────────────────────────────
+
+    /// Pause the contract — blocks all state-mutating operations.
+    /// Only the contract admin may call this.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Already paused");
+        }
+        env.storage().instance().set(&PAUSED, &true);
+        env.events()
+            .publish((symbol_short!("paused"),), caller);
+    }
+
+    /// Unpause the contract — resumes normal operations.
+    /// Only the contract admin may call this.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Not paused");
+        }
+        env.storage().instance().set(&PAUSED, &false);
+        env.events()
+            .publish((symbol_short!("unpaused"),), caller);
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&PAUSED).unwrap_or(false)
+    }
+
+    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    fn check_not_paused(env: &Env) {
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Contract is paused");
+        }
+    }
+
     /// Mint a new AI NFT with metadata hash
     pub fn mint(
         env: Env,
@@ -62,6 +112,9 @@ impl AINFTContract {
         metadata_hash: BytesN<32>,
         personality_traits: String,
     ) -> u64 {
+        Self::check_not_paused(&env);
+        let admin = Self::admin(env.clone());
+        admin.require_auth();
         minter.require_auth();
 
         // Increment NFT counter
@@ -113,6 +166,7 @@ impl AINFTContract {
 
     /// Transfer NFT from current owner to a new owner
     pub fn transfer(env: Env, nft_id: u64, to: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut owners: Map<u64, Address> = env
             .storage()
             .instance()

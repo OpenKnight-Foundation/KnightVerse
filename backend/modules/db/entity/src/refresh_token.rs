@@ -1,5 +1,5 @@
-use sea_orm::entity::prelude::*;
 use chrono::{DateTime, Utc};
+use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, DeriveEntityModel, PartialEq, Eq)]
 #[sea_orm(table_name = "refresh_tokens")]

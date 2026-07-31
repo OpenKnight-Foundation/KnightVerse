@@ -1,29 +1,34 @@
 // src/server.rs
 
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use crate::ai::{analyze_position, get_ai_suggestion};
+use crate::auth::{login, logout, refresh, register};
+use crate::config::AppConfig;
+use crate::games::{
+    abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
+    make_move,
+};
+use crate::players::{add_player, delete_player, find_player_by_id, update_player};
+use crate::rate_limiter::RedisRateLimiter;
+use crate::ws::{ws_route, LobbyState};
+use actix::Actor;
 use actix_cors::Cors;
+use actix_governor::{Governor, GovernorConfigBuilder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use challenge::api::configure_puzzle_routes;
+use challenge::puzzle_validation::PuzzleValidationService;
 use dotenv::dotenv;
-use sea_orm::{Database, DatabaseConnection};
+use matchmaking::redis::{create_redis_pool, test_redis_connection};
+use matchmaking::service::MatchmakingService;
+use migration::{Migrator, MigratorTrait};
+use sea_orm::Database;
+use security::JwtAuthMiddleware;
+use security::JwtService;
+use st_core::endpoint::configure as configure_nft_routes;
 use std::env;
 use std::sync::Arc;
-use security::JwtService;
-use security::JwtAuthMiddleware;
 use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 use utoipa_redoc::{Redoc, Servable};
-use actix::Actor;
-use crate::players::{add_player, delete_player, find_player_by_id, update_player};
-use crate::games::{create_game, get_game, make_move, list_games, join_game, abandon_game, import_game, complete_game};
-use crate::auth::{login, register, refresh, logout};
-use crate::ai::{get_ai_suggestion, analyze_position};
-use crate::ws::{LobbyState, ws_route};
-use crate::config::AppConfig;
-use actix_governor::{Governor, GovernorConfigBuilder};
-use matchmaking::service::MatchmakingService;
-use matchmaking::redis::{create_redis_pool, test_redis_connection};
-use challenge::puzzle_validation::PuzzleValidationService;
-use challenge::api::configure_puzzle_routes;
-use st_core::endpoint::configure as configure_nft_routes;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::openapi::ApiDoc;
 
@@ -47,17 +52,19 @@ pub async fn main() -> std::io::Result<()> {
     // Initialize logger
     env_logger::init();
 
-    // Load configuration from environment
+    // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
-    let jwt_secret = env::var("JWT_SECRET_KEY")
-        .unwrap_or_else(|_| "knightverse_dev_secret_key_change_in_production".to_string());
-    let jwt_expiration = env::var("JWT_EXPIRATION_SECS")
-        .unwrap_or_else(|_| "3600".to_string())
-        .parse::<usize>()
-        .unwrap_or(3600);
 
-    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    // JWT: strict env — crash on missing/insecure secret
+    let jwt_service = JwtService::from_env();
+    let jwt_secret = jwt_service.secret_key.clone();
+    let jwt_expiration = jwt_service.expiration_time();
+
+    // Redis: strict env — no localhost fallback that could mask misconfiguration
+    let redis_url = env::var("REDIS_URL").expect(
+        "REDIS_URL must be set. Refusing to start with a hardcoded fallback.",
+    );
 
     eprintln!("Initializing KnightVerse Backend Server");
     eprintln!("Server address: {}", server_addr);
@@ -70,15 +77,22 @@ pub async fn main() -> std::io::Result<()> {
         }
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "Database connection failed",
             ));
         }
     };
 
-    // Initialize JWT service
-    let jwt_service = JwtService::new(jwt_secret.clone(), jwt_expiration);
+    // Run database migrations automatically on startup
+    eprintln!("Running database migrations...");
+    match Migrator::up(&db, None).await {
+        Ok(_) => eprintln!("Database migrations completed successfully"),
+        Err(e) => {
+            eprintln!("Warning: Failed to run database migrations: {}", e);
+            // Don't abort server startup — allow running with existing schema
+        }
+    }
+
     let db = std::sync::Arc::new(db); // Wrap db in Arc
 
     // Create a shared LobbyState actor
@@ -90,12 +104,13 @@ pub async fn main() -> std::io::Result<()> {
     // Initialize Matchmaking
     eprintln!("Connecting to Redis for matchmaking at {}", redis_url);
     let redis_pool = create_redis_pool(&redis_url).expect("Failed to create Redis pool");
-    
+
     // Optional: test connection
     if let Err(e) = test_redis_connection(&redis_pool).await {
         eprintln!("Warning: Redis connection test failed: {}", e);
     }
-    
+
+    let rate_limiter_pool = redis_pool.clone();
     let matchmaking_service = MatchmakingService::new(redis_pool);
 
     // Initialize Puzzle Validation Service
@@ -110,14 +125,14 @@ pub async fn main() -> std::io::Result<()> {
         let jwt_secret = jwt_secret.clone();
         let matchmaking_service = matchmaking_service.clone();
         let puzzle_service = puzzle_service.clone();
-        
+
         // Configure CORS middleware with environment variables for flexibility
         let cors = {
             let mut cors = Cors::default()
                 .allow_any_method()
                 .allow_any_header()
                 .max_age(3600);
-            
+
             // Get allowed origins from environment variable, fallback to all origins in development
             if let Ok(allowed_origins) = env::var("ALLOWED_ORIGINS") {
                 // Parse comma-separated list of allowed origins
@@ -130,11 +145,11 @@ pub async fn main() -> std::io::Result<()> {
                 // In development, allow all origins by default
                 cors = cors.allow_any_origin();
             }
-            
+
             cors
         };
-        
-        // Configure Governor for Auth (Strict)
+
+        // Configure Governor for Auth (Strict per-second burst protection)
         let auth_governor_conf = GovernorConfigBuilder::default()
             .per_second(config.auth_rate_limit_per_sec)
             .burst_size(config.auth_rate_limit_burst)
@@ -142,7 +157,7 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
-        // Configure Governor for Games/General (Loose)
+        // Configure Governor for Games/General (Loose per-second burst protection)
         let game_governor_conf = GovernorConfigBuilder::default()
             .per_second(config.game_rate_limit_per_sec)
             .burst_size(config.game_rate_limit_burst)
@@ -150,7 +165,24 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
+        // Create Redis-backed rate limiters (shared across workers via Redis)
+        let auth_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_auth_rate_limit,
+            config.redis_auth_rate_limit_window,
+        );
+
+        let game_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_game_rate_limit,
+            config.redis_game_rate_limit_window,
+        );
+
         App::new()
+            .wrap(actix_web::middleware::DefaultHeaders::new().add((
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )))
             // Global middleware
             .wrap(cors)
             // App data
@@ -177,6 +209,7 @@ pub async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/games")
                     .wrap(Governor::new(&game_governor_conf))
+                    .wrap(game_redis_limiter)
                     .wrap(JwtAuthMiddleware::new(jwt_secret.clone(), jwt_expiration))
                     .service(create_game)
                     .service(get_game)
@@ -191,21 +224,16 @@ pub async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/auth")
                     .wrap(Governor::new(&auth_governor_conf))
+                    .wrap(auth_redis_limiter)
                     .service(login)
                     .service(register)
                     .service(refresh)
-                    .service(logout)
+                    .service(logout),
             )
             // WebSocket routes
-            .service(
-                web::scope("/v1/ws")
-                    .route("/game/{game_id}", web::get().to(ws_route))
-            )
+            .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
             // Matchmaking routes
-            .service(
-                web::scope("/v1")
-                    .configure(matchmaking::routes::config)
-            )
+            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
             .service(
                 web::scope("/v1/ai")
@@ -214,36 +242,67 @@ pub async fn main() -> std::io::Result<()> {
                     .service(analyze_position),
             )
             // NFT routes
-            .service(
-                web::scope("/api/v1")
-                    .configure(configure_nft_routes)
-            )
+            .service(web::scope("/api/v1").configure(configure_nft_routes))
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")
                     .url("/api/docs/openapi.json", openapi.clone())
-                    .config(utoipa_swagger_ui::Config::default().try_it_out_enabled(true))
+                    .config(utoipa_swagger_ui::Config::default().try_it_out_enabled(true)),
             )
             // ReDoc integration (alternative documentation UI)
-            .service(
-                Redoc::with_url("/api/redoc", openapi.clone())
-            )
+            .service(Redoc::with_url("/api/redoc", openapi.clone()))
             // WebSocket documentation as static HTML
-            .route("/api/docs/websocket", web::get().to(|| async {
-                HttpResponse::Ok()
-                    .content_type("text/markdown")
-                    .body(crate::openapi::websocket_documentation())
-            }))
+            .route(
+                "/api/docs/websocket",
+                web::get().to(|| async {
+                    HttpResponse::Ok()
+                        .content_type("text/markdown")
+                        .body(crate::openapi::websocket_documentation())
+                }),
+            )
     };
 
-    let mut server = HttpServer::new(app_factory).bind(&server_addr)?;
+    let mut http_server = HttpServer::new(app_factory).bind(&server_addr)?;
 
     if let Ok(workers_str) = env::var("WORKERS") {
         if let Ok(workers) = workers_str.parse::<usize>() {
             println!("Setting worker count to {}", workers);
-            server = server.workers(workers);
+            http_server = http_server.workers(workers);
         }
     }
 
-    server.run().await
+    // BE-26: Graceful shutdown on SIGTERM / SIGINT
+    // stop(true) waits for in-flight requests and drains the worker thread pool
+    // so active WebSocket connections and DB transactions can complete cleanly.
+    let server = http_server.run();
+    let server_handle = server.handle();
+
+    actix_web::rt::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+            let mut sigint = signal(SignalKind::interrupt())
+                .expect("failed to install SIGINT handler");
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    eprintln!("Received SIGTERM — initiating graceful shutdown...");
+                }
+                _ = sigint.recv() => {
+                    eprintln!("Received SIGINT — initiating graceful shutdown...");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            eprintln!("Received Ctrl+C — initiating graceful shutdown...");
+        }
+        // true = graceful: finish active connections, then drain workers
+        server_handle.stop(true).await;
+        eprintln!("Server stopped gracefully");
+    });
+
+    server.await
 }

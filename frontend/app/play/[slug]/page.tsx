@@ -12,6 +12,7 @@ import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -46,13 +47,18 @@ export default function PlayOnlinePage() {
   const [game] = useState(new Chess());
   const [position, setPosition] = useState("start");
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [whiteTime] = useState(600); // 10 min in seconds
-  const [blackTime] = useState(600);
+  const [whiteTime, setWhiteTime] = useState(600); // 10 min in seconds
+  const [blackTime, setBlackTime] = useState(600);
   const [playerColor] = useState<"white" | "black">("white");
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
+  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
   const isMobile = useIsMobile();
+
+  const handleFlipBoard = useCallback(() => {
+    setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
+  }, []);
 
   const {
     status: socketStatus,
@@ -71,6 +77,42 @@ export default function PlayOnlinePage() {
       setGameStatus("draw");
     }
   }, [game]);
+
+  // ── FE-04: Countdown clocks ───────────────────────────────────────────────
+  // Tick the active side's clock down by 1 second every second while the game
+  // is live. The interval is cleared the moment the game ends.
+  useEffect(() => {
+    if (socketStatus !== "connected" || gameStatus !== "playing") return;
+
+    const id = setInterval(() => {
+      const activeColor = game.turn(); // "w" | "b"
+      if (activeColor === "w") {
+        setWhiteTime((t) => Math.max(0, t - 1));
+      } else {
+        setBlackTime((t) => Math.max(0, t - 1));
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [socketStatus, gameStatus, game]);
+
+  // Sync clocks from authoritative server clock messages.
+  // The socket emits { type: "clock", whiteTime: number, blackTime: number }
+  // after each move so both sides stay in sync.
+  useEffect(() => {
+    // useChessSocket only exposes lastOpponentMove; clock data arrives via the
+    // raw WebSocket.  We listen for a "clock" message relayed through a custom
+    // DOM event dispatched by a thin shim (or we handle it here directly).
+    // For now we seed from lastOpponentMove's accompanying clock field when
+    // the server includes it.
+    if (!lastOpponentMove) return;
+    const raw = lastOpponentMove as typeof lastOpponentMove & {
+      whiteTime?: number;
+      blackTime?: number;
+    };
+    if (typeof raw.whiteTime === "number") setWhiteTime(raw.whiteTime);
+    if (typeof raw.blackTime === "number") setBlackTime(raw.blackTime);
+  }, [lastOpponentMove]);
 
   // Cheat detection
   const {
@@ -242,7 +284,7 @@ export default function PlayOnlinePage() {
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           {/* Chessboard Section */}
-          <div className="w-full max-w-[600px]" role="region" aria-label="Chess board">
+          <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0" role="region" aria-label="Chess board">
             {/* Opponent info bar */}
             <div className="flex items-center justify-between mb-3 px-1" role="status" aria-label="Opponent info">
               <div className="flex items-center gap-3">
@@ -266,10 +308,13 @@ export default function PlayOnlinePage() {
 
             {/* Board */}
             <div className="w-full min-w-[320px]">
-              <ChessboardComponent
-                position={position}
-                onDrop={handleMove}
-              />
+              <ErrorBoundary componentName="Chessboard">
+                <ChessboardComponent
+                  position={position}
+                  onDrop={handleMove}
+                  orientation={boardOrientation}
+                />
+              </ErrorBoundary>
             </div>
 
             {/* Player info bar */}
@@ -301,7 +346,7 @@ export default function PlayOnlinePage() {
             {/* Mobile controls — visible only on mobile, directly below board */}
             <div className="flex items-center gap-2 mt-3 lg:hidden">
               <button
-                onClick={() => {}}
+                onClick={handleFlipBoard}
                 aria-label="Flip board orientation"
                 className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
               >
@@ -413,7 +458,7 @@ export default function PlayOnlinePage() {
             {/* Controls — desktop only, mobile controls are above the sidebar */}
             <div className="hidden lg:flex gap-2">
               <button
-                onClick={() => {}}
+                onClick={handleFlipBoard}
                 aria-label="Flip board orientation"
                 className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
               >

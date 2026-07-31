@@ -4,12 +4,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { FaPlus, FaSpinner } from "react-icons/fa";
 import type { TournamentBracket, BracketFormat } from "@/components/tournament/BracketView";
+import { endpoints } from "@/lib/api";
 
 const BracketView = dynamic(() => import("@/components/tournament/BracketView"), {
   ssr: false,
 });
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const FORMAT_OPTIONS: { value: BracketFormat; label: string; description: string }[] = [
   { value: "SingleElimination", label: "Single Elimination", description: "One loss and you're out" },
@@ -33,17 +32,20 @@ export default function TournamentPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/v1/tournaments`, { credentials: "include" });
+      const res = await fetch(endpoints.tournaments.list(), { credentials: "include" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data: TournamentBracket[] = await res.json();
       setBrackets(data);
-      if (data.length > 0 && !selected) setSelected(data[0]);
+      // Use the functional form of setSelected so we don't need `selected` in the
+      // dependency array — reading `selected` here would make the callback identity
+      // change every time the user picks a tournament, causing an infinite fetch loop.
+      setSelected((prev) => (prev === null && data.length > 0 ? data[0] : prev));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load tournaments");
     } finally {
       setLoading(false);
     }
-  }, [selected]);
+  }, []); // no deps — uses only stable setters and module-level constants
 
   useEffect(() => {
     void fetchBrackets();
@@ -54,7 +56,7 @@ export default function TournamentPage() {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch(`${API_BASE}/v1/tournaments`, {
+      const res = await fetch(endpoints.tournaments.create(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

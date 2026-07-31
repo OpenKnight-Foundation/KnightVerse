@@ -36,17 +36,13 @@ pub enum PgnError {
 
 /// Represents the result of a chess game
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum GameResult {
     WhiteWins,
     BlackWins,
     Draw,
+    #[default]
     Ongoing,
-}
-
-impl Default for GameResult {
-    fn default() -> Self {
-        GameResult::Ongoing
-    }
 }
 
 impl GameResult {
@@ -111,17 +107,17 @@ pub struct ValidatedGame {
 /// Parse PGN headers from the input string
 fn parse_headers(pgn: &str) -> Result<(PgnHeaders, &str), PgnError> {
     let header_regex = Regex::new(r#"\[(\w+)\s+"([^"]+)"\]"#).unwrap();
-    
+
     let mut headers = PgnHeaders::default();
     let mut last_header_end = 0;
-    
+
     for cap in header_regex.captures_iter(pgn) {
         let full_match = cap.get(0).unwrap();
         last_header_end = full_match.end();
-        
+
         let key = cap.get(1).unwrap().as_str();
         let value = cap.get(2).unwrap().as_str().to_string();
-        
+
         match key.to_lowercase().as_str() {
             "event" => headers.event = Some(value),
             "site" => headers.site = Some(value),
@@ -135,7 +131,7 @@ fn parse_headers(pgn: &str) -> Result<(PgnHeaders, &str), PgnError> {
             }
         }
     }
-    
+
     // Validate required headers
     if headers.white.is_empty() {
         return Err(PgnError::MissingHeader("White".to_string()));
@@ -143,10 +139,10 @@ fn parse_headers(pgn: &str) -> Result<(PgnHeaders, &str), PgnError> {
     if headers.black.is_empty() {
         return Err(PgnError::MissingHeader("Black".to_string()));
     }
-    
+
     // Get the move text (everything after headers)
     let move_text = &pgn[last_header_end..];
-    
+
     Ok((headers, move_text))
 }
 
@@ -159,24 +155,24 @@ fn parse_moves(move_text: &str) -> Vec<String> {
     let without_semicolon_comments = Regex::new(r";[^\n]*")
         .unwrap()
         .replace_all(&without_curly_comments, " ");
-    
+
     // Remove NAGs (Numeric Annotation Glyphs like $1, $2, etc.)
     let without_nags = Regex::new(r"\$\d+")
         .unwrap()
         .replace_all(&without_semicolon_comments, " ");
-    
+
     // Remove variations (recursive parentheses - simplified, only top-level)
     let without_variations = Regex::new(r"\([^()]*\)")
         .unwrap()
         .replace_all(&without_nags, " ");
-    
+
     // Split into tokens
     let tokens: Vec<&str> = without_variations.split_whitespace().collect();
-    
+
     // Filter out move numbers, results, and other non-move tokens
     let move_number_regex = Regex::new(r"^\d+\.+$").unwrap();
     let result_regex = Regex::new(r"^(1-0|0-1|1/2-1/2|\*)$").unwrap();
-    
+
     tokens
         .into_iter()
         .filter(|token| {
@@ -189,14 +185,14 @@ fn parse_moves(move_text: &str) -> Vec<String> {
 /// Parse a PGN string into a ParsedGame
 pub fn parse_pgn(pgn_string: &str) -> Result<ParsedGame, PgnError> {
     let pgn = pgn_string.trim();
-    
+
     if pgn.is_empty() {
         return Err(PgnError::EmptyPgn);
     }
-    
+
     let (headers, move_text) = parse_headers(pgn)?;
     let moves = parse_moves(move_text);
-    
+
     Ok(ParsedGame {
         headers,
         moves,
@@ -209,37 +205,40 @@ pub fn parse_pgn(pgn_string: &str) -> Result<ParsedGame, PgnError> {
 pub fn validate_game(parsed: &ParsedGame) -> Result<ValidatedGame, PgnError> {
     let mut position: Chess = Chess::default();
     let mut validated_moves = Vec::new();
-    
+
     for (idx, move_san) in parsed.moves.iter().enumerate() {
         let move_number = (idx / 2) + 1;
-        
+
         // Parse the SAN move
         let san: San = move_san.parse().map_err(|_| PgnError::IllegalMove {
             move_number,
             move_text: move_san.clone(),
             reason: "Invalid move notation".to_string(),
         })?;
-        
+
         // Try to play the move
         let chess_move = san.to_move(&position).map_err(|_| PgnError::IllegalMove {
             move_number,
             move_text: move_san.clone(),
             reason: "Move is not legal in this position".to_string(),
         })?;
-        
-        position = position.play(&chess_move).map_err(|_| PgnError::IllegalMove {
-            move_number,
-            move_text: move_san.clone(),
-            reason: "Move leaves king in check".to_string(),
-        })?;
-        
+
+        position = position
+            .play(&chess_move)
+            .map_err(|_| PgnError::IllegalMove {
+                move_number,
+                move_text: move_san.clone(),
+                reason: "Move leaves king in check".to_string(),
+            })?;
+
         validated_moves.push(move_san.clone());
     }
-    
+
     // Get final FEN
-    let final_fen = shakmaty::fen::Fen::from_position(position.clone(), shakmaty::EnPassantMode::Legal)
-        .to_string();
-    
+    let final_fen =
+        shakmaty::fen::Fen::from_position(position.clone(), shakmaty::EnPassantMode::Legal)
+            .to_string();
+
     Ok(ValidatedGame {
         headers: parsed.headers.clone(),
         moves: validated_moves,
@@ -263,7 +262,7 @@ mod tests {
 
         let result = parse_pgn(pgn);
         assert!(result.is_ok());
-        
+
         let parsed = result.unwrap();
         assert_eq!(parsed.headers.white, "Magnus Carlsen");
         assert_eq!(parsed.headers.black, "Hikaru Nakamura");
@@ -281,7 +280,7 @@ mod tests {
 
         let parsed = parse_pgn(pgn).unwrap();
         let validated = validate_game(&parsed);
-        
+
         assert!(validated.is_ok());
         let game = validated.unwrap();
         assert!(game.is_valid);
@@ -300,7 +299,7 @@ mod tests {
 
         let parsed = parse_pgn(pgn).unwrap();
         let validated = validate_game(&parsed);
-        
+
         assert!(validated.is_err());
         if let Err(PgnError::IllegalMove { move_text, .. }) = validated {
             assert_eq!(move_text, "Ke3");
@@ -333,9 +332,21 @@ mod tests {
 
     #[test]
     fn test_game_result_parsing() {
-        assert_eq!(GameResult::from_pgn_string("1-0").unwrap(), GameResult::WhiteWins);
-        assert_eq!(GameResult::from_pgn_string("0-1").unwrap(), GameResult::BlackWins);
-        assert_eq!(GameResult::from_pgn_string("1/2-1/2").unwrap(), GameResult::Draw);
-        assert_eq!(GameResult::from_pgn_string("*").unwrap(), GameResult::Ongoing);
+        assert_eq!(
+            GameResult::from_pgn_string("1-0").unwrap(),
+            GameResult::WhiteWins
+        );
+        assert_eq!(
+            GameResult::from_pgn_string("0-1").unwrap(),
+            GameResult::BlackWins
+        );
+        assert_eq!(
+            GameResult::from_pgn_string("1/2-1/2").unwrap(),
+            GameResult::Draw
+        );
+        assert_eq!(
+            GameResult::from_pgn_string("*").unwrap(),
+            GameResult::Ongoing
+        );
     }
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tracing::{info, warn};
 
 /// Circuit breaker state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +110,7 @@ impl InnerState {
                     if opened_at.elapsed() >= self.config.open_timeout {
                         self.state = CircuitState::HalfOpen;
                         self.consecutive_successes = 0;
-                        log::info!("Circuit breaker transitioning from open to half-open");
+                        info!("Circuit breaker transitioning from open to half-open");
                         return Ok(());
                     }
                 }
@@ -132,7 +133,7 @@ impl InnerState {
                 if self.consecutive_successes >= self.config.success_threshold {
                     self.state = CircuitState::Closed;
                     self.consecutive_successes = 0;
-                    log::info!("Circuit breaker closed after successful half-open tests");
+                    info!("Circuit breaker closed after successful half-open tests");
                 }
             }
             CircuitState::Open => {
@@ -150,7 +151,7 @@ impl InnerState {
                 if self.consecutive_failures >= self.config.failure_threshold {
                     self.state = CircuitState::Open;
                     self.opened_at = Some(Instant::now());
-                    log::warn!(
+                    warn!(
                         "Circuit breaker opened after {} consecutive failures",
                         self.consecutive_failures
                     );
@@ -160,7 +161,7 @@ impl InnerState {
                 // Any failure in half-open re-opens the circuit
                 self.state = CircuitState::Open;
                 self.opened_at = Some(Instant::now());
-                log::warn!("Circuit breaker re-opened after failure in half-open state");
+                warn!("Circuit breaker re-opened after failure in half-open state");
             }
             CircuitState::Open => {
                 // Already open — keep counting but state stays open

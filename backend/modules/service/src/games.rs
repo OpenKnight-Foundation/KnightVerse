@@ -8,8 +8,8 @@ use dto::games::{
 };
 use error::error::ApiError;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
-    Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use sea_orm::{Condition, DatabaseConnection};
 use uuid::Uuid;

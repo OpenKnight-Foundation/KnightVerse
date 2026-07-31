@@ -277,6 +277,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         return;
       }
 
+      // No square selected (and clicked square was empty) — nothing to do.
+      if (!selectedSquare) return;
+
       const [sourceRow, sourceCol] = selectedSquare.split(",").map(Number);
       const selectedPiece = boardState[sourceRow][sourceCol];
 

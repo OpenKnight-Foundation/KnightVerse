@@ -86,7 +86,7 @@ pub async fn add_player(payload: NewPlayer) -> Result<player::Model, ApiError> {
 let email_taken = is_email_taken(payload.email.clone()).await;
 let username_taken = is_username_taken(payload.username.clone()).await?;
 
-if email_taken && username_taken {
+if email_taken || username_taken {
     return Err(ApiError::InvalidCredentials);
             }
     let new_player = player::ActiveModel {

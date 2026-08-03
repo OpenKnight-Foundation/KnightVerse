@@ -210,13 +210,14 @@ pub async fn refresh(
     };
 
     // Extract Bearer token
-    let token = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
-    } else {
-        return HttpResponse::Unauthorized().json(ErrorResponse {
-            message: "Invalid authorization format".to_string(),
-            code: "INVALID_AUTH_FORMAT".to_string(),
-        });
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid authorization format".to_string(),
+                code: "INVALID_AUTH_FORMAT".to_string(),
+            });
+        }
     };
 
     // Validate access token and get user info
@@ -351,13 +352,14 @@ pub async fn logout(
         }
     };
 
-    let token = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
-    } else {
-        return HttpResponse::Unauthorized().json(ErrorResponse {
-            message: "Invalid authorization format".to_string(),
-            code: "INVALID_AUTH_FORMAT".to_string(),
-        });
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid authorization format".to_string(),
+                code: "INVALID_AUTH_FORMAT".to_string(),
+            });
+        }
     };
 
     // Validate the token and extract the actual user ID

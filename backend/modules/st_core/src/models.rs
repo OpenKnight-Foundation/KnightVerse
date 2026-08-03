@@ -44,4 +44,3 @@ pub struct StellarAssetInfo {
     pub fixed_number: u32,
     pub display_decimals: u8,
 }
-

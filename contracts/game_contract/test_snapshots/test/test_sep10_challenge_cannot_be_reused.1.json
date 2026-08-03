@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "56eeb0cad470120e96a5c78f6f1432c09a360f0eb6bfb2949d484593fd13635a"
+                  "bytes": "3b9c6c81fc99c55a841e784222dd49c2f65702f26161636947702b3a63c3c65c"
                 },
                 {
                   "i128": {
@@ -107,7 +107,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "56eeb0cad470120e96a5c78f6f1432c09a360f0eb6bfb2949d484593fd13635a"
+                          "bytes": "3b9c6c81fc99c55a841e784222dd49c2f65702f26161636947702b3a63c3c65c"
                         }
                       },
                       {
@@ -124,6 +124,17 @@
                         },
                         "val": {
                           "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {
@@ -305,7 +316,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "56eeb0cad470120e96a5c78f6f1432c09a360f0eb6bfb2949d484593fd13635a"
+                  "bytes": "3b9c6c81fc99c55a841e784222dd49c2f65702f26161636947702b3a63c3c65c"
                 },
                 {
                   "i128": {
@@ -464,7 +475,7 @@
                   "bytes": "0202020202020202020202020202020202020202020202020202020202020202"
                 },
                 {
-                  "bytes": "f11e1d11d2088af6398036fe3fa640789c9cb5227b8886b6c98718efd8c79383668c2e27fa094b270835336ace126ffdaa032ea9eaa36b1d9bc56a390b1fd70f"
+                  "bytes": "3538cc9ef9278f9b7140e61df2794b450996a25e2f38a922b140b2b7ac935eac555d9312555e20dda403dab3ed1e399d9e6af7da0408af863c11d240891fa203"
                 }
               ]
             }
@@ -544,7 +555,7 @@
                   "bytes": "0202020202020202020202020202020202020202020202020202020202020202"
                 },
                 {
-                  "bytes": "f11e1d11d2088af6398036fe3fa640789c9cb5227b8886b6c98718efd8c79383668c2e27fa094b270835336ace126ffdaa032ea9eaa36b1d9bc56a390b1fd70f"
+                  "bytes": "3538cc9ef9278f9b7140e61df2794b450996a25e2f38a922b140b2b7ac935eac555d9312555e20dda403dab3ed1e399d9e6af7da0408af863c11d240891fa203"
                 }
               ]
             }
@@ -637,7 +648,7 @@
                       "bytes": "0202020202020202020202020202020202020202020202020202020202020202"
                     },
                     {
-                      "bytes": "f11e1d11d2088af6398036fe3fa640789c9cb5227b8886b6c98718efd8c79383668c2e27fa094b270835336ace126ffdaa032ea9eaa36b1d9bc56a390b1fd70f"
+                      "bytes": "3538cc9ef9278f9b7140e61df2794b450996a25e2f38a922b140b2b7ac935eac555d9312555e20dda403dab3ed1e399d9e6af7da0408af863c11d240891fa203"
                     }
                   ]
                 }

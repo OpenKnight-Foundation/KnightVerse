@@ -45,7 +45,6 @@ pub enum GameResult {
     Ongoing,
 }
 
-
 impl GameResult {
     /// Parse a result string from PGN format
     pub fn from_pgn_string(s: &str) -> Result<Self, PgnError> {

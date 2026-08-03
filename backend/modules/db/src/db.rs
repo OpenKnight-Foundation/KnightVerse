@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 pub mod db {
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 

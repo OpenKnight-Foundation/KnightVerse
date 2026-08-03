@@ -6,16 +6,15 @@ use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
-async fn is_username_taken(username: String) -> bool {
+async fn is_username_taken(username: String) -> Result<bool, ApiError> {
     let db = get_db().await;
 
     let user = player::Entity::find()
         .filter(player::Column::Username.eq(username))
         .one(&db)
-        .await
-        .unwrap();
+        .await?;
 
-    user.is_some()
+    Ok(user.is_some())
 }
 
 async fn is_email_taken(email: String) -> bool {
@@ -84,11 +83,12 @@ pub async fn add_player(payload: NewPlayer) -> Result<player::Model, ApiError> {
         return Ok(model);
     }
 
-    let email_available = is_email_taken(payload.email.clone()).await;
-    let username_available = is_username_taken(payload.username.clone()).await;
-    if email_available && username_available {
-        return Err(ApiError::InvalidCredentials);
-    }
+let email_taken = is_email_taken(payload.email.clone()).await;
+let username_taken = is_username_taken(payload.username.clone()).await?;
+
+if email_taken || username_taken {
+    return Err(ApiError::InvalidCredentials);
+            }
     let new_player = player::ActiveModel {
         id: Set(Uuid::new_v4()),
         username: Set(payload.username),
@@ -154,6 +154,31 @@ pub async fn update_player(id: Uuid, payload: UpdatePlayer) -> Result<player::Mo
         .map_err(ApiError::DatabaseError)?;
 
     Ok(updated_player)
+}
+
+pub async fn authenticate_player(
+    username: String,
+    password: &str,
+) -> Result<player::Model, ApiError> {
+    let db = get_db().await;
+
+    let user = player::Entity::find()
+        .filter(player::Column::Username.eq(username))
+        .filter(player::Column::IsEnabled.eq(true))
+        .one(&db)
+        .await?;
+
+    match user {
+        Some(usr) => {
+            let stored_hash = String::from_utf8(usr.password_hash.clone())
+                .map_err(|_| ApiError::InvalidCredentials)?;
+            match password::verify_password(password, &stored_hash) {
+                Ok(()) => Ok(usr),
+                Err(_) => Err(ApiError::InvalidCredentials),
+            }
+        }
+        None => Err(ApiError::InvalidCredentials),
+    }
 }
 
 pub async fn delete_player(id: Uuid) -> Result<(), ApiError> {

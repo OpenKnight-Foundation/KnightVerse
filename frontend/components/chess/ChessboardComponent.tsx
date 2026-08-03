@@ -263,20 +263,41 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
       const clickedSquare = `${row},${col}`;
-      if (!selectedSquare && displayRows[row][col]) {
+      const clickedPiece = displayRows[row][col];
+
+      // No piece selected yet — select if there's a piece on the square.
+      if (!selectedSquare && clickedPiece) {
         setSelectedSquare(clickedSquare);
         return;
       }
+
+      // Clicking the already-selected square deselects it.
       if (selectedSquare === clickedSquare) {
         setSelectedSquare(null);
         return;
       }
-      if (selectedSquare) {
-        const [sourceRow, sourceCol] = selectedSquare.split(",").map(Number);
-        attemptMove(sourceRow, sourceCol, row, col);
+
+      // No square selected (and clicked square was empty) — nothing to do.
+      if (!selectedSquare) return;
+
+      const [sourceRow, sourceCol] = selectedSquare.split(",").map(Number);
+      const selectedPiece = boardState[sourceRow][sourceCol];
+
+      // If the target square holds a piece of the same color, switch selection
+      // rather than attempting an illegal capture.
+      if (
+        clickedPiece &&
+        selectedPiece &&
+        clickedPiece[0] === selectedPiece[0] // same color prefix ('w' or 'b')
+      ) {
+        setSelectedSquare(clickedSquare);
+        return;
       }
+
+      // Otherwise attempt the move; clear selection only on success.
+      attemptMove(sourceRow, sourceCol, row, col);
     },
-    [selectedSquare, displayRows, attemptMove],
+    [selectedSquare, boardState, displayRows, attemptMove],
   );
 
   const handleDragStart = useCallback(

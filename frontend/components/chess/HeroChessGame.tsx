@@ -40,7 +40,10 @@ const MatchmakingModal = dynamic(
   { ssr: false },
 );
 const ChessVariantSelector = dynamic(
-  () => import("@/components/ChessVariantSelector"),
+  () =>
+    import("@/components/ChessVariantSelector").then((m) => ({
+      default: m.ChessVariantSelector,
+    })),
   { ssr: false },
 );
 
@@ -291,7 +294,7 @@ export default function HeroChessGame({
 
   const handleMatchmakingConfirm = (type: "Rated" | "Casual") => {
     setIsMatchmakingModalOpen(false);
-    joinMatchmaking(type);
+    joinMatchmaking(type, chessVariant);
   };
 
   const handleMatchmakingClose = () => {

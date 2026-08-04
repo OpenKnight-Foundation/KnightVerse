@@ -47,7 +47,7 @@ KnightVerse/
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/KnightVerse.git
+git clone https://github.com/OpenKnight-Foundation/KnightVerse.git
 cd KnightVerse
 ```
 

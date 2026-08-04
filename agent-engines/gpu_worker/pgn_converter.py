@@ -313,8 +313,9 @@ class PGNConverter:
 
         try:
             for move in game.mainline_moves():
-                move_number += 1
                 ply_count += 1
+                if ply_count % 2 == 1:
+                    move_number += 1
 
                 # Skip early moves if configured
                 if move_number < self.min_move_number:

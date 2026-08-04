@@ -1,13 +1,14 @@
 use actix::prelude::*;
-use actix_web::{HttpRequest, HttpResponse, Error, web};
+use actix_web::error::ErrorUnauthorized;
+use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
-use serde::{Serialize, Deserialize};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use security::jwt::{Claims, TokenType};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use security::jwt::{Claims, TokenType};
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
-use actix_web::error::ErrorUnauthorized;
-use serde_json::{Value, json};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 // For Redis Pub/Sub
@@ -19,11 +20,28 @@ use tokio::task::JoinHandle;
 #[rtype(result = "()")]
 #[serde(tag = "type", content = "payload")]
 pub enum WsMessage {
-    Move { from: String, to: String, san: String, fen: String },
-    Clock { white: u32, black: u32 },
-    End   { result: String, final_fen: String },
-    Error { code: u16, message: String },
-    ReconnectToken { token: String, expires_in: u32 },
+    Move {
+        from: String,
+        to: String,
+        san: String,
+        fen: String,
+    },
+    Clock {
+        white: u32,
+        black: u32,
+    },
+    End {
+        result: String,
+        final_fen: String,
+    },
+    Error {
+        code: u16,
+        message: String,
+    },
+    ReconnectToken {
+        token: String,
+        expires_in: u32,
+    },
 }
 
 /// Actor messages
@@ -53,9 +71,17 @@ pub struct LobbyState {
     sessions: HashMap<String, HashSet<Recipient<WsMessage>>>,
 }
 
+impl Default for LobbyState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LobbyState {
     pub fn new() -> Self {
-        LobbyState { sessions: HashMap::new() }
+        LobbyState {
+            sessions: HashMap::new(),
+        }
     }
 }
 
@@ -92,7 +118,7 @@ impl Handler<Broadcast> for LobbyState {
         if let Some(set) = self.sessions.get(&msg.game_id) {
             for recipient in set.iter() {
                 // backpressure: drop if send fails
-                let _ = recipient.do_send(msg.message.clone());
+                recipient.do_send(msg.message.clone());
             }
         }
     }
@@ -104,9 +130,10 @@ pub struct WsSession {
     pub lobby: Addr<LobbyState>,
     pub hb: std::time::Instant,
     pub user_id: i32,
+    pub player_id: Uuid,
     pub username: String,
     pub session_id: String,
-    pub redis_sub_task: Option<JoinHandle<()>>,     // Placeholder for compatibility
+    pub redis_sub_task: Option<JoinHandle<()>>, // Placeholder for compatibility
 }
 
 impl WsSession {
@@ -117,16 +144,22 @@ impl WsSession {
 
     /// Generate a reconnection token for this session
     fn generate_reconnect_token(&self) -> Result<String, jsonwebtoken::errors::Error> {
-        let secret = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
+        let secret =
+            env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
         let jwt_service = security::jwt::JwtService::new(secret, 3600);
-        jwt_service.generate_reconnect_token(self.user_id, &self.username, &self.session_id)
+        jwt_service.generate_reconnect_token(
+            self.user_id,
+            &self.username,
+            self.player_id,
+            &self.session_id,
+        )
     }
 
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(Self::HEARTBEAT_INTERVAL, |act, ctx| {
             let elapsed = std::time::Instant::now().duration_since(act.hb);
             if elapsed > Self::CLIENT_TIMEOUT {
-                log::warn!(
+                warn!(
                     "WebSocket timeout for game {}: no pong in {}s, terminating connection",
                     act.game_id,
                     elapsed.as_secs()
@@ -145,31 +178,40 @@ impl Actor for WsSession {
     fn started(&mut self, ctx: &mut Self::Context) {
         self.hb(ctx);
         let addr = ctx.address().recipient();
-        self.lobby.do_send(Connect { game_id: self.game_id.clone(), addr });
+        self.lobby.do_send(Connect {
+            game_id: self.game_id.clone(),
+            addr,
+        });
 
         // Redis pub/sub subscription intentionally disabled here; leave placeholder
         self.redis_sub_task = None;
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        log::info!("WebSocket disconnected for game: {}", self.game_id);
-        
+        info!("WebSocket disconnected for game: {}", self.game_id);
+
         // Send reconnection token to client for seamless reconnection
         if let Ok(reconnect_token) = self.generate_reconnect_token() {
-            let reconnect_msg = WsMessage::ReconnectToken { 
-                token: reconnect_token, 
-                expires_in: 30 
+            let reconnect_msg = WsMessage::ReconnectToken {
+                token: reconnect_token,
+                expires_in: 30,
             };
-            
+
             // Try to send the reconnection token
-            let _ = ctx.address().do_send(reconnect_msg);
-            log::info!("Sent reconnection token for user: {}", self.username);
+            ctx.address().do_send(reconnect_msg);
+            info!("Sent reconnection token for user: {}", self.username);
         } else {
-            log::error!("Failed to generate reconnection token for user: {}", self.username);
+            error!(
+                "Failed to generate reconnection token for user: {}",
+                self.username
+            );
         }
-        
+
         let addr = ctx.address().recipient();
-        self.lobby.do_send(Disconnect { game_id: self.game_id.clone(), addr });
+        self.lobby.do_send(Disconnect {
+            game_id: self.game_id.clone(),
+            addr,
+        });
         // Cancel Redis subscription task if running
         if let Some(handle) = self.redis_sub_task.take() {
             handle.abort();
@@ -188,9 +230,12 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                 self.hb = std::time::Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                // Try to parse as WsMessage
+                // Parse and broadcast the move to all connected clients in this game.
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    // Redis publishing disabled in tests/CI environment
+                    self.lobby.do_send(Broadcast {
+                        game_id: self.game_id.clone(),
+                        message: ws_msg,
+                    });
                 }
             }
             Ok(ws::Message::Binary(_)) => {}
@@ -223,9 +268,12 @@ pub async fn ws_route(
     stream: web::Payload,
     lobby: web::Data<Addr<LobbyState>>,
 ) -> Result<HttpResponse, Error> {
-    let auth_header = req.headers().get("Authorization").and_then(|h| h.to_str().ok());
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok());
     let mut reconnect_token: Option<String> = None;
-    
+
     // Parse query string manually
     let query_string = req.query_string();
     if !query_string.is_empty() {
@@ -238,7 +286,7 @@ pub async fn ws_route(
             }
         }
     }
-    
+
     let claims = if let Some(ref reconnect_token_str) = reconnect_token {
         // Validate reconnection token
         validate_reconnect_token(reconnect_token_str)?
@@ -257,13 +305,14 @@ pub async fn ws_route(
 
     let game_id = req.match_info().get("game_id").unwrap_or("").to_string();
     let session_id = Uuid::new_v4().to_string();
-    
+
     ws::start(
-        WsSession { 
-            game_id, 
-            lobby: lobby.get_ref().clone(), 
+        WsSession {
+            game_id,
+            lobby: lobby.get_ref().clone(),
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
+            player_id: claims.player_id,
             username: claims.username,
             session_id,
             redis_sub_task: None,
@@ -275,36 +324,46 @@ pub async fn ws_route(
 
 /// Validate access token
 fn validate_access_token(token: &str) -> Result<Claims, Error> {
-    let secret = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
+    let secret =
+        env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
     let validation = Validation::new(Algorithm::HS256);
-    let token_data = decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
-        .map_err(|_| ErrorUnauthorized("Invalid or expired token"))?;
-    
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| ErrorUnauthorized("Invalid or expired token"))?;
+
     // Ensure it's an access token
     if token_data.claims.token_type != TokenType::Access {
         return Err(ErrorUnauthorized("Invalid token type"));
     }
-    
+
     Ok(token_data.claims)
 }
 
 /// Validate reconnection token
 fn validate_reconnect_token(token: &str) -> Result<Claims, Error> {
-    let secret = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
+    let secret =
+        env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "development_secret_key".to_string());
     let validation = Validation::new(Algorithm::HS256);
-    let token_data = decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
-        .map_err(|_| ErrorUnauthorized("Invalid or expired reconnection token"))?;
-    
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| ErrorUnauthorized("Invalid or expired reconnection token"))?;
+
     // Ensure it's a reconnection token
     if token_data.claims.token_type != TokenType::Reconnect {
         return Err(ErrorUnauthorized("Invalid token type"));
     }
-    
+
     // Check if reconnection token has JTI (session identifier)
     if token_data.claims.jti.is_none() {
         return Err(ErrorUnauthorized("Invalid reconnection token format"));
     }
-    
+
     Ok(token_data.claims)
 }
 
@@ -312,7 +371,6 @@ fn validate_reconnect_token(token: &str) -> Result<Claims, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix::prelude::*;
     use tokio::sync::mpsc::unbounded_channel;
 
     struct TestRecipient {
@@ -339,10 +397,31 @@ mod tests {
         let recipient1 = TestRecipient { tx: tx1 }.start().recipient();
         let recipient2 = TestRecipient { tx: tx2 }.start().recipient();
         let game_id = "game123".to_string();
-        lobby.send(Connect { game_id: game_id.clone(), addr: recipient1.clone() }).await.unwrap();
-        lobby.send(Connect { game_id: game_id.clone(), addr: recipient2.clone() }).await.unwrap();
-        let msg = WsMessage::Clock { white: 60, black: 60 };
-        lobby.send(Broadcast { game_id: game_id.clone(), message: msg.clone() }).await.unwrap();
+        lobby
+            .send(Connect {
+                game_id: game_id.clone(),
+                addr: recipient1.clone(),
+            })
+            .await
+            .unwrap();
+        lobby
+            .send(Connect {
+                game_id: game_id.clone(),
+                addr: recipient2.clone(),
+            })
+            .await
+            .unwrap();
+        let msg = WsMessage::Clock {
+            white: 60,
+            black: 60,
+        };
+        lobby
+            .send(Broadcast {
+                game_id: game_id.clone(),
+                message: msg.clone(),
+            })
+            .await
+            .unwrap();
         let received1 = rx1.recv().await.unwrap();
         let received2 = rx2.recv().await.unwrap();
         assert_eq!(received1, msg);

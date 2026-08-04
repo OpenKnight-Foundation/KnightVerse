@@ -79,7 +79,7 @@ class TestPGNTrainingCoordinator(unittest.TestCase):
 [Black "B"]
 [Result "1-0"]
 
-1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 1-0
 """
         self.temp_pgn = tempfile.NamedTemporaryFile(
             mode="w", suffix=".pgn", delete=False
@@ -312,14 +312,14 @@ class TestProcessingPipeline(unittest.TestCase):
 [Black "Player B"]
 [Result "1-0"]
 
-1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 1-0
 
 [Event "Game 2"]
 [White "Player C"]
 [Black "Player D"]
 [Result "0-1"]
 
-1. d4 d5 2. c4 0-1
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 6. Nf3 0-1
 """
         self.temp_pgn = tempfile.NamedTemporaryFile(
             mode="w", suffix=".pgn", delete=False

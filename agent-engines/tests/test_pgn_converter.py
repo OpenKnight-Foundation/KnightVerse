@@ -249,6 +249,15 @@ class TestPGNConverter(unittest.TestCase):
         examples = converter.extract_positions(games[0])
         self.assertGreater(len(examples), 0)
 
+    def test_move_number_and_ply_count_incrementing(self):
+        """Test move_number increments every 2 plies while ply_count increments every ply."""
+        games = list(self.converter.parse_pgn_string(self.simple_pgn))
+        examples = self.converter.extract_positions(games[0])
+        ply_counts = [ex.position_features["ply_count"] for ex in examples]
+        move_numbers = [ex.position_features["move_number"] for ex in examples]
+        self.assertEqual(ply_counts, [1, 2, 3, 4, 5, 6, 7])
+        self.assertEqual(move_numbers, [1, 1, 2, 2, 3, 3, 4])
+
     def test_pgn_file_parsing(self):
         """Test parsing PGN from file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pgn", delete=False) as f:
@@ -432,3 +441,17 @@ class TestEdgeCases(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_en_passant_parsing(self):
+        pgn_text = "[Event \"Casual Game\"]\n\n1. e4 e6 2. e5 d5 3. exd6 *"
+        converter = PGNConverter()
+        games = list(converter.parse_pgn_string(pgn_text))
+        self.assertEqual(len(games), 1)
+        self.assertEqual(len(list(games[0].mainline_moves())), 5)
+        # Ensure en passant was parsed successfully
+
+    def test_pawn_promotion(self):
+        pgn_text = "[Event \"Casual Game\"]\n\n1. e4 d5 2. exd5 Nf6 3. d6 Nd5 4. d7+ Kd7 5. d8=Q+ *"
+        converter = PGNConverter()
+        games = list(converter.parse_pgn_string(pgn_text))
+        self.assertEqual(len(games), 1)

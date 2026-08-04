@@ -119,5 +119,18 @@ class TestDecentralizedOrchestrator(unittest.TestCase):
             
         self.loop.run_until_complete(run_test())
 
+    def test_shutdown_awaits_cancelled_health_check_task(self):
+        async def run_test():
+            await self.orchestrator.start()
+            task = self.orchestrator._health_check_task
+            self.assertIsNotNone(task)
+            self.assertFalse(task.done())
+            await self.orchestrator.shutdown()
+            self.assertIsNone(self.orchestrator._health_check_task)
+            self.assertTrue(task.done())
+            self.assertTrue(task.cancelled())
+
+        self.loop.run_until_complete(run_test())
+
 if __name__ == "__main__":
     unittest.main()

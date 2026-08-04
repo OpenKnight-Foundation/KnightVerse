@@ -429,6 +429,17 @@
                       },
                       {
                         "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "MAXSTAKE"
                         },
                         "val": {

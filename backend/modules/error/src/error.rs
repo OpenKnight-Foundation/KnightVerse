@@ -1,4 +1,4 @@
-use actix_web::{Error, HttpRequest, HttpResponse, error::JsonPayloadError};
+use actix_web::{error::JsonPayloadError, Error, HttpRequest, HttpResponse};
 use argon2::password_hash::Error as Argon2HashError;
 use core::fmt;
 use sea_orm::DbErr;
@@ -55,10 +55,10 @@ impl fmt::Display for ApiError {
         match self {
             ApiError::InvalidCredentials => write!(f, "Invalid credentials"),
             ApiError::NotFound(v) => write!(f, "{} not found", v),
-            ApiError::DatabaseError(err) => write!(f, "Database error {}", err.to_string()),
+            ApiError::DatabaseError(err) => write!(f, "Database error {}", err),
             ApiError::ValidationError(errs) => {
                 let mut s = String::new();
-                for (_, error_kind) in errs.errors() {
+                for error_kind in errs.errors().values() {
                     match error_kind {
                         ValidationErrorsKind::Field(field) => {
                             if let Some(message) = &field[0].message {
@@ -69,14 +69,17 @@ impl fmt::Display for ApiError {
                         }
                         ValidationErrorsKind::Struct(strct) => {
                             strct.errors().iter().for_each(|(field_name, error_kind)| {
-                                s.push_str(&parse_validation_error(error_kind, &field_name))
+                                s.push_str(&parse_validation_error(error_kind, field_name))
                             })
                         }
                         ValidationErrorsKind::List(tree) => {
-                            tree.iter().for_each(|(_, box_errors)|{
-                                box_errors.errors().iter().for_each(|(field_name, error_kind)|{
-                                    s.push_str(&parse_validation_error(error_kind, &field_name))
-                                })
+                            tree.iter().for_each(|(_, box_errors)| {
+                                box_errors
+                                    .errors()
+                                    .iter()
+                                    .for_each(|(field_name, error_kind)| {
+                                        s.push_str(&parse_validation_error(error_kind, field_name))
+                                    })
                             });
                         }
                     }
@@ -84,13 +87,21 @@ impl fmt::Display for ApiError {
                 write!(f, "{}", s)
             }
             ApiError::PasswordHashError(err) => {
-                write!(f, "Unable to hash password: {}", err.to_string())
+                write!(f, "Unable to hash password: {}", err)
             }
             ApiError::PgnParseError(msg) => {
                 write!(f, "Invalid PGN format: {}", msg)
             }
-            ApiError::IllegalMoveError { move_number, move_text, reason } => {
-                write!(f, "Illegal move at move {}: '{}' - {}", move_number, move_text, reason)
+            ApiError::IllegalMoveError {
+                move_number,
+                move_text,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Illegal move at move {}: '{}' - {}",
+                    move_number, move_text, reason
+                )
             }
             ApiError::BadRequest(msg) => write!(f, "{}", msg),
             ApiError::Forbidden(msg) => write!(f, "{}", msg),

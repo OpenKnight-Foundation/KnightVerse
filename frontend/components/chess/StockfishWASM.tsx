@@ -48,6 +48,9 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
   const resolveRef = useRef<((result: AnalysisResult) => void) | null>(null);
   const rejectRef = useRef<((error: Error) => void) | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // AbortController for the currently running analyzePosition call.
+  // Replaced each time a new analysis starts; aborted on unmount or stopAnalysis.
+  const analysisAbortControllerRef = useRef<AbortController | null>(null);
 
   // Accumulator for the latest "info" line data while analyzing
   const latestInfo = useRef<{
@@ -125,6 +128,13 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
 
   // ─── Cleanup ───
   const cleanup = useCallback(() => {
+    // Abort any in-flight analyzePosition call so its promise is rejected
+    // immediately and does not try to call setState after unmount.
+    if (analysisAbortControllerRef.current) {
+      analysisAbortControllerRef.current.abort();
+      analysisAbortControllerRef.current = null;
+    }
+
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -226,6 +236,13 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
         throw new Error('Analysis already in progress');
       }
 
+      // Create a fresh AbortController for this call.  The cleanup function
+      // (called on unmount) will abort it so the Promise rejects instead of
+      // silently calling setState on an unmounted component.
+      const abortController = new AbortController();
+      analysisAbortControllerRef.current = abortController;
+      const { signal } = abortController;
+
       setIsAnalyzing(true);
       setError(null);
 
@@ -236,8 +253,33 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
       latestInfo.current = { depth: 0, evaluation: null, pv: [], nodes: 0, timeMs: 0 };
 
       return new Promise((resolve, reject) => {
-        resolveRef.current = resolve;
-        rejectRef.current = reject;
+        // Wire abort signal so unmount immediately rejects the promise.
+        const onAbort = () => {
+          workerRef.current?.postMessage('stop');
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
+          resolveRef.current = null;
+          rejectRef.current = null;
+          reject(new Error('Analysis aborted'));
+        };
+
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+
+        signal.addEventListener('abort', onAbort, { once: true });
+
+        resolveRef.current = (result) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(result);
+        };
+        rejectRef.current = (err) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(err);
+        };
 
         // Send position + go command (UCI protocol)
         workerRef.current!.postMessage('ucinewgame');
@@ -267,6 +309,12 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
     if (workerRef.current && isAnalyzing) {
       workerRef.current.postMessage('stop');
       setIsAnalyzing(false);
+
+      // Abort the current AbortController so the analyzePosition promise rejects
+      if (analysisAbortControllerRef.current) {
+        analysisAbortControllerRef.current.abort();
+        analysisAbortControllerRef.current = null;
+      }
 
       if (rejectRef.current) {
         rejectRef.current(new Error('Analysis stopped'));

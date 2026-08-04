@@ -39,8 +39,8 @@ impl NewPlayer {
         Self {
             username: format!("Player {}", rnd),
             email: format!("player{}@gmail.com", rnd),
-            password: format!("PasswordIsVeryStrong"),
-            real_name: format!("A new player"),
+            password: "PasswordIsVeryStrong".to_string(),
+            real_name: "A new player".to_string(),
         }
     }
 
@@ -48,18 +48,18 @@ impl NewPlayer {
         let rnd: i32 = rand::random();
         let mut username = format!("Player {}", rnd);
         let mut email = format!("player{}@gmail.com", rnd);
-        let mut password = format!("PasswordIsVeryStrong");
+        let mut password = "PasswordIsVeryStrong".to_string();
 
         match invalid_choice {
-            InvalidPlayer::Username => username = format!("1"),
-            InvalidPlayer::Password => password = format!("pswrd"),
-            InvalidPlayer::Email => email = format!("mail"),
+            InvalidPlayer::Username => username = "1".to_string(),
+            InvalidPlayer::Password => password = "pswrd".to_string(),
+            InvalidPlayer::Email => email = "mail".to_string(),
         }
         Self {
             username,
             email,
             password,
-            real_name: format!("A new player"),
+            real_name: "A new player".to_string(),
         }
     }
 }

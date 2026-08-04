@@ -6,7 +6,7 @@ pub mod pairer;
 #[cfg(test)]
 mod tests;
 
-pub use pairer::{SwissPairer, PairingError};
+pub use pairer::{PairingError, SwissPairer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
@@ -82,7 +82,7 @@ impl Player {
     pub fn add_game_result(&mut self, opponent: Uuid, color: Color, result: GameResult) {
         self.opponents.push(opponent);
         self.color_history.push(color);
-        
+
         match result {
             GameResult::Win => self.score += 1.0,
             GameResult::Draw => self.score += 0.5,
@@ -95,8 +95,16 @@ impl Player {
     }
 
     pub fn get_color_balance(&self) -> i32 {
-        let white_count = self.color_history.iter().filter(|&&c| c == Color::White).count() as i32;
-        let black_count = self.color_history.iter().filter(|&&c| c == Color::Black).count() as i32;
+        let white_count = self
+            .color_history
+            .iter()
+            .filter(|&&c| c == Color::White)
+            .count() as i32;
+        let black_count = self
+            .color_history
+            .iter()
+            .filter(|&&c| c == Color::Black)
+            .count() as i32;
         white_count - black_count
     }
 
@@ -118,10 +126,7 @@ pub enum GameResult {
 
 impl TournamentState {
     pub fn new(players: Vec<Player>, total_rounds: u32) -> Self {
-        let player_map: HashMap<Uuid, Player> = players
-            .into_iter()
-            .map(|p| (p.id, p))
-            .collect();
+        let player_map: HashMap<Uuid, Player> = players.into_iter().map(|p| (p.id, p)).collect();
 
         Self {
             players: player_map,
@@ -133,16 +138,14 @@ impl TournamentState {
     }
 
     pub fn get_active_players(&self) -> Vec<&Player> {
-        self.players
-            .values()
-            .filter(|p| p.is_active)
-            .collect()
+        self.players.values().filter(|p| p.is_active).collect()
     }
 
     pub fn get_players_sorted_by_score_then_rating(&self) -> Vec<&Player> {
         let mut players: Vec<&Player> = self.get_active_players();
         players.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score)
+            b.score
+                .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(b.rating.cmp(&a.rating))
         });
@@ -154,7 +157,8 @@ impl TournamentState {
             if let Some(player) = self.players.get_mut(&player_id) {
                 // Find the opponent and color from current round pairings
                 if let Some(pairing) = self.pairings.iter().find(|p| {
-                    p.round == self.current_round && (p.white_player == player_id || p.black_player == player_id)
+                    p.round == self.current_round
+                        && (p.white_player == player_id || p.black_player == player_id)
                 }) {
                     let opponent_id = if pairing.white_player == player_id {
                         pairing.black_player
@@ -170,7 +174,7 @@ impl TournamentState {
                 }
             }
         }
-        
+
         self.completed_rounds += 1;
         self.current_round += 1;
     }

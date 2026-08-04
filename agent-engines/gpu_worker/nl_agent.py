@@ -300,15 +300,20 @@ class NaturalLanguageAgent:
         eval_text = self._format_evaluation(result.evaluation, complexity)
         
         if complexity == ComplexityLevel.BEGINNER:
+            if result.evaluation is not None:
+                pos_desc = 'good for white' if result.evaluation > 0.3 else 'good for black' if result.evaluation < -0.3 else 'roughly equal'
+            else:
+                pos_desc = 'roughly equal'
             response = (
-                f"This position is {'good for white' if result.evaluation > 0.3 else 'good for black' if result.evaluation < -0.3 else 'roughly equal'}.\n\n"
+                f"This position is {pos_desc}.\n\n"
                 f"The best move is {result.best_move}.\n\n"
                 f"I've analyzed this to depth {result.depth}, which gives us a pretty reliable assessment."
             )
         elif complexity == ComplexityLevel.ADVANCED:
             pv_text = " -> ".join(result.principal_variation[:5]) if result.principal_variation else "N/A"
+            eval_cp = f"{result.evaluation} centipawns" if result.evaluation is not None else "N/A"
             response = (
-                f"Evaluation: {eval_text} ({result.evaluation} centipawns)\n"
+                f"Evaluation: {eval_text} ({eval_cp})\n"
                 f"Depth: {result.depth}\n"
                 f"Best move: {result.best_move}\n"
                 f"Principal variation: {pv_text}\n"
@@ -342,9 +347,13 @@ class NaturalLanguageAgent:
         eval_text = self._format_evaluation(result.evaluation, complexity)
         
         if complexity == ComplexityLevel.BEGINNER:
+            if result.evaluation is not None:
+                adv_desc = 'an advantage' if result.evaluation > 0.3 else 'good chances' if result.evaluation > 0 else 'the best practical chances'
+            else:
+                adv_desc = 'the best practical chances'
             response = (
                 f"I recommend playing {result.best_move}.\n\n"
-                f"This move gives you {'an advantage' if result.evaluation > 0.3 else 'good chances' if result.evaluation > 0 else 'the best practical chances'} "
+                f"This move gives you {adv_desc} "
                 f"in this position."
             )
         elif complexity == ComplexityLevel.ADVANCED:
@@ -384,18 +393,30 @@ class NaturalLanguageAgent:
         best_move = result.best_move
         
         if complexity == ComplexityLevel.BEGINNER:
+            if result.evaluation is not None:
+                pos_desc = 'improves your position' if result.evaluation > 0 else 'is the best defense'
+                chances_desc = 'good attacking chances' if result.evaluation > 1.0 else 'a solid position'
+            else:
+                pos_desc = 'is the best defense'
+                chances_desc = 'a solid position'
             response = (
                 f"The best move in this position is {best_move}.\n\n"
-                f"This move {'improves your position' if result.evaluation > 0 else 'is the best defense'} "
-                f"and leads to {'good attacking chances' if result.evaluation > 1.0 else 'a solid position'}."
+                f"This move {pos_desc} "
+                f"and leads to {chances_desc}."
             )
         else:
             pv_text = " -> ".join(result.principal_variation[:4]) if result.principal_variation else "N/A"
+            if result.evaluation is not None:
+                eval_formatted = f"{result.evaluation:.2f}"
+                threat_desc = 'creates threats' if result.evaluation > 0.5 else 'maintains equality' if abs(result.evaluation) <= 0.5 else 'defends against threats'
+            else:
+                eval_formatted = "N/A"
+                threat_desc = 'maintains equality'
             response = (
                 f"{best_move} is the strongest move here.\n\n"
-                f"It leads to a position evaluated at {result.evaluation:.2f}.\n\n"
+                f"It leads to a position evaluated at {eval_formatted}.\n\n"
                 f"Main line: {pv_text}\n\n"
-                f"This move {'creates threats' if result.evaluation > 0.5 else 'maintains equality' if abs(result.evaluation) <= 0.5 else 'defends against threats'} "
+                f"This move {threat_desc} "
                 f"and follows sound chess principles."
             )
         
@@ -420,16 +441,24 @@ class NaturalLanguageAgent:
         
         # Provide tactical/strategic hint without giving away the move
         if complexity == ComplexityLevel.BEGINNER:
+            if result.evaluation is not None:
+                attack_desc = 'attack' if result.evaluation > 0 else 'defend'
+            else:
+                attack_desc = 'defend'
             hint = (
-                f"Look for moves that {'attack' if result.evaluation > 0 else 'defend'} key pieces.\n\n"
+                f"Look for moves that {attack_desc} key pieces.\n\n"
                 f"Consider {'central squares' if 'e' in best_move or 'd' in best_move else 'the flanks'} "
                 f"and think about piece activity."
             )
         else:
             # Give first piece of the best move as hint
             first_char = best_move[0] if best_move else '?'
+            if result.evaluation is not None:
+                advance_desc = 'advancing' if result.evaluation > 0 else 'consolidating'
+            else:
+                advance_desc = 'consolidating'
             hint = (
-                f"Consider {'advancing' if result.evaluation > 0 else 'consolidating'} your position.\n\n"
+                f"Consider {advance_desc} your position.\n\n"
                 f"The best move starts with '{first_char}' - think about what piece or pawn that could be."
             )
         
@@ -464,16 +493,20 @@ class NaturalLanguageAgent:
                     f"I recommend {best_move} instead, which is stronger than both moves you mentioned."
                 )
         else:
+            if result.evaluation is not None:
+                eval_formatted = f"{result.evaluation:.2f}"
+            else:
+                eval_formatted = "N/A"
             if best_move in moves_to_compare:
                 response = (
                     f"{best_move} is superior among the moves you mentioned.\n\n"
-                    f"Current evaluation: {result.evaluation:.2f}\n"
+                    f"Current evaluation: {eval_formatted}\n"
                     f"This move leads to the most favorable position."
                 )
             else:
                 response = (
                     f"The best move is actually {best_move}, not the ones you mentioned.\n\n"
-                    f"Evaluation with {best_move}: {result.evaluation:.2f}\n\n"
+                    f"Evaluation with {best_move}: {eval_formatted}\n\n"
                     f"Consider analyzing why {best_move} is stronger than your candidate moves."
                 )
         

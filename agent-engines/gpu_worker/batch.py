@@ -38,11 +38,24 @@ class BatchAnalyzer:
             asyncio.PriorityQueue()
         )
         self._shutdown_event = asyncio.Event()
-        self._task = asyncio.create_task(self._batch_loop())
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> BatchAnalyzer:
+        """Start the background batching loop."""
+        if self._task is None or self._task.done():
+            self._shutdown_event.clear()
+            self._task = asyncio.create_task(self._batch_loop())
+        return self
+
+    async def initialize(self) -> BatchAnalyzer:
+        """Initialize and start the background batching loop."""
+        return await self.start()
 
     async def submit(self, request: AnalysisRequest) -> AnalysisResult:
         """Add one request to the batch queue and await its result."""
 
+        if self._task is None or self._task.done():
+            await self.start()
         future: asyncio.Future[AnalysisResult] = asyncio.get_running_loop().create_future()
         queued = _QueuedRequest(request=request, future=future)
         await self._queue.put(
@@ -61,9 +74,11 @@ class BatchAnalyzer:
         """Stop the background batching loop."""
 
         self._shutdown_event.set()
-        self._task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._task
+        if self._task is not None:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
 
     async def _batch_loop(self) -> None:
         """Collect requests until the batch is full or the flush timer expires."""

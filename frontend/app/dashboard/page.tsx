@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   BarChart3,
   Flame,
+  Loader2,
   Target,
   TrendingDown,
   TrendingUp,
@@ -13,16 +14,37 @@ import {
 import RankBadge from "@/components/dashboard/RankBadge";
 import RecentMatches from "@/components/dashboard/RecentMatches";
 import StatCard from "@/components/dashboard/StatCard";
-import { EXTENDED_MOCK_ELO_DATA } from "@/constants/mockEloData";
+import type { EloDataPoint } from "@/components/profile/EloRatingChart";
+import { useAuth } from "@/context/authContext";
 import { useEloStats, type TimeRange } from "@/hook/useEloStats";
 import { cn } from "@/lib/utils";
+import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 
 const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
   ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-gray-700/30 bg-gray-800/40 p-6 shadow-lg shadow-black/10">
+      <LoadingSkeleton className="h-5 w-48 mb-4" />
+      <LoadingSkeleton className="h-[390px] w-full" />
+    </div>
+  ),
 });
 const PerformanceBreakdown = dynamic(() => import("@/components/dashboard/PerformanceBreakdown"), {
   ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-gray-700/30 bg-gray-800/40 p-6 shadow-lg shadow-black/10 space-y-4">
+      <LoadingSkeleton className="h-5 w-40" />
+      <div className="grid grid-cols-2 gap-4">
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+        <LoadingSkeleton className="h-16 w-full" />
+      </div>
+    </div>
+  ),
 });
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
   { label: "7D", value: "7d" },
@@ -32,12 +54,55 @@ const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
 ];
 
 export default function DashboardPage() {
+  const { accessToken, user, isLoading: authLoading } = useAuth();
   const [range, setRange] = useState<TimeRange>("30d");
-  const stats = useEloStats(EXTENDED_MOCK_ELO_DATA, range);
+  const [eloData, setEloData] = useState<EloDataPoint[]>([]);
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Fetch real ELO history from the backend whenever the authenticated user changes.
+  useEffect(() => {
+    if (authLoading || !accessToken || !user) return;
+
+    let cancelled = false;
+    setFetchLoading(true);
+    setFetchError(null);
+
+    fetch(`${API_BASE}/v1/users/${user.user_id}/elo-history`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(`Failed to load ELO history (${res.status})`);
+        }
+        return res.json() as Promise<EloDataPoint[]>;
+      })
+      .then((data) => {
+        if (!cancelled) setEloData(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setFetchError(err instanceof Error ? err.message : "Unknown error");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFetchLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, user, authLoading]);
+
+  const isLoading = authLoading || fetchLoading;
+
+  const stats = useEloStats(eloData, range);
   const filteredData = stats.filteredData;
   const baselineElo = filteredData[0]?.elo ?? stats.currentElo;
   const netChange = stats.currentElo - baselineElo;
-  const subtitle = `${stats.currentElo} rating · ${stats.totalGames} games in view`;
+  const subtitle = isLoading
+    ? "Loading your stats…"
+    : `${stats.currentElo} rating · ${stats.totalGames} games in view`;
 
   return (
     <div className="space-y-6 pb-8" role="region" aria-label="ELO progress dashboard">
@@ -51,6 +116,11 @@ export default function DashboardPage() {
               </div>
               <h1 className="mt-4 text-3xl font-bold text-white md:text-4xl">ELO Progress</h1>
               <p className="mt-2 text-base text-gray-300">{subtitle}</p>
+              {fetchError && (
+                <p className="mt-1 text-sm text-red-400" role="alert">
+                  {fetchError}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2" role="tablist" aria-label="Dashboard time range filters">
@@ -76,7 +146,13 @@ export default function DashboardPage() {
           </div>
 
           <div className="w-full max-w-sm xl:min-w-[320px]">
-            <RankBadge elo={stats.currentElo} />
+            {isLoading ? (
+              <div className="flex h-32 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-teal-400" aria-label="Loading rating…" />
+              </div>
+            ) : (
+              <RankBadge elo={stats.currentElo} />
+            )}
           </div>
         </div>
       </section>
@@ -85,28 +161,28 @@ export default function DashboardPage() {
         <StatCard
           icon={<BarChart3 className="h-6 w-6" />}
           label="Current ELO"
-          value={stats.currentElo}
+          value={isLoading ? "—" : stats.currentElo}
           trend={{ value: netChange, label: "range" }}
           accentColor="teal"
         />
         <StatCard
           icon={<Trophy className="h-6 w-6" />}
           label="Peak Rating"
-          value={stats.peakElo}
+          value={isLoading ? "—" : stats.peakElo}
           trend={{ value: stats.peakElo - stats.currentElo, label: "to peak" }}
           accentColor="blue"
         />
         <StatCard
           icon={<Target className="h-6 w-6" />}
           label="Win Rate"
-          value={`${stats.winRate.toFixed(1)}%`}
+          value={isLoading ? "—" : `${stats.winRate.toFixed(1)}%`}
           trend={{ value: stats.avgChange, label: "avg pts" }}
           accentColor="emerald"
         />
         <StatCard
           icon={stats.currentStreak >= 0 ? <TrendingUp className="h-6 w-6" /> : <TrendingDown className="h-6 w-6" />}
           label="Current Streak"
-          value={`${stats.currentStreak > 0 ? "+" : ""}${stats.currentStreak}`}
+          value={isLoading ? "—" : `${stats.currentStreak > 0 ? "+" : ""}${stats.currentStreak}`}
           trend={{ value: stats.volatility, label: "volatility" }}
           accentColor="amber"
         />
@@ -125,15 +201,15 @@ export default function DashboardPage() {
             <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
               <div className="rounded-xl border border-gray-700/30 bg-gray-900/50 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-gray-500">Lowest point</p>
-                <p className="mt-2 text-2xl font-bold text-white">{stats.lowestElo}</p>
+                <p className="mt-2 text-2xl font-bold text-white">{isLoading ? "—" : stats.lowestElo}</p>
               </div>
               <div className="rounded-xl border border-gray-700/30 bg-gray-900/50 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-gray-500">Games sampled</p>
-                <p className="mt-2 text-2xl font-bold text-white">{stats.totalGames}</p>
+                <p className="mt-2 text-2xl font-bold text-white">{isLoading ? "—" : stats.totalGames}</p>
               </div>
               <div className="rounded-xl border border-gray-700/30 bg-gray-900/50 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-gray-500">Best streak</p>
-                <p className="mt-2 text-2xl font-bold text-white">{stats.bestStreak}</p>
+                <p className="mt-2 text-2xl font-bold text-white">{isLoading ? "—" : stats.bestStreak}</p>
               </div>
             </div>
           </div>

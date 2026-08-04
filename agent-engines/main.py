@@ -9,10 +9,14 @@ from enum import Enum
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 
+from gpu_worker.anomaly import BotFarmAnomalyDetector
 from gpu_worker.config import WorkerConfig
 from gpu_worker.pool import WorkerPool
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
+from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
+from gpu_worker.nl_agent import NaturalLanguageAgent
+from gpu_worker.nl_models import NLAnalysisRequest, NLAnalysisResponse
 from gpu_worker.resource_optimizer import ResourceOptimizer, ResourceTier, ResourceLimits
 from gpu_worker.deployment_pipeline import (
     DeploymentPipelineOrchestrator,
@@ -20,6 +24,7 @@ from gpu_worker.deployment_pipeline import (
     PipelineResult,
     DeploymentTarget
 )
+import websockets
 
 # Configure logging with a professional format
 logging.basicConfig(
@@ -58,17 +63,126 @@ class AgentEngineOrchestrator:
     
     def __init__(self, node_id: Optional[str] = None):
         self.config = WorkerConfig()
-        self.pool = WorkerPool([self.config])
+        self.bot_farm_detector = BotFarmAnomalyDetector()
+        self.pool = WorkerPool([self.config], anomaly_detector=self.bot_farm_detector)
+        self.nl_agent = NaturalLanguageAgent(self.pool)
         self.decentralized = DecentralizedOrchestrator(self.pool, node_id=node_id)
         self.resource_optimizer = ResourceOptimizer()
         self.deployment_pipeline = DeploymentPipelineOrchestrator()
         self._active_engines: Dict[str, Dict[str, Any]] = {}
         self._pipelines: Dict[str, DeploymentStatus] = {}
         self._resource_allocations: Dict[str, ResourceLimits] = {}
+        # Track active WebSocket connections to push updates
+        self._active_connections: Dict[str, Any] = {}
+
+    async def websocket_handler(self, websocket, path):
+        """Handle incoming WebSocket connections with real-time push updates.
+        
+        Supports both analysis requests and natural language requests,
+        pushing thinking state updates and final results without client polling.
+        """
+        connection_id = str(uuid.uuid4())
+        self._active_connections[connection_id] = websocket
+        logger.info(f"New WebSocket connection: {connection_id}")
+        
+        try:
+            async for message in websocket:
+                try:
+                    request_data = json.loads(message)
+                    request_type = request_data.get("type", "analysis")
+                    
+                    if request_type == "nl_request":
+                        # Handle natural language request with real-time updates
+                        nl_request = NLAnalysisRequest(**request_data["payload"])
+                        request_id = nl_request.request_id
+                        
+                        # Push initial thinking state
+                        await websocket.send(json.dumps({
+                            "type": "nl_thinking",
+                            "payload": {
+                                "request_id": request_id,
+                                "status": "processing",
+                                "message": "Analyzing your request..."
+                            }
+                        }))
+                        
+                        # Process the NL request asynchronously
+                        asyncio.create_task(self._process_nl_request(websocket, nl_request))
+                        
+                    elif request_type == "analysis":
+                        # Standard analysis request — honours opponent_elo if present
+                        # so the engine difficulty is scaled dynamically.
+                        payload = request_data["payload"]
+                        request = EloAnalysisRequest(**payload)
+                        result = await self.decentralized.submit_task(request)
+                        await websocket.send(json.dumps({
+                            "type": "analysis_complete",
+                            "payload": result.model_dump()
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "error": f"Unknown request type: {request_type}"
+                        }))
+                        
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    await websocket.send(json.dumps({"error": str(e)}))
+                    
+        except websockets.exceptions.ConnectionClosed:
+            logger.info(f"WebSocket connection closed: {connection_id}")
+        finally:
+            # Clean up connection
+            if connection_id in self._active_connections:
+                del self._active_connections[connection_id]
+    
+    async def _process_nl_request(self, websocket, request: NLAnalysisRequest):
+        """Process a natural language request and push all updates through WebSocket."""
+        request_id = request.request_id
+        
+        try:
+            # Push intermediate status update
+            await websocket.send(json.dumps({
+                "type": "nl_thinking",
+                "payload": {
+                    "request_id": request_id,
+                    "status": "analyzing",
+                    "message": "Running chess engine analysis..."
+                }
+            }))
+            
+            # Process the request using the NL agent
+            response = await self.nl_agent.process_request(
+                user_input=request.user_input,
+                fen=request.fen,
+                move_history=request.move_history,
+                complexity=request.complexity,
+                context=request.context
+            )
+            
+            # Push final completion status
+            await websocket.send(json.dumps({
+                "type": "nl_complete",
+                "payload": response.to_dict()
+            }))
+            
+            logger.info(f"Completed NL request {request_id}: intent={response.intent.value}")
+            
+        except Exception as e:
+            logger.error(f"Error processing NL request {request_id}: {e}", exc_info=True)
+            # Push error status
+            await websocket.send(json.dumps({
+                "type": "nl_error",
+                "payload": {
+                    "request_id": request_id,
+                    "error": str(e)
+                }
+            }))
 
     async def start(self):
         """Start the orchestrator services."""
         await self.decentralized.start()
+        start_server = websockets.serve(self.websocket_handler, "localhost", 8765)
+        await start_server
+        logger.info("WebSocket server started on ws://localhost:8765")
 
     async def shutdown(self):
         """Shutdown the orchestrator services."""
@@ -226,11 +340,37 @@ async def main() -> None:
     
     logger.info(f"Decentralized Engine Orchestrator started on node {orchestrator.decentralized.node_id}")
     
+    # Set up shutdown event to trigger graceful shutdown
+    shutdown_event = asyncio.Event()
+    
+    # Define signal handler to trigger graceful shutdown
+    def handle_shutdown_signal():
+        logger.info("Received shutdown signal, initiating graceful shutdown")
+        shutdown_event.set()
+    
+    # Register signal handlers for SIGINT and SIGTERM
+    loop = asyncio.get_running_loop()
+    for signal_name in ('SIGINT', 'SIGTERM'):
+        loop.add_signal_handler(
+            getattr(asyncio, signal_name),
+            handle_shutdown_signal
+        )
+    
     try:
-        await asyncio.Event().wait()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        await orchestrator.shutdown()
-        logger.info("Orchestrator shut down")
+        # Wait for shutdown signal
+        await shutdown_event.wait()
+    finally:
+        # Wait for active evaluations to complete with a 30 second timeout
+        logger.info("Waiting for active evaluations to complete (timeout: 30s)")
+        try:
+            await asyncio.wait_for(orchestrator.shutdown(), timeout=30)
+            logger.info("Orchestrator shut down gracefully")
+        except asyncio.TimeoutError:
+            logger.error("Timed out waiting for active evaluations to complete, forcing shutdown")
+            # Force shutdown even if tasks are still running
+            await orchestrator.shutdown()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
 
 async def run_demonstration():
     orchestrator = AgentEngineOrchestrator(node_id="demo-node")

@@ -1,6 +1,6 @@
+use crate::{AIMetadata, NFTMintRequest, NFTService};
 use actix_web::{web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
-use crate::{NFTService, AIMetadata, NFTMintRequest};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -30,9 +30,7 @@ pub struct MintNFTResponse {
         (status = 500, description = "Internal server error", body = MintNFTResponse)
     )
 )]
-pub async fn mint_nft(
-    request: web::Json<MintNFTRequest>,
-) -> Result<HttpResponse> {
+pub async fn mint_nft(request: web::Json<MintNFTRequest>) -> Result<HttpResponse> {
     // Get issuer account from environment or configuration
     let issuer_account = std::env::var("STELLAR_ISSUER_ACCOUNT")
         .unwrap_or_else(|_| "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG".to_string());
@@ -72,18 +70,14 @@ pub async fn mint_nft(
         (status = 400, description = "Invalid metadata", body = serde_json::Value)
     )
 )]
-pub async fn format_ai_metadata(
-    request: web::Json<AIMetadata>,
-) -> Result<HttpResponse> {
+pub async fn format_ai_metadata(request: web::Json<AIMetadata>) -> Result<HttpResponse> {
     match NFTService::format_ai_metadata(request.into_inner()) {
-        Ok(formatted_metadata) => {
-            match NFTService::create_ipfs_metadata(&formatted_metadata) {
-                Ok(ipfs_metadata) => Ok(HttpResponse::Ok().json(ipfs_metadata)),
-                Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                    "success": false,
-                    "error": e.to_string()
-                }))),
-            }
+        Ok(formatted_metadata) => match NFTService::create_ipfs_metadata(&formatted_metadata) {
+            Ok(ipfs_metadata) => Ok(HttpResponse::Ok().json(ipfs_metadata)),
+            Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "success": false,
+                "error": e.to_string()
+            }))),
         },
         Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "success": false,
@@ -109,20 +103,50 @@ pub async fn format_ai_metadata(
         (status = 400, description = "Invalid parameters", body = serde_json::Value)
     )
 )]
-pub async fn generate_stellar_toml(
-    query: web::Query<serde_json::Value>,
-) -> Result<HttpResponse> {
+pub async fn generate_stellar_toml(query: web::Query<serde_json::Value>) -> Result<HttpResponse> {
     let metadata = AIMetadata {
-        name: query.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        description: query.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        url: query.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        issuer: query.get("issuer").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        code: query.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        name: query
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        description: query
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        url: query
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        issuer: query
+            .get("issuer")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        code: query
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         attributes: None,
-        external_url: query.get("external_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        image: query.get("image").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        animation_url: query.get("animation_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        youtube_url: query.get("youtube_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        external_url: query
+            .get("external_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        image: query
+            .get("image")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        animation_url: query
+            .get("animation_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        youtube_url: query
+            .get("youtube_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     };
 
     match NFTService::generate_stellar_toml(&metadata) {
@@ -140,17 +164,8 @@ pub async fn generate_stellar_toml(
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/nft")
-            .service(
-                web::resource("/mint")
-                    .route(web::post().to(mint_nft))
-            )
-            .service(
-                web::resource("/metadata/format")
-                    .route(web::post().to(format_ai_metadata))
-            )
-            .service(
-                web::resource("/stellar-toml")
-                    .route(web::get().to(generate_stellar_toml))
-            )
+            .service(web::resource("/mint").route(web::post().to(mint_nft)))
+            .service(web::resource("/metadata/format").route(web::post().to(format_ai_metadata)))
+            .service(web::resource("/stellar-toml").route(web::get().to(generate_stellar_toml))),
     );
 }

@@ -3,7 +3,7 @@
 //! close to a real client connection as a test can get, rather than calling
 //! the handler function directly in isolation.
 
-use actix::Addr;
+use actix::{Actor, Addr};
 use actix_web::{web, App};
 use futures_util::{SinkExt, StreamExt};
 use security::jwt::JwtService;
@@ -25,13 +25,13 @@ fn make_access_token(user_id: i32, username: &str) -> String {
 /// shared `LobbyState` so the test can simulate server-side game events
 /// (moves/clock/end) the same way real move-processing logic elsewhere in
 /// the app would, via `Broadcast`.
-fn start_ws_test_server() -> (actix_web::test::TestServer, Addr<LobbyState>) {
+fn start_ws_test_server() -> (actix_test::TestServer, Addr<LobbyState>) {
     std::env::set_var("JWT_SECRET_KEY", JWT_SECRET);
 
     let lobby = LobbyState::new().start();
     let lobby_for_test = lobby.clone();
 
-    let srv = actix_web::test::start(move || {
+    let srv = actix_test::start(move || {
         App::new()
             .app_data(web::Data::new(lobby.clone()))
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))

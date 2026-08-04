@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::sync::broadcast;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::models::{GameStatus, PieceColor, Player, Room, ServerMessage};
@@ -26,7 +27,7 @@ lazy_static::lazy_static! {
 pub fn init_game_state() {
     // This function is called at startup to ensure the lazy_static is initialized
     let _guard = GAME_STATE.lock().unwrap();
-    log::info!("Game state initialized");
+    info!("Game state initialized");
 }
 
 // Get a clone of the message sender for a room
@@ -59,7 +60,7 @@ pub fn create_room_with_time(initial_time_ms: u64, increment_ms: u64) -> String 
     );
     state.message_senders.insert(room_id.clone(), tx);
 
-    log::info!(
+    info!(
         "Created room {} with time control: {}ms + {}ms increment",
         room_id, initial_time_ms, increment_ms
     );
@@ -108,7 +109,7 @@ pub fn join_room(room_id: &str, player_id: &str, player_name: Option<String>) ->
             .map_err(|e| format!("System clock error: {}", e))?
             .as_millis() as u64;
         room.last_move_at = Some(now_ms);
-        log::info!("Game started in room {}, clock started at {}ms", room_id, now_ms);
+        info!("Game started in room {}, clock started at {}ms", room_id, now_ms);
     }
 
     // Create response message
@@ -122,7 +123,7 @@ pub fn join_room(room_id: &str, player_id: &str, player_name: Option<String>) ->
     // Broadcast to other players in the room
     if let Some(sender) = state.message_senders.get(room_id) {
         if let Err(e) = sender.send(response.clone()) {
-            log::warn!("Failed to broadcast RoomJoined message: {:?}", e);
+            warn!("Failed to broadcast RoomJoined message: {:?}", e);
         }
     }
 
@@ -164,7 +165,7 @@ pub fn send_move(room_id: &str, player_id: &str, move_notation: &str) -> Result<
         let winner_color = if is_white { "Black" } else { "White" };
         let loser_color = if is_white { "White" } else { "Black" };
 
-        log::warn!(
+        warn!(
             "Move rejected: player {} in room {} exceeded time. Elapsed: {}ms, Remaining: {}ms, Buffer: {}ms",
             player_id, room_id, elapsed_ms, player_remaining, LATENCY_BUFFER_MS
         );

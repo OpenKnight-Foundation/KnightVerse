@@ -3,6 +3,7 @@ use engine::{process::ProcessEngine, Engine, EngineError, EngineResult, GoParams
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 pub struct EngineService {
@@ -69,17 +70,17 @@ impl EngineService {
         match result {
             Ok(engine_result) => Ok(engine_result),
             Err(CircuitBreakerError::CircuitOpen) => {
-                log::warn!("Circuit breaker is open — engine request rejected");
+                warn!("Circuit breaker is open — engine request rejected");
                 Err(EngineError::Unknown(
                     "Engine is temporarily unavailable (circuit breaker open)".to_string(),
                 ))
             }
             Err(CircuitBreakerError::OperationTimeout) => {
-                log::error!("Engine operation timed out");
+                error!("Engine operation timed out");
                 Err(EngineError::Timeout)
             }
             Err(CircuitBreakerError::OperationFailed(msg)) => {
-                log::error!("Engine operation failed: {}", msg);
+                error!("Engine operation failed: {}", msg);
                 Err(EngineError::Unknown(format!("Engine failure: {}", msg)))
             }
         }

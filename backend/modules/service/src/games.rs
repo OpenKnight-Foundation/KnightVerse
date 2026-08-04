@@ -8,8 +8,8 @@ use dto::games::{
 };
 use error::error::ApiError;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
-    Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use sea_orm::{Condition, DatabaseConnection};
 use uuid::Uuid;
@@ -418,54 +418,66 @@ impl GameService {
         chess::RatingService::get_player_rating(db, player_id).await
     }
 
-    /// List games with keyset pagination.
-    ///
+    /// List games with keyset or offset pagination.
+    /// 
     /// # Arguments
     /// * `db` - Database connection
-    /// * `cursor` - Optional cursor string (base64 encoded "timestamp,id")
+    /// * `cursor` - Optional cursor string (base64 encoded "timestamp,id") for keyset pagination
+    /// * `offset` - Optional offset for offset-based pagination (takes precedence over cursor if both provided)
     /// * `limit` - Number of items to return
     /// * `player_id` - Optional player ID filter (checks both white and black players)
     /// * `status` - Optional status filter (currently maps to result being not null for finished games, or specific status if column exists)
     ///
     /// Note: The current schema uses `result` to determine if a game is finished.
     /// Active games might have `result` as NULL (after our migration).
-    pub async fn list_games(
-        db: &DatabaseConnection,
-        cursor: Option<String>,
-        limit: u64,
+    /// Build the shared filter conditions for player_id and status.
+    fn build_filter_condition(
         player_id: Option<Uuid>,
-        status: Option<GameStatus>,
-    ) -> Result<(Vec<game::Model>, Option<String>), DbErr> {
-        let mut query = Game::find();
+        status: &Option<GameStatus>,
+    ) -> Option<Condition> {
+        let mut conditions: Vec<Condition> = Vec::new();
 
-        // 1. Apply Filtering
         if let Some(pid) = player_id {
-            // Filter by player (white OR black)
-            // effective union of indexes logic would be nice, but OR is simpler to write here.
-            // "idx_games_white_player_created_at_id" and "idx_games_black_player_created_at_id"
-            // Postgres creates a BitmapOr for these two indexes usually.
-            let condition = Condition::any()
+            let player_cond = Condition::any()
                 .add(game::Column::WhitePlayer.eq(pid))
                 .add(game::Column::BlackPlayer.eq(pid));
-            query = query.filter(condition);
+            conditions.push(player_cond);
         }
 
-        if let Some(s) = status {
+        if let Some(s) = status.as_ref() {
             match s {
                 GameStatus::Waiting | GameStatus::InProgress => {
-                    // Active games: result is NULL
-                    query = query.filter(game::Column::Result.is_null());
+                    conditions.push(Condition::all().add(game::Column::Result.is_null()));
                 }
                 GameStatus::Completed | GameStatus::Aborted => {
-                    // Finished games: result is NOT NULL
-                    // Note: "Aborted" vs "Completed" might need distinguishing via ResultSide if we had it,
-                    // but for now we just check if it has a result.
-                    query = query.filter(game::Column::Result.is_not_null());
+                    conditions.push(Condition::all().add(game::Column::Result.is_not_null()));
                 }
             }
         }
 
-        // 2. Apply Cursor (Keyset Pagination)
+        if conditions.is_empty() {
+            None
+        } else {
+            Some(conditions.into_iter().reduce(|acc, c| acc.add(c)).unwrap())
+        }
+    }
+
+    pub async fn list_games(
+        db: &DatabaseConnection,
+        cursor: Option<String>,
+        offset: Option<u64>,
+        limit: u64,
+        player_id: Option<Uuid>,
+        status: Option<GameStatus>,
+    ) -> Result<(Vec<game::Model>, Option<String>, u64), DbErr> {
+        let filter_condition = Self::build_filter_condition(player_id, &status);
+
+        let mut query = Game::find();
+        if let Some(ref cond) = filter_condition {
+            query = query.filter(cond.clone());
+        }
+
+        // 1. Apply Cursor (Keyset Pagination)
         // Sort by created_at DESC, id DESC
         query = query
             .order_by(game::Column::CreatedAt, Order::Desc)
@@ -507,7 +519,19 @@ impl GameService {
             }
         }
 
-        // 3. Limit and Execution
+        // 2. Count total matching games (before pagination)
+        let mut count_query = Game::find();
+        if let Some(ref cond) = filter_condition {
+            count_query = count_query.filter(cond.clone());
+        }
+        let total_count = count_query.count(db).await?;
+
+        // 3. Apply offset if provided (offset-based pagination)
+        if let Some(off) = offset {
+            query = query.offset(off);
+        }
+
+        // 4. Limit and Execution
         // Fetch limit + 1 to check if there is a next page
         let results = query.limit(limit + 1).all(db).await?;
 
@@ -525,7 +549,7 @@ impl GameService {
             }
         }
 
-        Ok((games, next_cursor))
+        Ok((games, next_cursor, total_count))
     }
 
     fn encode_cursor(timestamp: DateTime<Utc>, id: Uuid) -> String {
@@ -587,9 +611,14 @@ mod tests {
     #[tokio::test]
     async fn test_list_games_query_structure() {
         // Create Mock Database to verify the generated SQL
+        // We need two query result sets: one for count, one for the main query
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (empty list is fine, we check SQL)
+                // First query result (count)
+                vec![],
+            ])
+            .append_query_results(vec![
+                // Second query result (main data)
                 vec![game::Model {
                     id: Uuid::new_v4(),
                     white_player: Uuid::new_v4(),
@@ -609,15 +638,22 @@ mod tests {
             .into_connection();
 
         let player_id = Uuid::new_v4();
-
-        let _result = GameService::list_games(&db, None, 10, Some(player_id), None).await;
-
+        
+        let _result = GameService::list_games(
+            &db,
+            None,
+            None,
+            10,
+            Some(player_id),
+            None
+        ).await;
+        
         // Get transaction log to verify SQL
         let transaction_log = db.into_transaction_log();
-
-        // We expect one query
-        assert_eq!(transaction_log.len(), 1);
-
+        
+        // We expect two queries (count + data)
+        assert_eq!(transaction_log.len(), 2);
+        
         let log = &transaction_log[0];
         let log_str = format!("{:?}", log);
         println!("Log: {}", log_str);
@@ -639,25 +675,38 @@ mod tests {
         let cursor = GameService::encode_cursor(last_time, last_id);
 
         let db = MockDatabase::new(DbBackend::Postgres)
-            .append_query_results(vec![vec![game::Model {
-                id: Uuid::new_v4(),
-                white_player: Uuid::new_v4(),
-                black_player: Uuid::new_v4(),
-                fen: "fen".to_string(),
-                pgn: serde_json::json!({}),
-                result: None,
-                variant: db_entity::game::GameVariant::Standard,
-                started_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                duration_sec: 600,
-                created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                is_imported: false,
-                original_pgn: None,
+            .append_query_results(vec![
+                // First query result (count)
+                vec![],
+            ])
+            .append_query_results(vec![
+                // Second query result (main data)
+                vec![game::Model {
+                 id: Uuid::new_v4(),
+                    white_player: Uuid::new_v4(),
+                    black_player: Uuid::new_v4(),
+                    fen: "fen".to_string(),
+                    pgn: serde_json::json!({}),
+                    result: None,
+                    variant: db_entity::game::GameVariant::Standard,
+                    started_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    duration_sec: 600,
+                    created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    is_imported: false,
+                    original_pgn: None,
             }]])
             .into_connection();
-
-        let _result = GameService::list_games(&db, Some(cursor), 10, None, None).await;
-
+            
+        let _result = GameService::list_games(
+            &db,
+            Some(cursor),
+            None,
+            10,
+            None,
+            None
+        ).await;
+        
         let transaction_log = db.into_transaction_log();
         let log = &transaction_log[0];
         let log_str = format!("{:?}", log);

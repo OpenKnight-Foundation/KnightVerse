@@ -203,8 +203,32 @@ pub async fn list_games(
     let limit = query.limit.unwrap_or(10);
     let cursor = query.cursor.clone();
 
-    match GameService::list_games(db.get_ref(), cursor, limit, query.player_id, status_enum).await {
-        Ok((games, next_cursor)) => {
+    // Compute offset from page (if page is provided and cursor is not)
+    let offset: Option<u64> = if cursor.is_none() {
+        query.page.map(|p| {
+            let page = if p < 1 {
+                tracing::warn!("Invalid page value {} — clamping to 1", p);
+                1
+            } else {
+                p as u64
+            };
+            (page - 1) * limit
+        })
+    } else {
+        None
+    };
+
+    match GameService::list_games(
+        db.get_ref(),
+        cursor,
+        offset,
+        limit,
+        query.player_id,
+        status_enum,
+    )
+    .await
+    {
+        Ok((games, next_cursor, total_count)) => {
             let game_dtos: Vec<serde_json::Value> = games
                 .into_iter()
                 .map(|g| {
@@ -230,6 +254,7 @@ pub async fn list_games(
                 "message": "Games found",
                 "data": {
                     "games":       game_dtos,
+                    "total_count": total_count,
                     "next_cursor": next_cursor,
                     "limit":       limit,
                 }

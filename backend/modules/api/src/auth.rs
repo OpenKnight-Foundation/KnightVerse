@@ -3,6 +3,7 @@ use actix_web::{
     post, web, HttpRequest, HttpResponse,
 };
 use std::env;
+use tracing::{error, warn};
 use uuid::Uuid;
 use validator::Validate;
 
@@ -129,7 +130,7 @@ pub async fn login(
         {
             Ok(t) => t,
             Err(e) => {
-                log::error!("Failed to generate refresh token: {}", e);
+                error!("Failed to generate refresh token: {}", e);
                 return HttpResponse::InternalServerError().json(ErrorResponse {
                     message: "Failed to generate refresh token".to_string(),
                     code: "TOKEN_ERROR".to_string(),
@@ -241,7 +242,7 @@ pub async fn refresh(
     {
         Ok(fid) => fid,
         Err(TokenServiceError::TokenReuseDetected) => {
-            log::warn!("Token reuse detected for player {}", claims.user_id);
+            warn!("Token reuse detected for player {}", claims.user_id);
             return HttpResponse::Unauthorized().json(ErrorResponse {
                 message: "Token reuse detected. Account locked for security.".to_string(),
                 code: "TOKEN_THEFT_DETECTED".to_string(),
@@ -289,7 +290,7 @@ pub async fn refresh(
     {
         Ok(t) => t,
         Err(e) => {
-            log::error!("Failed to generate new refresh token: {}", e);
+            error!("Failed to generate new refresh token: {}", e);
             return HttpResponse::InternalServerError().json(ErrorResponse {
                 message: "Failed to generate new refresh token".to_string(),
                 code: "TOKEN_ERROR".to_string(),
@@ -377,7 +378,7 @@ pub async fn logout(
 
     // Revoke all tokens for this player
     if let Err(e) = TokenService::revoke_player_tokens(db.get_ref(), user_id).await {
-        log::error!("Failed to revoke tokens: {}", e);
+        error!("Failed to revoke tokens: {}", e);
         return HttpResponse::InternalServerError().json(ErrorResponse {
             message: "Failed to logout".to_string(),
             code: "LOGOUT_ERROR".to_string(),

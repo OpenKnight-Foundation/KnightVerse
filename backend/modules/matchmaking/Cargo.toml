@@ -14,4 +14,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 deadpool-redis = "0.14"
 redis = { version = "0.24", features = ["tokio-comp", "json"] }
-log = "0.4"
+tracing = "0.1"

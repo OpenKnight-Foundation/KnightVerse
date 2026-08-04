@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 // For Redis Pub/Sub
@@ -158,7 +159,7 @@ impl WsSession {
         ctx.run_interval(Self::HEARTBEAT_INTERVAL, |act, ctx| {
             let elapsed = std::time::Instant::now().duration_since(act.hb);
             if elapsed > Self::CLIENT_TIMEOUT {
-                log::warn!(
+                warn!(
                     "WebSocket timeout for game {}: no pong in {}s, terminating connection",
                     act.game_id,
                     elapsed.as_secs()
@@ -187,7 +188,7 @@ impl Actor for WsSession {
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        log::info!("WebSocket disconnected for game: {}", self.game_id);
+        info!("WebSocket disconnected for game: {}", self.game_id);
 
         // Send reconnection token to client for seamless reconnection
         if let Ok(reconnect_token) = self.generate_reconnect_token() {
@@ -198,9 +199,9 @@ impl Actor for WsSession {
 
             // Try to send the reconnection token
             ctx.address().do_send(reconnect_msg);
-            log::info!("Sent reconnection token for user: {}", self.username);
+            info!("Sent reconnection token for user: {}", self.username);
         } else {
-            log::error!(
+            error!(
                 "Failed to generate reconnection token for user: {}",
                 self.username
             );

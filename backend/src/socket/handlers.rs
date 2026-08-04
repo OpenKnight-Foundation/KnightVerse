@@ -2,6 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{from_str, to_string};
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
+use tracing::{error, info};
 
 use crate::game::{
     accept_takeback,
@@ -28,7 +29,7 @@ pub async fn handle_client_message(
     let client_message: ClientMessage = match from_str(message) {
         Ok(msg) => msg,
         Err(e) => {
-            log::error!("Failed to parse client message: {}", e);
+            error!("Failed to parse client message: {}", e);
             let error_msg = ServerMessage::Error {
                 code: "PARSE_ERROR".to_string(),
                 message: "Failed to parse message".to_string(),
@@ -43,7 +44,7 @@ pub async fn handle_client_message(
     // Handle the message based on its type
     match client_message {
         ClientMessage::JoinRoom(payload) => {
-            log::info!(
+            info!(
                 "Player {} joining room {}",
                 payload.player_id,
                 payload.room_id
@@ -69,7 +70,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::SendMove(payload) => {
-            log::info!(
+            info!(
                 "Player {} making move {} in room {}",
                 payload.player_id,
                 payload.move_notation,
@@ -90,7 +91,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::LeaveRoom(payload) => {
-            log::info!(
+            info!(
                 "Player {} leaving room {}",
                 payload.player_id,
                 payload.room_id
@@ -113,7 +114,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::RequestGameLog(payload) => {
-            log::info!("Game log requested for room {}", payload.room_id);
+            info!("Game log requested for room {}", payload.room_id);
 
             match get_game_log(&payload.room_id) {
                 Ok(response) => {
@@ -129,7 +130,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::OfferTakeback(payload) => {
-            log::info!(
+            info!(
                 "Player {} offering takeback in room {}",
                 payload.player_id,
                 payload.room_id
@@ -149,7 +150,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::AcceptTakeback(payload) => {
-            log::info!(
+            info!(
                 "Player {} accepting takeback in room {}",
                 payload.player_id,
                 payload.room_id
@@ -169,7 +170,7 @@ pub async fn handle_client_message(
             }
         }
         ClientMessage::RejectTakeback(payload) => {
-            log::info!(
+            info!(
                 "Player {} rejecting takeback in room {}",
                 payload.player_id,
                 payload.room_id

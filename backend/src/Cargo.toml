@@ -11,6 +11,8 @@ chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 lazy_static = "1.4"
 api = { path = "../modules/api" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -10,6 +10,7 @@ use std::{
     rc::Rc,
     task::{Context, Poll},
 };
+use tracing::warn;
 
 /// Redis-backed rate limiter middleware for actix-web.
 ///
@@ -114,7 +115,7 @@ where
             let mut conn = match pool.get().await {
                 Ok(c) => c,
                 Err(e) => {
-                    log::warn!(
+                    warn!(
                         "Redis rate limiter connection failed: {}. Allowing request.",
                         e
                     );
@@ -130,7 +131,7 @@ where
             {
                 Ok(c) => c,
                 Err(e) => {
-                    log::warn!("Redis INCR failed: {}. Allowing request.", e);
+                    warn!("Redis INCR failed: {}. Allowing request.", e);
                     return service.call(req).await.map(ServiceResponse::map_into_boxed_body);
                 }
             };

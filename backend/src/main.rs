@@ -11,5 +11,10 @@ use api::server;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Initialize basic tracing for telemetry
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     server::main().await
 }

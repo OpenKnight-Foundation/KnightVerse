@@ -1,6 +1,7 @@
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 use uuid::Uuid;
 
 use super::models::*;
@@ -76,7 +77,7 @@ async fn join_queue(
     match service.join_queue(match_request).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => {
-            log::error!("Failed to join queue: {}", e);
+            error!("Failed to join queue: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -101,7 +102,7 @@ async fn get_status(
             queue_status: None,
         }),
         Err(e) => {
-            log::error!("Failed to get queue status: {}", e);
+            error!("Failed to get queue status: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -122,7 +123,7 @@ async fn cancel_request(
             "status": "Request not found"
         })),
         Err(e) => {
-            log::error!("Failed to cancel request: {}", e);
+            error!("Failed to cancel request: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -150,7 +151,7 @@ async fn accept_invite(
             "status": "Invite not found"
         })),
         Err(e) => {
-            log::error!("Failed to accept invite: {}", e);
+            error!("Failed to accept invite: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),

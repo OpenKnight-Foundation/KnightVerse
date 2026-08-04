@@ -14,6 +14,7 @@ from gpu_worker.config import WorkerConfig
 from gpu_worker.pool import WorkerPool
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
+from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
 from gpu_worker.nl_agent import NaturalLanguageAgent
 from gpu_worker.nl_models import NLAnalysisRequest, NLAnalysisResponse
 from gpu_worker.resource_optimizer import ResourceOptimizer, ResourceTier, ResourceLimits
@@ -109,8 +110,10 @@ class AgentEngineOrchestrator:
                         asyncio.create_task(self._process_nl_request(websocket, nl_request))
                         
                     elif request_type == "analysis":
-                        # Standard analysis request
-                        request = AnalysisRequest(**request_data["payload"])
+                        # Standard analysis request — honours opponent_elo if present
+                        # so the engine difficulty is scaled dynamically.
+                        payload = request_data["payload"]
+                        request = EloAnalysisRequest(**payload)
                         result = await self.decentralized.submit_task(request)
                         await websocket.send(json.dumps({
                             "type": "analysis_complete",

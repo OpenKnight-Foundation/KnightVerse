@@ -1,22 +1,20 @@
-mod telemetry;
+//! KnightVerse Backend - Main Entry Point
+//!
+//! This is the unified entry point for the KnightVerse backend service.
+//! It initializes the API server with all configured routes and middleware.
+//!
+//! Graceful shutdown (BE-26): the Actix-Web server in `api::server` installs
+//! SIGTERM/SIGINT handlers and calls `ServerHandle::stop(true)` so in-flight
+//! HTTP/WebSocket work and the worker thread pool are drained cleanly.
+
+use api::server;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let tracer_provider = telemetry::init_telemetry()
-        .expect("failed to initialize telemetry");
+    // Initialize basic tracing for telemetry
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
-    // ... existing DB pool / redis pool / app state setup stays exactly as is ...
-
-    let server = HttpServer::new(move || {
-        App::new()
-            .wrap(tracing_actix_web::TracingLogger::default()) // <-- add this, before/around other middleware
-            // ... existing .app_data(...), .service(...), .route(...) calls unchanged ...
-    })
-    .bind(("0.0.0.0", 8080))? // match the existing bind address/port
-    .run();
-
-    server.await?;
-
-    telemetry::shutdown_telemetry(tracer_provider);
-    Ok(())
+    server::main().await
 }

@@ -1,12 +1,18 @@
-use actix_web::{web, HttpResponse, HttpRequest, post, cookie::{Cookie, time::Duration}};
-use validator::Validate;
+use actix_web::{
+    cookie::{time::Duration, Cookie},
+    post, web, HttpRequest, HttpResponse,
+};
 use std::env;
 use uuid::Uuid;
+use validator::Validate;
 
-use dto::auth::{RegisterRequest, LoginRequest, AuthResponse, ErrorResponse, RefreshTokenRequest, RefreshResponse, LogoutResponse};
-use security::{JwtService, TokenService, TokenServiceError};
-use sea_orm::{DatabaseConnection, EntityTrait, ColumnTrait, QueryFilter};
 use db_entity::player;
+use dto::auth::{
+    AuthResponse, ErrorResponse, LoginRequest, LogoutResponse, RefreshResponse,
+    RefreshTokenRequest, RegisterRequest,
+};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use security::{JwtService, TokenService, TokenServiceError};
 use service::helper::password;
 
 /// Register a new user
@@ -117,28 +123,30 @@ pub async fn login(
         .parse::<i64>()
         .unwrap_or(7);
 
-    let refresh_token = match TokenService::generate_refresh_token(db.get_ref(), user_id, family_id, refresh_ttl).await {
-        Ok(t) => t,
-        Err(e) => {
-            log::error!("Failed to generate refresh token: {}", e);
-            return HttpResponse::InternalServerError().json(ErrorResponse {
-                message: "Failed to generate refresh token".to_string(),
-                code: "TOKEN_ERROR".to_string(),
-            });
-        }
-    };
+    let refresh_token =
+        match TokenService::generate_refresh_token(db.get_ref(), user_id, family_id, refresh_ttl)
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("Failed to generate refresh token: {}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    message: "Failed to generate refresh token".to_string(),
+                    code: "TOKEN_ERROR".to_string(),
+                });
+            }
+        };
 
     // Build response with cookie
-    let mut response = HttpResponse::Ok()
-        .json(AuthResponse {
-            access_token,
-            refresh_token: refresh_token.clone(),
-            token_type: "Bearer".to_string(),
-            expires_in: 3600,
-            refresh_token_expires_in: (refresh_ttl * 86400) as usize,
-            user_id,
-            username,
-        });
+    let mut response = HttpResponse::Ok().json(AuthResponse {
+        access_token,
+        refresh_token: refresh_token.clone(),
+        token_type: "Bearer".to_string(),
+        expires_in: 3600,
+        refresh_token_expires_in: (refresh_ttl * 86400) as usize,
+        user_id,
+        username,
+    });
 
     // Set HTTP-only secure cookie
     let cookie = Cookie::build("refresh_token", refresh_token)
@@ -202,13 +210,14 @@ pub async fn refresh(
     };
 
     // Extract Bearer token
-    let token = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
-    } else {
-        return HttpResponse::Unauthorized().json(ErrorResponse {
-            message: "Invalid authorization format".to_string(),
-            code: "INVALID_AUTH_FORMAT".to_string(),
-        });
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid authorization format".to_string(),
+                code: "INVALID_AUTH_FORMAT".to_string(),
+            });
+        }
     };
 
     // Validate access token and get user info
@@ -223,7 +232,13 @@ pub async fn refresh(
     };
 
     // Verify refresh token and mark as used
-    let family_id = match TokenService::verify_and_mark_used(db.get_ref(), &refresh_token, claims.user_id).await {
+    let family_id = match TokenService::verify_and_mark_used(
+        db.get_ref(),
+        &refresh_token,
+        claims.user_id,
+    )
+    .await
+    {
         Ok(fid) => fid,
         Err(TokenServiceError::TokenReuseDetected) => {
             log::warn!("Token reuse detected for player {}", claims.user_id);
@@ -247,15 +262,16 @@ pub async fn refresh(
     };
 
     // Generate new access token
-    let new_access_token = match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
-        Ok(t) => t,
-        Err(_) => {
-            return HttpResponse::InternalServerError().json(ErrorResponse {
-                message: "Failed to generate new access token".to_string(),
-                code: "TOKEN_ERROR".to_string(),
-            });
-        }
-    };
+    let new_access_token =
+        match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
+            Ok(t) => t,
+            Err(_) => {
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    message: "Failed to generate new access token".to_string(),
+                    code: "TOKEN_ERROR".to_string(),
+                });
+            }
+        };
 
     // Generate new refresh token in same family
     let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
@@ -263,7 +279,14 @@ pub async fn refresh(
         .parse::<i64>()
         .unwrap_or(7);
 
-    let new_refresh_token = match TokenService::generate_refresh_token(db.get_ref(), claims.user_id, family_id, refresh_ttl).await {
+    let new_refresh_token = match TokenService::generate_refresh_token(
+        db.get_ref(),
+        claims.user_id,
+        family_id,
+        refresh_ttl,
+    )
+    .await
+    {
         Ok(t) => t,
         Err(e) => {
             log::error!("Failed to generate new refresh token: {}", e);
@@ -275,13 +298,12 @@ pub async fn refresh(
     };
 
     // Build response with new cookie
-    let mut response = HttpResponse::Ok()
-        .json(RefreshResponse {
-            access_token: new_access_token,
-            refresh_token: new_refresh_token.clone(),
-            token_type: "Bearer".to_string(),
-            expires_in: 3600,
-        });
+    let mut response = HttpResponse::Ok().json(RefreshResponse {
+        access_token: new_access_token,
+        refresh_token: new_refresh_token.clone(),
+        token_type: "Bearer".to_string(),
+        expires_in: 3600,
+    });
 
     // Set new HTTP-only cookie
     let cookie = Cookie::build("refresh_token", new_refresh_token)
@@ -330,13 +352,14 @@ pub async fn logout(
         }
     };
 
-    let token = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
-    } else {
-        return HttpResponse::Unauthorized().json(ErrorResponse {
-            message: "Invalid authorization format".to_string(),
-            code: "INVALID_AUTH_FORMAT".to_string(),
-        });
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid authorization format".to_string(),
+                code: "INVALID_AUTH_FORMAT".to_string(),
+            });
+        }
     };
 
     // Validate the token and extract the actual user ID
@@ -362,10 +385,9 @@ pub async fn logout(
     }
 
     // Clear the refresh token cookie
-    let mut response = HttpResponse::Ok()
-        .json(LogoutResponse {
-            message: "Logged out successfully".to_string(),
-        });
+    let mut response = HttpResponse::Ok().json(LogoutResponse {
+        message: "Logged out successfully".to_string(),
+    });
 
     let cookie = Cookie::build("refresh_token", "")
         .http_only(true)

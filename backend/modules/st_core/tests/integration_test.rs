@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use st_core::{NFTService, AIMetadata, NFTMintRequest};
+    use st_core::{AIMetadata, NFTMintRequest, NFTService};
 
     #[tokio::test]
     async fn test_nft_mint_transaction_creation() {
@@ -20,7 +20,8 @@ mod tests {
 
         let mint_request = NFTMintRequest {
             ai_metadata,
-            destination_account: "GATTMQEODSDX45WZK2JFIYETXWYCU5GRJ5I3Z7P2UDYD6YFVONDM4CX4".to_string(),
+            destination_account: "GATTMQEODSDX45WZK2JFIYETXWYCU5GRJ5I3Z7P2UDYD6YFVONDM4CX4"
+                .to_string(),
             issuer_account: "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG".to_string(),
             network: "testnet".to_string(),
         };
@@ -36,7 +37,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ai_metadata_formatting() {
-        let mut metadata = AIMetadata {
+        let metadata = AIMetadata {
             name: "  Test AI  ".to_string(),
             description: "  Test Description  ".to_string(),
             url: "ipfs://QmTest123".to_string(),

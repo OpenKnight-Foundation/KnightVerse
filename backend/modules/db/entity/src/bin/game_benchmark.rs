@@ -1,15 +1,15 @@
-use sea_orm::{*, ActiveValue::Set, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr};
+use db_entity::game::{GameVariant, ResultSide}; // Added imports
 use db_entity::prelude::{Game, Player};
 use db_entity::{game, player};
-use db_entity::game::{ResultSide, GameVariant}; // Added imports
+use dotenv::dotenv;
+use rand::distributions::Alphanumeric;
+use rand::prelude::*;
+use sea_orm::{sea_query::Expr, ActiveValue::Set, EntityTrait, QueryFilter, QuerySelect, *};
 use serde_json::{json, Value as JsonValue};
-use uuid::Uuid;
 use std::env;
 use std::time::Instant;
-use rand::prelude::*;
-use rand::distributions::Alphanumeric;
 use tokio::time::{sleep, Duration};
-use dotenv::dotenv;
+use uuid::Uuid;
 
 // Configuration
 const NUM_PLAYERS_TO_CREATE: usize = 100;
@@ -19,8 +19,8 @@ const BATCH_SIZE: usize = 100; // Insert games in batches
 // Helper to connect to the database
 async fn setup_db() -> Result<DatabaseConnection, DbErr> {
     dotenv().ok(); // load .env if present
-    let db_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL environment variable not set for benchmark");
+    let db_url =
+        env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set for benchmark");
     Database::connect(&db_url).await
 }
 
@@ -31,9 +31,9 @@ fn generate_random_pgn(rng: &mut ThreadRng) -> JsonValue {
         .map(|_| {
             let len = rng.gen_range(2..6); // Calculate len first
             rng.sample_iter(&Alphanumeric)
-               .take(len)
-               .map(char::from)
-               .collect()
+                .take(len)
+                .map(char::from)
+                .collect()
         })
         .collect();
 
@@ -55,11 +55,11 @@ fn generate_random_pgn(rng: &mut ThreadRng) -> JsonValue {
 fn generate_random_fen(rng: &mut ThreadRng) -> String {
     let len = rng.gen_range(40..70); // Calculate len first
     rng.sample_iter(&Alphanumeric)
-       .take(len)
-       .map(char::from)
-       .collect::<String>() + " w KQkq - 0 1"
+        .take(len)
+        .map(char::from)
+        .collect::<String>()
+        + " w KQkq - 0 1"
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -75,15 +75,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         player_models.push(player::ActiveModel {
             id: Set(player_id), // Explicitly set the ID
             username: Set(format!("bench_user_{}_{}", i, Uuid::new_v4().simple())),
-            email: Set(format!("bench_email_{}_{}@bench.com", i, Uuid::new_v4().simple())),
+            email: Set(format!(
+                "bench_email_{}_{}@bench.com",
+                i,
+                Uuid::new_v4().simple()
+            )),
             password_hash: Set(b"bench_hash".to_vec()),
             biography: Set("Benchmark player biography".to_string()), // Provide a non-null value
-            country: Set("Unknown".to_string()), // Add default
-            flair: Set("Bench Flair".to_string()), // Add default
-            real_name: Set("Bench Real Name".to_string()), // Add default
-            location: Set(Some("Bench Location".to_string())), // Add default
-            fide_rating: Set(Some(1500)), // Add default
-            social_links: Set(Some(vec![])), // Add default (empty vec)
+            country: Set("Unknown".to_string()),                      // Add default
+            flair: Set("Bench Flair".to_string()),                    // Add default
+            real_name: Set("Bench Real Name".to_string()),            // Add default
+            location: Set(Some("Bench Location".to_string())),        // Add default
+            fide_rating: Set(Some(1500)),                             // Add default
+            social_links: Set(Some(vec![])),                          // Add default (empty vec)
             ..Default::default()
         });
     }
@@ -104,10 +108,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Fetched {} player IDs for game creation.", player_ids.len());
 
     // === Benchmark: Insertions ===
-    println!("Inserting {} games in batches of {}...", NUM_GAMES_TO_INSERT, BATCH_SIZE);
+    println!(
+        "Inserting {} games in batches of {}...",
+        NUM_GAMES_TO_INSERT, BATCH_SIZE
+    );
     let mut game_models = Vec::with_capacity(BATCH_SIZE);
-    let variants = [GameVariant::Standard, GameVariant::Chess960, GameVariant::Blitz, GameVariant::Rapid, GameVariant::Classical]; // Update variants list
-    let results = [ResultSide::WhiteWins, ResultSide::BlackWins, ResultSide::Draw]; // Update results list
+    let variants = [
+        GameVariant::Standard,
+        GameVariant::Chess960,
+        GameVariant::Blitz,
+        GameVariant::Rapid,
+        GameVariant::Classical,
+    ]; // Update variants list
+    let results = [
+        ResultSide::WhiteWins,
+        ResultSide::BlackWins,
+        ResultSide::Draw,
+    ]; // Update results list
     let insert_start = Instant::now();
 
     for i in 0..NUM_GAMES_TO_INSERT {
@@ -130,8 +147,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if game_models.len() >= BATCH_SIZE || i == NUM_GAMES_TO_INSERT - 1 {
             Game::insert_many(game_models.drain(..)).exec(&db).await?;
-            if (i + 1) % (BATCH_SIZE * 10) == 0 { // Print progress
-                 println!("  Inserted {} games...", i + 1);
+            if (i + 1) % (BATCH_SIZE * 10) == 0 {
+                // Print progress
+                println!("  Inserted {} games...", i + 1);
             }
         }
     }
@@ -200,26 +218,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // === Cleanup (Optional but recommended) ===
-    println!("\nStarting cleanup (deleting benchmark games and players)... This might take a while.");
+    println!(
+        "\nStarting cleanup (deleting benchmark games and players)... This might take a while."
+    );
     let cleanup_start = Instant::now();
 
     // Delete games associated with the benchmark players
     let delete_games_res = Game::delete_many()
         .filter(
-            game::Column::WhitePlayer.is_in(player_ids.clone())
-            .or(game::Column::BlackPlayer.is_in(player_ids.clone()))
+            game::Column::WhitePlayer
+                .is_in(player_ids.clone())
+                .or(game::Column::BlackPlayer.is_in(player_ids.clone())),
         )
-        .exec(&db).await?;
+        .exec(&db)
+        .await?;
     println!("  Deleted {} game records.", delete_games_res.rows_affected);
 
     // Delete benchmark players
     let delete_players_res = Player::delete_many()
         .filter(player::Column::Username.starts_with("bench_user_"))
-        .exec(&db).await?;
-    println!("  Deleted {} player records.", delete_players_res.rows_affected);
+        .exec(&db)
+        .await?;
+    println!(
+        "  Deleted {} player records.",
+        delete_players_res.rows_affected
+    );
 
     let cleanup_duration = cleanup_start.elapsed();
     println!("Cleanup finished in {:.2?}.", cleanup_duration);
 
     Ok(())
-} 
+}

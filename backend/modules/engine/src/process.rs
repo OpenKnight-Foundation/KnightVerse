@@ -1,10 +1,10 @@
-use tokio::process::{Command, Child};
-use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
-use std::process::Stdio;
-use async_trait::async_trait;
+use crate::parser::{UciMessage, parse_uci_line};
 use crate::{Engine, EngineError, EngineResult, GoParams};
-use crate::parser::{parse_uci_line, UciMessage};
+use async_trait::async_trait;
+use std::process::Stdio;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 pub struct ProcessEngine {
@@ -33,7 +33,7 @@ impl ProcessEngine {
 
         // Initialize UCI
         engine.send_command("uci").await?;
-        
+
         // Wait for uciok with 5-second timeout
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
@@ -43,13 +43,17 @@ impl ProcessEngine {
                 }
             }
             Ok::<(), EngineError>(())
-        }).await.map_err(|_| EngineError::Timeout)??;
+        })
+        .await
+        .map_err(|_| EngineError::Timeout)??;
 
         Ok(engine)
     }
 
     async fn send_command(&mut self, cmd: &str) -> Result<(), EngineError> {
-        self.stdin.write_all(format!("{}\n", cmd).as_bytes()).await?;
+        self.stdin
+            .write_all(format!("{}\n", cmd).as_bytes())
+            .await?;
         self.stdin.flush().await?;
         Ok(())
     }
@@ -75,11 +79,14 @@ impl Engine for ProcessEngine {
         if let Some(time) = params.time_limit_ms {
             cmd.push_str(&format!(" movetime {}", time));
         }
-        
+
         self.send_command(&cmd).await?;
 
         let mut last_info = None;
-        let timeout_duration = params.time_limit_ms.map(|t| std::time::Duration::from_millis(t as u64 + 1000)).unwrap_or(std::time::Duration::from_secs(30));
+        let timeout_duration = params
+            .time_limit_ms
+            .map(|t| std::time::Duration::from_millis(t as u64 + 1000))
+            .unwrap_or(std::time::Duration::from_secs(30));
 
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
@@ -92,20 +99,37 @@ impl Engine for ProcessEngine {
                             depth: None,
                             principal_variation: Vec::new(),
                         };
-                        if let Some(UciMessage::Info { depth, score_cp, score_mate: _, pv }) = last_info.clone() {
+                        if let Some(UciMessage::Info {
+                            depth,
+                            score_cp,
+                            score_mate: _,
+                            pv,
+                        }) = last_info.clone()
+                        {
                             result.depth = depth;
                             result.evaluation = score_cp.map(|cp| cp as f32 / 100.0);
                             result.principal_variation = pv;
                         }
                         return Ok(result);
                     }
-                    Some(UciMessage::Info { depth, score_cp, score_mate, pv }) => {
-                        last_info = Some(UciMessage::Info { depth, score_cp, score_mate, pv });
+                    Some(UciMessage::Info {
+                        depth,
+                        score_cp,
+                        score_mate,
+                        pv,
+                    }) => {
+                        last_info = Some(UciMessage::Info {
+                            depth,
+                            score_cp,
+                            score_mate,
+                            pv,
+                        });
                     }
                     _ => {}
                 }
             }
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(res) => res,
@@ -122,15 +146,31 @@ impl Engine for ProcessEngine {
                                 depth: None,
                                 principal_variation: Vec::new(),
                             };
-                            if let Some(UciMessage::Info { depth, score_cp, score_mate: _, pv }) = last_info {
+                            if let Some(UciMessage::Info {
+                                depth,
+                                score_cp,
+                                score_mate: _,
+                                pv,
+                            }) = last_info
+                            {
                                 result.depth = depth;
                                 result.evaluation = score_cp.map(|cp| cp as f32 / 100.0);
                                 result.principal_variation = pv;
                             }
                             return Err(EngineError::Timeout);
                         }
-                        Some(UciMessage::Info { depth, score_cp, score_mate, pv }) => {
-                            last_info = Some(UciMessage::Info { depth, score_cp, score_mate, pv });
+                        Some(UciMessage::Info {
+                            depth,
+                            score_cp,
+                            score_mate,
+                            pv,
+                        }) => {
+                            last_info = Some(UciMessage::Info {
+                                depth,
+                                score_cp,
+                                score_mate,
+                                pv,
+                            });
                         }
                         _ => {}
                     }
@@ -156,7 +196,8 @@ impl Engine for ProcessEngine {
                     return Ok(true);
                 }
             }
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(res) => res,

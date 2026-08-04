@@ -124,7 +124,7 @@ export class CheatDetectionEngine {
     const thinkTimes = this.computeThinkTimes(color);
     const timeConsistency = this.scoreTimeConsistency(thinkTimes);
     const accuracyScore = this.scoreAccuracy(playerMoves);
-    const complexitySpeed = this.scoreComplexitySpeed(playerMoves, thinkTimes);
+    const complexitySpeed = this.scoreComplexitySpeed(playerMoves);
     const blunderAvoidance = this.scoreBlunderAvoidance(playerMoves);
     const blunderCount = this.countBlunders(playerMoves);
 
@@ -315,32 +315,34 @@ export class CheatDetectionEngine {
    * Fast moves in complex positions = suspicious (engine evaluates instantly).
    * Returns 0–100 (higher = more suspicious).
    */
-  private scoreComplexitySpeed(
-    playerMoves: MoveEntry[],
-    thinkTimes: number[],
-  ): number {
+  private scoreComplexitySpeed(playerMoves: MoveEntry[]): number {
     if (playerMoves.length < MIN_MOVES_FOR_ANALYSIS) return 0;
 
-    // Find moves in complex positions (many pieces on board)
-    const complexMoveIndices: number[] = [];
-    playerMoves.forEach((move, i) => {
-      const pieceCount = this.countPieces(move.fenBefore);
-      if (pieceCount >= COMPLEX_POSITION_THRESHOLD) {
-        complexMoveIndices.push(i);
+    // Think time for each complex-position move, measured against this player's *own*
+    // previous move. We deliberately compute the gap here rather than indexing into the
+    // compacted `thinkTimes` array: that array starts at move 1 and is filtered, so its
+    // indices are not aligned with `playerMoves` and would attribute a neighbour's think
+    // time to a complex move. The first move (i === 0) has no preceding own move, so its
+    // think time is unknown and it is excluded.
+    const complexThinkTimes: number[] = [];
+    for (let i = 1; i < playerMoves.length; i++) {
+      const pieceCount = this.countPieces(playerMoves[i].fenBefore);
+      if (pieceCount < COMPLEX_POSITION_THRESHOLD) {
+        continue;
       }
-    });
 
-    if (complexMoveIndices.length < 3) return 0;
-
-    // Check thinking times for complex positions
-    let fastComplexMoves = 0;
-    for (const idx of complexMoveIndices) {
-      if (idx < thinkTimes.length && thinkTimes[idx] < FAST_MOVE_THRESHOLD_MS) {
-        fastComplexMoves++;
+      const elapsed = playerMoves[i].timestamp - playerMoves[i - 1].timestamp;
+      if (elapsed > 0) {
+        complexThinkTimes.push(elapsed);
       }
     }
 
-    const fastRate = fastComplexMoves / complexMoveIndices.length;
+    if (complexThinkTimes.length < 3) return 0;
+
+    const fastComplexMoves = complexThinkTimes.filter(
+      (elapsed) => elapsed < FAST_MOVE_THRESHOLD_MS,
+    ).length;
+    const fastRate = fastComplexMoves / complexThinkTimes.length;
 
     // High rate of fast moves in complex positions → suspicious
     if (fastRate >= 0.5) return Math.min(90, Math.round(fastRate * 120));

@@ -131,6 +131,7 @@ pub fn join_room(room_id: &str, player_id: &str, player_name: Option<String>) ->
 }
 
 // Send a move
+#[tracing::instrument(fields(room_id = %room_id, player_id = %player_id))]
 pub fn send_move(room_id: &str, player_id: &str, move_notation: &str) -> Result<ServerMessage, String> {
     let mut state = GAME_STATE.lock().unwrap();
 

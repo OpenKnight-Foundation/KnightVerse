@@ -22,6 +22,8 @@ const NFT_COUNTER: Symbol = symbol_short!("NFT_CNT");
 const NFT_OWNERS: Symbol = symbol_short!("OWNERS");
 const NFT_METADATA: Symbol = symbol_short!("METADATA");
 const MINTER_REGISTRY: Symbol = symbol_short!("MINTER");
+// Pausable extension (SC-11)
+const PAUSED: Symbol = symbol_short!("PAUSED");
 
 // Contract errors
 #[contracterror]
@@ -33,6 +35,8 @@ pub enum ContractError {
     AlreadyTransferred = 4,
     InvalidOwner = 5,
     MinterMismatch = 6,
+    /// Contract is paused for emergency halt (SC-11)
+    ContractPaused = 7,
 }
 
 #[contract]
@@ -55,6 +59,52 @@ impl AINFTContract {
         env.storage().instance().get(&ADMIN).expect("Admin not set")
     }
 
+    // ── Pausable extension (SC-11) ────────────────────────────────────────────
+
+    /// Pause the contract — blocks all state-mutating operations.
+    /// Only the contract admin may call this.
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Already paused");
+        }
+        env.storage().instance().set(&PAUSED, &true);
+        env.events()
+            .publish((symbol_short!("paused"),), caller);
+    }
+
+    /// Unpause the contract — resumes normal operations.
+    /// Only the contract admin may call this.
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
+        if caller != admin {
+            panic!("Not admin");
+        }
+        if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Not paused");
+        }
+        env.storage().instance().set(&PAUSED, &false);
+        env.events()
+            .publish((symbol_short!("unpaused"),), caller);
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&PAUSED).unwrap_or(false)
+    }
+
+    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    fn check_not_paused(env: &Env) {
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            panic!("Contract is paused");
+        }
+    }
+
     /// Mint a new AI NFT with metadata hash
     pub fn mint(
         env: Env,
@@ -62,6 +112,7 @@ impl AINFTContract {
         metadata_hash: BytesN<32>,
         personality_traits: String,
     ) -> u64 {
+        Self::check_not_paused(&env);
         let admin = Self::admin(env.clone());
         admin.require_auth();
         minter.require_auth();
@@ -76,7 +127,7 @@ impl AINFTContract {
             owner: minter.clone(),
             nft_id: nft_counter,
             metadata_hash: metadata_hash.clone(),
-            personality_traits,
+            personality_traits: personality_traits.clone(),
             created_at: env.ledger().sequence() as u64,
             minter: minter.clone(),
         };
@@ -105,16 +156,23 @@ impl AINFTContract {
             .instance()
             .get(&MINTER_REGISTRY)
             .unwrap_or(Map::new(&env));
-        minter_registry.set(nft_counter, minter);
+        minter_registry.set(nft_counter, minter.clone());
         env.storage()
             .instance()
             .set(&MINTER_REGISTRY, &minter_registry);
+
+        // Emit NFT minted event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("mint")),
+            (nft_counter, minter, metadata_hash),
+        );
 
         nft_counter
     }
 
     /// Transfer NFT from current owner to a new owner
     pub fn transfer(env: Env, nft_id: u64, to: Address) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
         let mut owners: Map<u64, Address> = env
             .storage()
             .instance()
@@ -135,9 +193,15 @@ impl AINFTContract {
             .get(&NFT_METADATA)
             .ok_or(ContractError::NFTNotFound)?;
         let mut nft = nft_metadata.get(nft_id).ok_or(ContractError::NFTNotFound)?;
-        nft.owner = to;
+        nft.owner = to.clone();
         nft_metadata.set(nft_id, nft);
         env.storage().instance().set(&NFT_METADATA, &nft_metadata);
+
+        // Emit NFT transferred event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("transfer")),
+            (nft_id, current_owner, to),
+        );
 
         Ok(())
     }

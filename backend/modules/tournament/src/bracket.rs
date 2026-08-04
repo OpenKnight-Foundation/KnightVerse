@@ -74,7 +74,9 @@ pub enum BracketError {
 impl std::fmt::Display for BracketError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotEnoughPlayers => write!(f, "At least 2 players are required to start a tournament"),
+            Self::NotEnoughPlayers => {
+                write!(f, "At least 2 players are required to start a tournament")
+            }
             Self::TournamentAlreadyStarted => write!(f, "Tournament has already started"),
             Self::TournamentNotStarted => write!(f, "Tournament has not started yet"),
             Self::MatchNotFound => write!(f, "Match not found"),
@@ -176,7 +178,11 @@ impl BracketService {
         };
 
         {
-            let m = bracket.matches.iter_mut().find(|m| m.id == match_id).unwrap();
+            let m = bracket
+                .matches
+                .iter_mut()
+                .find(|m| m.id == match_id)
+                .unwrap();
             m.winner_id = Some(winner_id);
             m.status = MatchStatus::Completed;
             m.completed_at = Some(Utc::now());
@@ -186,7 +192,7 @@ impl BracketService {
             BracketFormat::SingleElimination | BracketFormat::DoubleElimination => {
                 let next_round = match_round + 1;
                 // Odd match_number feeds player1 slot; even feeds player2 slot
-                let next_match_number = (match_number + 1) / 2;
+                let next_match_number = match_number.div_ceil(2);
 
                 if let Some(next) = bracket
                     .matches
@@ -206,7 +212,11 @@ impl BracketService {
                 }
             }
             BracketFormat::RoundRobin => {
-                if bracket.matches.iter().all(|m| m.status == MatchStatus::Completed) {
+                if bracket
+                    .matches
+                    .iter()
+                    .all(|m| m.status == MatchStatus::Completed)
+                {
                     bracket.winner_id = determine_round_robin_winner(bracket);
                     bracket.status = TournamentStatus::Completed;
                     bracket.completed_at = Some(Utc::now());
@@ -232,7 +242,11 @@ impl BracketService {
 }
 
 fn next_power_of_two(n: u32) -> u32 {
-    if n.is_power_of_two() { n } else { n.next_power_of_two() }
+    if n.is_power_of_two() {
+        n
+    } else {
+        n.next_power_of_two()
+    }
 }
 
 fn generate_single_elimination_matches(
@@ -250,7 +264,13 @@ fn generate_single_elimination_matches(
 
         let (p1_id, p2_id, status, winner_id, completed_at) = match (p1, p2) {
             // Bye: top seed advances automatically
-            (Some(id), None) => (Some(id), None, MatchStatus::Completed, Some(id), Some(Utc::now())),
+            (Some(id), None) => (
+                Some(id),
+                None,
+                MatchStatus::Completed,
+                Some(id),
+                Some(Utc::now()),
+            ),
             (Some(id1), Some(id2)) => (Some(id1), Some(id2), MatchStatus::Pending, None, None),
             _ => (None, None, MatchStatus::Pending, None, None),
         };
@@ -400,7 +420,12 @@ mod tests {
         .unwrap();
 
         BracketService::start_tournament(&mut bracket).unwrap();
-        let m = bracket.matches.iter().find(|m| m.round == 1).unwrap().clone();
+        let m = bracket
+            .matches
+            .iter()
+            .find(|m| m.round == 1)
+            .unwrap()
+            .clone();
         let winner = m.player1_id.unwrap();
 
         BracketService::record_result(&mut bracket, m.id, winner).unwrap();
@@ -421,16 +446,42 @@ mod tests {
 
         BracketService::start_tournament(&mut bracket).unwrap();
 
-        let r1: Vec<_> = bracket.matches.iter().filter(|m| m.round == 1).map(|m| m.id).collect();
+        let r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1)
+            .map(|m| m.id)
+            .collect();
         for id in r1 {
-            let winner = bracket.matches.iter().find(|m| m.id == id).unwrap().player1_id.unwrap();
+            let winner = bracket
+                .matches
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .player1_id
+                .unwrap();
             BracketService::record_result(&mut bracket, id, winner).unwrap();
         }
-        assert_eq!(bracket.status, TournamentStatus::InProgress, "Should still be in progress after round 1");
+        assert_eq!(
+            bracket.status,
+            TournamentStatus::InProgress,
+            "Should still be in progress after round 1"
+        );
 
-        let r2: Vec<_> = bracket.matches.iter().filter(|m| m.round == 2).map(|m| m.id).collect();
+        let r2: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 2)
+            .map(|m| m.id)
+            .collect();
         for id in r2 {
-            let winner = bracket.matches.iter().find(|m| m.id == id).unwrap().player1_id.unwrap();
+            let winner = bracket
+                .matches
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .player1_id
+                .unwrap();
             BracketService::record_result(&mut bracket, id, winner).unwrap();
         }
         assert_eq!(bracket.status, TournamentStatus::Completed);
@@ -447,8 +498,8 @@ mod tests {
         .unwrap();
 
         let m = bracket.matches[0].clone();
-        let err = BracketService::record_result(&mut bracket, m.id, m.player1_id.unwrap())
-            .unwrap_err();
+        let err =
+            BracketService::record_result(&mut bracket, m.id, m.player1_id.unwrap()).unwrap_err();
         assert_eq!(err, BracketError::TournamentNotStarted);
     }
 
@@ -519,7 +570,10 @@ mod tests {
             .filter(|m| m.round == 1 && m.status == MatchStatus::Completed)
             .collect();
         assert_eq!(byes.len(), 1, "Exactly one bye for 3-player bracket");
-        assert!(byes[0].winner_id.is_some(), "Bye match should have a winner set");
+        assert!(
+            byes[0].winner_id.is_some(),
+            "Bye match should have a winner set"
+        );
     }
 
     #[test]
@@ -549,7 +603,13 @@ mod tests {
 
         let ids: Vec<_> = bracket.matches.iter().map(|m| m.id).collect();
         for id in ids {
-            let winner = bracket.matches.iter().find(|m| m.id == id).unwrap().player1_id.unwrap();
+            let winner = bracket
+                .matches
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .player1_id
+                .unwrap();
             BracketService::record_result(&mut bracket, id, winner).unwrap();
         }
 
@@ -572,7 +632,13 @@ mod tests {
         // Player at index 0 (highest ELO) wins all their matches
         let ids: Vec<_> = bracket.matches.iter().map(|m| m.id).collect();
         for id in ids {
-            let winner = bracket.matches.iter().find(|m| m.id == id).unwrap().player1_id.unwrap();
+            let winner = bracket
+                .matches
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .player1_id
+                .unwrap();
             BracketService::record_result(&mut bracket, id, winner).unwrap();
         }
 

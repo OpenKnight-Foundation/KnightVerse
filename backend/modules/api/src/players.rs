@@ -1,15 +1,11 @@
 use actix_web::{
-    HttpResponse, delete, get, post, put,
+    delete, get, post, put,
     web::{Json, Path},
+    HttpMessage, HttpRequest, HttpResponse,
 };
-use dto::{
-    players::{DisplayPlayer, NewPlayer, UpdatePlayer, UpdatedPlayer},
-    responses::{
-        InvalidCredentialsResponse, NotFoundResponse, PlayerAdded, PlayerDeleted, PlayerFound,
-        PlayerUpdated,
-    },
-};
+use dto::players::{DisplayPlayer, NewPlayer, UpdatePlayer, UpdatedPlayer};
 use error::error::ApiError;
+use security::jwt::Claims;
 use serde_json::json;
 use validator::Validate;
 
@@ -49,7 +45,7 @@ pub async fn add_player(payload: Json<NewPlayer>) -> HttpResponse {
     get,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player found", body=PlayerFound),
@@ -75,7 +71,7 @@ pub async fn find_player_by_id(id: Path<Uuid>) -> HttpResponse {
     put,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player updated", body=PlayerUpdated),
@@ -83,10 +79,29 @@ pub async fn find_player_by_id(id: Path<Uuid>) -> HttpResponse {
     )
 )]
 #[put("/{id}")]
-pub async fn update_player(id: Path<Uuid>, payload: Json<UpdatePlayer>) -> HttpResponse {
+pub async fn update_player(
+    req: HttpRequest,
+    id: Path<Uuid>,
+    payload: Json<UpdatePlayer>,
+) -> HttpResponse {
+    let path_uuid = id.into_inner();
+
+    // IDOR check: the authenticated caller must own this profile.
+    if let Some(claims) = req.extensions().get::<Claims>() {
+        if claims.player_id != path_uuid {
+            return HttpResponse::Forbidden().json(json!({
+                "message": "You are not authorized to modify this profile"
+            }));
+        }
+    } else {
+        return HttpResponse::Unauthorized().json(json!({
+            "message": "Authentication required"
+        }));
+    }
+
     match payload.0.validate() {
         Ok(_) => {
-            let player = update_player_by_id(id.into_inner(), payload.0).await;
+            let player = update_player_by_id(path_uuid, payload.0).await;
 
             match player {
                 Ok(plyr) => HttpResponse::Ok().json(json!({
@@ -106,7 +121,7 @@ pub async fn update_player(id: Path<Uuid>, payload: Json<UpdatePlayer>) -> HttpR
     delete,
     path = "/v1/players/{id}",
     params(
-        ("id" = String, Path, description = "Player ID in UUID format", format="uuid")
+        ("id" = Uuid, Path, description = "Player ID in UUID format", format="uuid")
     ),
     responses(
         (status = 200, description = "Player deleted", body=PlayerDeleted),
@@ -114,8 +129,23 @@ pub async fn update_player(id: Path<Uuid>, payload: Json<UpdatePlayer>) -> HttpR
     )
 )]
 #[delete("/{id}")]
-pub async fn delete_player(id: Path<Uuid>) -> HttpResponse {
-    match delete_player_by_id(id.into_inner()).await {
+pub async fn delete_player(req: HttpRequest, id: Path<Uuid>) -> HttpResponse {
+    let path_uuid = id.into_inner();
+
+    // IDOR check: the authenticated caller must own this profile.
+    if let Some(claims) = req.extensions().get::<Claims>() {
+        if claims.player_id != path_uuid {
+            return HttpResponse::Forbidden().json(json!({
+                "message": "You are not authorized to delete this profile"
+            }));
+        }
+    } else {
+        return HttpResponse::Unauthorized().json(json!({
+            "message": "Authentication required"
+        }));
+    }
+
+    match delete_player_by_id(path_uuid).await {
         Ok(_) => HttpResponse::Ok().json(json!({
             "message":"Player deleted",
             "data":{}

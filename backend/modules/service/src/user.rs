@@ -1,10 +1,9 @@
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ActiveValue,
-};
-use db_entity::user::{self, Entity as UserEntity};
+use crate::helper::password;
 use chrono::Utc;
-use bcrypt::{hash, verify, DEFAULT_COST};
-
+use db_entity::user;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
+};
 
 /// User service for authentication and user management
 pub struct UserService;
@@ -37,8 +36,7 @@ impl UserService {
             return Err(DbErr::Custom("Email already exists".to_string()));
         }
 
-        // Hash password
-        let password_hash = hash(password, DEFAULT_COST)
+        let password_hash = password::hash_password(password)
             .map_err(|_| DbErr::Custom("Failed to hash password".to_string()))?;
 
         let now = Utc::now();
@@ -70,16 +68,9 @@ impl UserService {
 
         match user {
             Some(user_model) => {
-                // Verify password
-                match verify(password, &user_model.password_hash) {
-                    Ok(is_valid) => {
-                        if is_valid {
-                            Ok(user_model)
-                        } else {
-                            Err(DbErr::Custom("Invalid password".to_string()))
-                        }
-                    }
-                    Err(_) => Err(DbErr::Custom("Authentication failed".to_string())),
+                match password::verify_password(password, &user_model.password_hash) {
+                    Ok(()) => Ok(user_model),
+                    Err(_) => Err(DbErr::Custom("Invalid password".to_string())),
                 }
             }
             None => Err(DbErr::Custom("User not found".to_string())),
@@ -87,7 +78,10 @@ impl UserService {
     }
 
     /// Get user by ID
-    pub async fn get_by_id(db: &DatabaseConnection, user_id: i32) -> Result<Option<user::Model>, DbErr> {
+    pub async fn get_by_id(
+        db: &DatabaseConnection,
+        user_id: i32,
+    ) -> Result<Option<user::Model>, DbErr> {
         user::Entity::find_by_id(user_id).one(db).await
     }
 
@@ -103,7 +97,10 @@ impl UserService {
     }
 
     /// Get user by email
-    pub async fn get_by_email(db: &DatabaseConnection, email: &str) -> Result<Option<user::Model>, DbErr> {
+    pub async fn get_by_email(
+        db: &DatabaseConnection,
+        email: &str,
+    ) -> Result<Option<user::Model>, DbErr> {
         user::Entity::find()
             .filter(user::Column::Email.eq(email))
             .one(db)

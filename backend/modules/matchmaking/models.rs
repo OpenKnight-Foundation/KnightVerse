@@ -1,8 +1,7 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchType {
@@ -21,6 +20,32 @@ impl MatchType {
     }
 }
 
+/// Time control selected by the player (maps to frontend variant IDs).
+/// Serialized as a simple string, e.g. "10+0", "5+0", "3+0", "1+0".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeControl(pub String);
+
+impl TimeControl {
+    /// Return the initial time in seconds for this time control.
+    pub fn initial_seconds(&self) -> u64 {
+        match self.0.as_str() {
+            "bullet" => 60,
+            "blitz" => 180,
+            "rapid" => 480,
+            _ => 600,
+        }
+    }
+
+    pub fn increment_seconds(&self) -> u64 {
+        0
+    }
+}
+
+impl Default for TimeControl {
+    fn default() -> Self {
+        TimeControl("standard".to_string())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Player {
@@ -36,6 +61,8 @@ pub struct MatchRequest {
     pub match_type: MatchType,
     pub invite_address: Option<String>,
     pub max_elo_diff: Option<u32>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 impl MatchRequest {
@@ -48,7 +75,6 @@ impl MatchRequest {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     pub id: Uuid,
@@ -56,6 +82,8 @@ pub struct Match {
     pub player2: Player,
     pub match_type: MatchType,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +126,7 @@ mod tests {
             match_type: MatchType::Rated,
             invite_address: None,
             max_elo_diff: Some(100),
+            time_control: TimeControl::default(),
         };
 
         let json = req.to_redis_value().expect("Should serialize");
@@ -119,6 +148,7 @@ mod tests {
             match_type: MatchType::Private,
             invite_address: Some("GINVITEE123".to_string()),
             max_elo_diff: None,
+            time_control: TimeControl::default(),
         };
 
         let json = req.to_redis_value().expect("Should serialize");
@@ -139,6 +169,7 @@ mod tests {
             match_type: MatchType::Casual,
             invite_address: None,
             max_elo_diff: None,
+            time_control: TimeControl::default(),
         };
 
         let json = req.to_redis_value().expect("Should serialize");

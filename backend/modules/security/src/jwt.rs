@@ -1,14 +1,14 @@
 use actix_web::{
+    body::{BoxBody, MessageBody},
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
     error::{Error, ErrorUnauthorized},
-    body::{BoxBody, MessageBody},
     HttpMessage,
 };
 use futures_util::future::{ok, LocalBoxFuture, Ready};
-use std::task::{Context, Poll};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -46,7 +46,7 @@ pub enum TokenType {
 #[derive(Clone, Debug)]
 pub struct JwtService {
     pub secret_key: String,
-    expiration_time: usize, // in seconds
+    expiration_time: usize,           // in seconds
     reconnect_expiration_time: usize, // in seconds (shorter for reconnect tokens)
 }
 
@@ -60,8 +60,57 @@ impl JwtService {
         }
     }
 
+    /// Create a JWT service from environment variables.
+    ///
+    /// Requires `JWT_SECRET` (preferred) or `JWT_SECRET_KEY`. The process will
+    /// panic on startup if neither is set — no hardcoded fallback is allowed.
+    /// Optional: `JWT_EXPIRATION_SECS` (default 3600).
+    pub fn from_env() -> Self {
+        let secret_key = std::env::var("JWT_SECRET")
+            .or_else(|_| std::env::var("JWT_SECRET_KEY"))
+            .expect(
+                "JWT_SECRET (or JWT_SECRET_KEY) must be set. Refusing to start with a hardcoded fallback secret.",
+            );
+
+        if secret_key.trim().is_empty() {
+            panic!("JWT_SECRET must not be empty");
+        }
+
+        // Reject well-known insecure defaults that might still be in .env templates
+        const INSECURE_DEFAULTS: &[&str] = &[
+            "knightverse_dev_secret_key_change_in_production",
+            "xlmate_super_secret_jwt_key_change_in_production",
+            "your_secret_key_here",
+            "your_secret_key_change_this_in_production",
+            "change_me",
+            "secret",
+        ];
+        if INSECURE_DEFAULTS.iter().any(|d| secret_key == *d) {
+            panic!(
+                "JWT_SECRET appears to be an insecure default value. Set a strong, unique secret before starting the server."
+            );
+        }
+
+        let expiration_time = std::env::var("JWT_EXPIRATION_SECS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(3600);
+
+        Self::new(secret_key, expiration_time)
+    }
+
+    /// Token expiration time in seconds
+    pub fn expiration_time(&self) -> usize {
+        self.expiration_time
+    }
+
     /// Generate a new JWT access token for a user
-    pub fn generate_token(&self, user_id: i32, username: &str, player_id: Uuid) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_token(
+        &self,
+        user_id: i32,
+        username: &str,
+        player_id: Uuid,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -88,7 +137,13 @@ impl JwtService {
     }
 
     /// Generate a reconnection token for seamless WebSocket reconnection
-    pub fn generate_reconnect_token(&self, user_id: i32, username: &str, player_id: Uuid, session_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    pub fn generate_reconnect_token(
+        &self,
+        user_id: i32,
+        username: &str,
+        player_id: Uuid,
+        session_id: &str,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -127,11 +182,7 @@ impl JwtService {
 
     /// Extract token from Authorization header
     pub fn extract_token_from_header(auth_header: &str) -> Option<String> {
-        if auth_header.starts_with("Bearer ") {
-            Some(auth_header[7..].to_string())
-        } else {
-            None
-        }
+        auth_header.strip_prefix("Bearer ").map(|s| s.to_string())
     }
 }
 
@@ -219,28 +270,22 @@ where
                             // Store claims in request extensions
                             req.extensions_mut().insert(claims);
                             let fut = self.service.call(req);
-                            Box::pin(async move { 
+                            Box::pin(async move {
                                 let res = fut.await?;
                                 Ok(res.map_into_boxed_body())
                             })
                         }
                         Err(_) => {
-                            Box::pin(async move {
-                                Err(ErrorUnauthorized("Invalid or expired token"))
-                            })
+                            Box::pin(
+                                async move { Err(ErrorUnauthorized("Invalid or expired token")) },
+                            )
                         }
                     }
                 } else {
-                    Box::pin(async move {
-                        Err(ErrorUnauthorized("Invalid authorization format"))
-                    })
+                    Box::pin(async move { Err(ErrorUnauthorized("Invalid authorization format")) })
                 }
             }
-            None => {
-                Box::pin(async move {
-                    Err(ErrorUnauthorized("Missing authorization header"))
-                })
-            }
+            None => Box::pin(async move { Err(ErrorUnauthorized("Missing authorization header")) }),
         }
     }
 }

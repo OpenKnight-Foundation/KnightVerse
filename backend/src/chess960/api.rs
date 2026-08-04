@@ -1,10 +1,10 @@
+use super::generator::Chess960Generator;
+use super::models::{Chess960Library, Chess960Position};
 use actix_web::{web, HttpResponse, Result};
-use serde::{Deserialize, Serialize};
- use std::sync::Arc;
 use lazy_static::lazy_static;
 use rand::Rng;
- use super::models::{Chess960Library, Chess960Position};
- use super::generator::Chess960Generator;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 lazy_static::lazy_static! {
     static ref CHESS960_LIBRARY: Arc<Chess960Library> = {
@@ -39,7 +39,7 @@ pub struct StatsResponse {
 
 pub async fn get_position(query: web::Query<PositionQuery>) -> Result<HttpResponse> {
     let library = &*CHESS960_LIBRARY;
-    
+
     let position = if query.random.unwrap_or(false) {
         // Get random position
         let mut rng = rand::thread_rng();
@@ -72,7 +72,7 @@ pub async fn get_position(query: web::Query<PositionQuery>) -> Result<HttpRespon
 pub async fn get_fen(path: web::Path<u16>) -> Result<HttpResponse> {
     let number = path.into_inner();
     let library = &*CHESS960_LIBRARY;
-    
+
     match library.positions.get(&number) {
         Some(position) => Ok(HttpResponse::Ok().json(ApiResponse {
             success: true,
@@ -88,16 +88,18 @@ pub async fn get_fen(path: web::Path<u16>) -> Result<HttpResponse> {
 }
 lazy_static! {
     static ref CHESS960_FENS: std::collections::HashSet<String> = {
-        CHESS960_LIBRARY.positions.values()
+        CHESS960_LIBRARY
+            .positions
+            .values()
             .map(|pos| pos.fen.clone())
             .collect()
     };
 }
 
- pub async fn verify_fen(req: web::Json<FenVerifyRequest>) -> Result<HttpResponse> {
+pub async fn verify_fen(req: web::Json<FenVerifyRequest>) -> Result<HttpResponse> {
     let is_valid = CHESS960_FENS.contains(&req.fen);
-     
-     Ok(HttpResponse::Ok().json(ApiResponse {
+
+    Ok(HttpResponse::Ok().json(ApiResponse {
         success: true,
         data: Some(is_valid),
         message: if is_valid {
@@ -109,34 +111,34 @@ lazy_static! {
 }
 lazy_static! {
     static ref KING_DISTRIBUTION: std::collections::HashMap<usize, u32> = {
-         let mut distribution = std::collections::HashMap::new();
-         for position in CHESS960_LIBRARY.positions.values() {
-             let count = distribution.entry(position.white_king_pos).or_insert(0);
-             *count += 1;
-         }
-         distribution
-     };
- }
+        let mut distribution = std::collections::HashMap::new();
+        for position in CHESS960_LIBRARY.positions.values() {
+            let count = distribution.entry(position.white_king_pos).or_insert(0);
+            *count += 1;
+        }
+        distribution
+    };
+}
 
 pub async fn get_stats() -> Result<HttpResponse> {
-     let library = &*CHESS960_LIBRARY;
-     
-     let stats = StatsResponse {
-         total_positions: library.total_positions,
-         king_distribution: KING_DISTRIBUTION.clone(),
-         version: library.metadata.version.clone(),
-     };
-     
-     Ok(HttpResponse::Ok().json(ApiResponse {
-         success: true,
-         data: Some(stats),
-         message: "Statistics retrieved successfully".to_string(),
-     }))
- }
+    let library = &*CHESS960_LIBRARY;
+
+    let stats = StatsResponse {
+        total_positions: library.total_positions,
+        king_distribution: KING_DISTRIBUTION.clone(),
+        version: library.metadata.version.clone(),
+    };
+
+    Ok(HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        data: Some(stats),
+        message: "Statistics retrieved successfully".to_string(),
+    }))
+}
 
 pub async fn export_json() -> Result<HttpResponse> {
     let library = &*CHESS960_LIBRARY;
-    
+
     match serde_json::to_string_pretty(&**library) {
         Ok(json) => Ok(HttpResponse::Ok()
             .content_type("application/json")
@@ -156,6 +158,6 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/fen/{number}", web::get().to(get_fen))
             .route("/verify", web::post().to(verify_fen))
             .route("/stats", web::get().to(get_stats))
-            .route("/export", web::get().to(export_json))
+            .route("/export", web::get().to(export_json)),
     );
 }

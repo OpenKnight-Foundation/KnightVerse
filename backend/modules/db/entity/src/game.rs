@@ -35,7 +35,6 @@ pub enum GameVariant {
     Classical,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, DeriveEntityModel)]
-
 #[sea_orm(table_name = "game", schema_name = "smdb")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

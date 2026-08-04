@@ -1,6 +1,7 @@
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 use uuid::Uuid;
 
 use super::models::*;
@@ -13,6 +14,8 @@ pub struct JoinQueueRequest {
     pub match_type: MatchType,
     pub invite_address: Option<String>,
     pub max_elo_diff: Option<u32>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,12 +71,13 @@ async fn join_queue(
         match_type: req.match_type.clone(),
         invite_address: req.invite_address.clone(),
         max_elo_diff: req.max_elo_diff,
+        time_control: req.time_control.clone(),
     };
 
     match service.join_queue(match_request).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => {
-            log::error!("Failed to join queue: {}", e);
+            error!("Failed to join queue: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -98,7 +102,7 @@ async fn get_status(
             queue_status: None,
         }),
         Err(e) => {
-            log::error!("Failed to get queue status: {}", e);
+            error!("Failed to get queue status: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -119,7 +123,7 @@ async fn cancel_request(
             "status": "Request not found"
         })),
         Err(e) => {
-            log::error!("Failed to cancel request: {}", e);
+            error!("Failed to cancel request: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),
@@ -138,13 +142,16 @@ async fn accept_invite(
         join_time: Utc::now(),
     };
 
-    match service.accept_private_invite(req.inviter_request_id, player).await {
+    match service
+        .accept_private_invite(req.inviter_request_id, player)
+        .await
+    {
         Ok(Some(response)) => HttpResponse::Ok().json(response),
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
             "status": "Invite not found"
         })),
         Err(e) => {
-            log::error!("Failed to accept invite: {}", e);
+            error!("Failed to accept invite: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),

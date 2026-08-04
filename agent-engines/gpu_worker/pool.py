@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import prometheus_client
+from prometheus_client import Counter, Gauge
+
+# Prometheus Metrics for AI Worker Pool
+WORKER_COUNT = Gauge('ai_worker_pool_size', 'Number of active AI workers in the pool')
+JOBS_PROCESSED = Counter('ai_worker_jobs_processed_total', 'Total number of jobs processed by the AI worker pool')
+
 import asyncio
+import logging
 from collections.abc import Callable
 
 from gpu_worker.anomaly import BotFarmAnomalyDetector
+from gpu_worker.anomaly_logger import log_anomaly_report
 from gpu_worker.config import WorkerConfig
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo
 from gpu_worker.worker import GPUAnalysisWorker
 from gpu_worker.opening_book import OpeningBook
 from gpu_worker.maia_worker import MaiaWorker
 from gpu_worker.maia_config import MaiaConfig
+
+logger = logging.getLogger("KnightVerse.WorkerPool")
 
 
 class WorkerPool:
@@ -54,7 +65,9 @@ class WorkerPool:
 
         if not self._started:
             raise RuntimeError("worker pool has not been started")
-        self.anomaly_detector.record_request(request)
+        anomaly_report = self.anomaly_detector.record_request(request)
+        if anomaly_report.findings:
+            log_anomaly_report(anomaly_report)
 
         # Check if the request is for a Maia personality.
         if request.actor_id and request.actor_id.startswith("maia-"):
@@ -87,8 +100,31 @@ class WorkerPool:
         tasks = [self.submit(request) for request in requests]
         return await asyncio.gather(*tasks)
 
-    async def shutdown_all(self) -> None:
-        """Gracefully shut down all workers."""
+    async def wait_for_pending_tasks(self, timeout: float | None = None) -> None:
+        """Wait for all pending tasks to complete before shutting down."""
+        async with self._condition:
+            # Wait until all pending tasks are completed
+            await asyncio.wait_for(
+                self._condition.wait_for(
+                    lambda: all(r == 0 for r in self._reservations) and 
+                            all(r == 0 for r in self._maia_reservations)
+                ),
+                timeout=timeout
+            )
+            logger.info("All pending analysis tasks completed")
+
+    async def shutdown_all(self, wait_for_pending: bool = True, timeout: float | None = 30) -> None:
+        """Gracefully shut down all workers.
+        
+        Args:
+            wait_for_pending: Whether to wait for pending tasks to complete before shutdown
+            timeout: Maximum time to wait for pending tasks in seconds
+        """
+        if wait_for_pending:
+            try:
+                await self.wait_for_pending_tasks(timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"Timed out waiting for {sum(self._reservations)} standard and {sum(self._maia_reservations)} Maia pending tasks to complete, proceeding with shutdown")
 
         await asyncio.gather(*(worker.shutdown() for worker in self._workers))
         await asyncio.gather(*(worker.shutdown() for worker in self._maia_workers))

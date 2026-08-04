@@ -1,499 +1,60 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React from "react";
 import dynamic from "next/dynamic";
-import { Chess } from "chess.js";
-import { useParams, useRouter } from "next/navigation";
-import { useChessSocket } from "@/hook/useChessSocket";
-import { FaUser, FaClock, FaSignal } from "react-icons/fa";
-import { Web3StatusBar } from "@/components/Web3StatusBar";
-import { useCheatDetection } from "@/hook/useCheatDetection";
-import { GameResultOverlay } from "@/components/GameResultOverlay";
-import type { GameResult } from "@/components/GameResultOverlay";
-import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
-import { useIsMobile } from "@/hook/use-mobile";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-const ChessboardComponent = dynamic(
-  () => import("@/components/chess/ChessboardComponent"),
+const PlayGameEngine = dynamic(
+  () => import("@/components/chess/PlayGameEngine"),
   {
     ssr: false,
     loading: () => (
-      <div className="w-full max-w-[560px] min-w-[320px] aspect-square rounded-md border-2 border-gray-700/50 p-1">
-        <div className="grid grid-cols-8 grid-rows-8 gap-0 w-full h-full">
-          {Array.from({ length: 64 }).map((_, i) => (
-            <div
-              key={i}
-              className={`${
-                (Math.floor(i / 8) + (i % 8)) % 2 === 0
-                  ? "bg-gray-700/30"
-                  : "bg-gray-600/20"
-              } rounded-sm shimmer-bg`}
-            />
-          ))}
+      <div className="min-h-screen p-4 md:p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <div className="h-5 w-32 bg-gray-700/50 rounded animate-pulse" />
+            <div className="h-8 w-48 bg-gray-700/50 rounded-lg animate-pulse" />
+          </div>
+          <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
+            <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-red-600 animate-pulse" />
+                  <div className="space-y-1">
+                    <div className="h-4 w-20 bg-gray-700/50 rounded animate-pulse" />
+                    <div className="h-3 w-12 bg-gray-700/50 rounded animate-pulse" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-700/30">
+                  <div className="h-4 w-12 bg-gray-700/50 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="w-full max-w-[560px] min-w-[320px] aspect-square rounded-md border-2 border-gray-700/50 p-1">
+                <div className="grid grid-cols-8 grid-rows-8 gap-0 w-full h-full">
+                  {Array.from({ length: 64 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`${
+                        (Math.floor(i / 8) + (i % 8)) % 2 === 0
+                          ? "bg-gray-700/30"
+                          : "bg-gray-600/20"
+                      } rounded-sm shimmer-bg`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="w-full lg:w-80 space-y-4">
+              <div className="h-32 rounded-xl border border-gray-700/50 bg-gray-800/40 animate-pulse" />
+              <div className="h-48 rounded-xl border border-gray-700/50 bg-gray-800/40 animate-pulse" />
+              <div className="h-40 rounded-xl border border-gray-700/50 bg-gray-800/40 animate-pulse" />
+            </div>
+          </div>
         </div>
       </div>
     ),
   },
 );
 
-type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
-
 export default function PlayOnlinePage() {
-  const params = useParams();
-  const router = useRouter();
-  const gameId = params.slug as string;
-
-  const [game] = useState(new Chess());
-  const [position, setPosition] = useState("start");
-  const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [whiteTime, setWhiteTime] = useState(600); // 10 min in seconds
-  const [blackTime, setBlackTime] = useState(600);
-  const [playerColor] = useState<"white" | "black">("white");
-  const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
-  const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
-  const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
-  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
-  const isMobile = useIsMobile();
-
-  const handleFlipBoard = useCallback(() => {
-    setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
-  }, []);
-
-  const {
-    status: socketStatus,
-    sendMove,
-    disconnect,
-    reconnect,
-    lastOpponentMove,
-  } = useChessSocket(gameId);
-
-  const checkGameStatus = useCallback(() => {
-    if (game.isCheckmate()) {
-      setGameStatus("checkmate");
-    } else if (game.isStalemate()) {
-      setGameStatus("stalemate");
-    } else if (game.isDraw()) {
-      setGameStatus("draw");
-    }
-  }, [game]);
-
-  // ── FE-04: Countdown clocks ───────────────────────────────────────────────
-  // Tick the active side's clock down by 1 second every second while the game
-  // is live. The interval is cleared the moment the game ends.
-  useEffect(() => {
-    if (socketStatus !== "connected" || gameStatus !== "playing") return;
-
-    const id = setInterval(() => {
-      const activeColor = game.turn(); // "w" | "b"
-      if (activeColor === "w") {
-        setWhiteTime((t) => Math.max(0, t - 1));
-      } else {
-        setBlackTime((t) => Math.max(0, t - 1));
-      }
-    }, 1000);
-
-    return () => clearInterval(id);
-  }, [socketStatus, gameStatus, game]);
-
-  // Sync clocks from authoritative server clock messages.
-  // The socket emits { type: "clock", whiteTime: number, blackTime: number }
-  // after each move so both sides stay in sync.
-  useEffect(() => {
-    // useChessSocket only exposes lastOpponentMove; clock data arrives via the
-    // raw WebSocket.  We listen for a "clock" message relayed through a custom
-    // DOM event dispatched by a thin shim (or we handle it here directly).
-    // For now we seed from lastOpponentMove's accompanying clock field when
-    // the server includes it.
-    if (!lastOpponentMove) return;
-    const raw = lastOpponentMove as typeof lastOpponentMove & {
-      whiteTime?: number;
-      blackTime?: number;
-    };
-    if (typeof raw.whiteTime === "number") setWhiteTime(raw.whiteTime);
-    if (typeof raw.blackTime === "number") setBlackTime(raw.blackTime);
-  }, [lastOpponentMove]);
-
-  // Cheat detection
-  const {
-    opponentAnalysis,
-    playerAnalysis,
-    recordMove: recordCheatMove,
-    reset: resetCheatDetection,
-    isActive: isCheatDetectionActive,
-  } = useCheatDetection(playerColor);
-
-  // Apply opponent's move to local chess state
-  useEffect(() => {
-    if (!lastOpponentMove) return;
-    try {
-      const fenBeforeOpponentMove = game.fen();
-      const move = game.move({
-        from: lastOpponentMove.from,
-        to: lastOpponentMove.to,
-        promotion: lastOpponentMove.promotion ?? "q",
-      });
-      if (move) {
-        setPosition(game.fen());
-        setMoveHistory((prev: string[]) => [...prev, move.san]);
-        recordCheatMove(
-          move.san,
-          move,
-          fenBeforeOpponentMove,
-          playerColor === "white" ? "b" : "w",
-          Math.ceil(game.moveNumber() / 2),
-        );
-        checkGameStatus();
-      }
-    } catch {
-      // illegal move from server — ignore
-    }
-  }, [lastOpponentMove, game, checkGameStatus, recordCheatMove, playerColor]);
-
-  const isMyTurn =
-    socketStatus === "connected" &&
-    ((playerColor === "white" && game.turn() === "w") ||
-      (playerColor === "black" && game.turn() === "b"));
-
-  const handleMove = useCallback(
-    ({
-      sourceSquare,
-      targetSquare,
-    }: {
-      sourceSquare: string;
-      targetSquare: string;
-    }) => {
-      if (!isMyTurn || gameStatus !== "playing") return false;
-
-      try {
-        const fenBeforeMyMove = game.fen();
-        const move = game.move({
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: "q",
-        });
-        if (move === null) return false;
-
-        requestAnimationFrame(() => setPosition(game.fen()));
-        setMoveHistory((prev: string[]) => [...prev, move.san]);
-        sendMove({ from: sourceSquare, to: targetSquare, promotion: "q" });
-        recordCheatMove(
-          move.san,
-          move,
-          fenBeforeMyMove,
-          playerColor === "white" ? "w" : "b",
-          Math.ceil(game.moveNumber() / 2),
-        );
-        checkGameStatus();
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor],
-  );
-
-  const handleResign = useCallback(() => {
-    setGameStatus("resigned");
-    resetCheatDetection();
-    disconnect();
-  }, [disconnect, resetCheatDetection]);
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const socketStatusLabel = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "Live";
-      case "connecting":
-        return "Connecting...";
-      case "reconnecting":
-        return "Reconnecting...";
-      case "disconnected":
-        return "Disconnected";
-      case "error":
-        return "Error";
-      default:
-        return "Idle";
-    }
-  };
-
-  const socketStatusColor = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "text-emerald-400";
-      case "connecting":
-      case "reconnecting":
-        return "text-yellow-400";
-      default:
-        return "text-red-400";
-    }
-  };
-
-  // Group moves into pairs for display
-  const movePairs = moveHistory.reduce(
-    (acc: string[][], move: string, i: number) => {
-      if (i % 2 === 0) acc.push([move]);
-      else acc[acc.length - 1].push(move);
-      return acc;
-    },
-    [],
-  );
-
-  let overlayResult: GameResult | null = null;
-  if (gameStatus === "checkmate") {
-    overlayResult = game.turn() === "b" ? "white_wins" : "black_wins";
-  } else if (gameStatus === "stalemate") {
-    overlayResult = "stalemate";
-  } else if (gameStatus === "draw") {
-    overlayResult = "draw";
-  }
-
-  return (
-    <div className="min-h-screen p-4 md:p-8" role="region" aria-label="Online Chess Game">
-      <div className="max-w-7xl mx-auto">
-        {/* Top bar */}
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => router.push("/")}
-            aria-label="Back to lobby"
-            className="text-gray-400 hover:text-white transition-colors text-sm flex items-center gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            Back to Lobby
-          </button>
-          <Web3StatusBar />
-        </div>
-
-        <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
-          {/* Chessboard Section */}
-          <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0" role="region" aria-label="Chess board">
-            {/* Opponent info bar */}
-            <div className="flex items-center justify-between mb-3 px-1" role="status" aria-label="Opponent info">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center">
-                  <FaUser className="text-white text-xs" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">Opponent</p>
-                  <p className="text-xs text-gray-400">
-                    {playerColor === "white" ? "Black" : "White"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-700/30">
-                <FaClock className="text-gray-400 text-xs" />
-                <span className="font-mono text-sm text-gray-200">
-                  {formatTime(playerColor === "white" ? blackTime : whiteTime)}
-                </span>
-              </div>
-            </div>
-
-            {/* Board */}
-            <div className="w-full min-w-[320px]">
-              <ErrorBoundary componentName="Chessboard">
-                <ChessboardComponent
-                  position={position}
-                  onDrop={handleMove}
-                  orientation={boardOrientation}
-                />
-              </ErrorBoundary>
-            </div>
-
-            {/* Player info bar */}
-            <div className="flex items-center justify-between mt-3 px-1" role="status" aria-label="Your info">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-blue-600 flex items-center justify-center">
-                  <FaUser className="text-white text-xs" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">You</p>
-                  <p className="text-xs text-gray-400 capitalize">
-                    {playerColor}
-                    {isMyTurn && (
-                      <span className="ml-2 text-emerald-400">
-                        (Your turn)
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-700/30">
-                <FaClock className="text-gray-400 text-xs" />
-                <span className="font-mono text-sm text-gray-200">
-                  {formatTime(playerColor === "white" ? whiteTime : blackTime)}
-                </span>
-              </div>
-            </div>
-
-            {/* Mobile controls — visible only on mobile, directly below board */}
-            <div className="flex items-center gap-2 mt-3 lg:hidden">
-              <button
-                onClick={handleFlipBoard}
-                aria-label="Flip board orientation"
-                className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
-              >
-                Flip Board
-              </button>
-              <button
-                onClick={handleResign}
-                disabled={gameStatus !== "playing"}
-                aria-label="Resign game"
-                className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Resign
-              </button>
-              <div className="flex items-center gap-1.5 px-2 shrink-0">
-                <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                <span className={`text-xs ${socketStatusColor()}`}>
-                  {socketStatusLabel()}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Game Sidebar - Move History & Controls */}
-          <div className="w-full lg:w-80 space-y-4" role="complementary" aria-label="Game controls">
-            {/* Game Status Card */}
-            <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4 animate-fade-in">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-300">
-                  Game Status
-                </h3>
-                <div className="hidden lg:flex items-center gap-1.5">
-                  <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                  <span className={`text-xs ${socketStatusColor()}`}>
-                    {socketStatusLabel()}
-                  </span>
-                </div>
-              </div>
-
-              {gameStatus !== "playing" && (
-                <div className="p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 mb-3 animate-scale-in" role="alert" aria-live="assertive">
-                  <p className="text-sm font-bold text-yellow-400">
-                    {gameStatus === "checkmate" && "Checkmate!"}
-                    {gameStatus === "stalemate" && "Stalemate!"}
-                    {gameStatus === "draw" && "Draw!"}
-                    {gameStatus === "resigned" && "Resigned!"}
-                  </p>
-                </div>
-              )}
-
-              {game.isCheck() && gameStatus === "playing" && (
-                <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 mb-3 animate-scale-in" role="alert" aria-live="assertive">
-                  <p className="text-sm font-bold text-red-400">Check!</p>
-                </div>
-              )}
-
-              <div className="text-xs text-gray-500">
-                Game ID: {gameId?.slice(0, 12)}...
-              </div>
-            </div>
-
-            {/* Move History */}
-            <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4" role="region" aria-label="Move history">
-              <button
-                className="flex items-center justify-between w-full text-left"
-                onClick={() => isMobile && setIsMoveHistoryOpen((prev) => !prev)}
-                aria-expanded={isMobile ? isMoveHistoryOpen : true}
-              >
-                <h3 className="text-sm font-semibold text-gray-300">Moves</h3>
-                <span className="text-gray-500 text-xs lg:hidden">
-                  {isMoveHistoryOpen ? "▲" : "▼"}
-                </span>
-              </button>
-              <div className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}>
-                {movePairs.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">
-                    No moves yet.{" "}
-                    {isMyTurn ? "Your turn to move!" : "Waiting for opponent..."}
-                  </p>
-                ) : (
-                  movePairs.map((pair, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 py-1 px-2 rounded hover:bg-gray-700/30 text-sm"
-                    >
-                      <span className="text-gray-500 w-6 text-right text-xs">
-                        {i + 1}.
-                      </span>
-                      <span className="text-white font-mono text-xs w-16">
-                        {pair[0]}
-                      </span>
-                      <span className="text-gray-400 font-mono text-xs w-16">
-                        {pair[1] ?? ""}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Cheat Detection Panel */}
-            <CheatDetectionPanel
-              opponentAnalysis={opponentAnalysis}
-              playerAnalysis={playerAnalysis}
-              isActive={isCheatDetectionActive}
-              isExpanded={isCheatPanelExpanded}
-              onToggle={() => setIsCheatPanelExpanded((prev: boolean) => !prev)}
-            />
-
-            {/* Controls — desktop only, mobile controls are above the sidebar */}
-            <div className="hidden lg:flex gap-2">
-              <button
-                onClick={handleFlipBoard}
-                aria-label="Flip board orientation"
-                className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
-              >
-                Flip Board
-              </button>
-              <button
-                onClick={handleResign}
-                disabled={gameStatus !== "playing"}
-                aria-label="Resign game"
-                className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Resign
-              </button>
-            </div>
-
-            {/* Reconnection button */}
-            {socketStatus === "disconnected" && gameStatus === "playing" && (
-              <button
-                onClick={reconnect}
-                className="w-full py-2.5 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-sm font-medium transition-all duration-300 animate-fade-in"
-              >
-                Reconnect to Game
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {overlayResult && (
-        <GameResultOverlay
-          result={overlayResult}
-          onPlayAgain={() => router.push("/")}
-          onPlayOnline={() => router.push("/")}
-        />
-      )}
-    </div>
-  );
+  return <PlayGameEngine />;
 }

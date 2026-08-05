@@ -80,7 +80,7 @@ pub async fn create_game(
     get,
     path = "/v1/games/{id}",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     responses(
         (status = 200, description = "Game found",     body = GameDisplayDTO),
@@ -117,7 +117,7 @@ pub async fn get_game(id: Path<Uuid>, db: web::Data<DatabaseConnection>) -> Http
     put,
     path = "/v1/games/{id}/move",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = MakeMoveRequest,
     responses(
@@ -177,7 +177,7 @@ pub async fn make_move(
     path = "/v1/games",
     params(
         ("status"    = Option<String>, Query, description = "Filter by status (waiting, in_progress, completed, aborted)"),
-        ("player_id" = Option<String>, Query, description = "Filter by player UUID", format = "uuid"),
+        ("player_id" = Option<Uuid>, Query, description = "Filter by player UUID", format = "uuid"),
         ("page"      = Option<i32>,    Query, description = "Page number"),
         ("limit"     = Option<i32>,    Query, description = "Items per page")
     ),
@@ -203,8 +203,32 @@ pub async fn list_games(
     let limit = query.limit.unwrap_or(10);
     let cursor = query.cursor.clone();
 
-    match GameService::list_games(db.get_ref(), cursor, limit, query.player_id, status_enum).await {
-        Ok((games, next_cursor)) => {
+    // Compute offset from page (if page is provided and cursor is not)
+    let offset: Option<u64> = if cursor.is_none() {
+        query.page.map(|p| {
+            let page = if p < 1 {
+                tracing::warn!("Invalid page value {} — clamping to 1", p);
+                1
+            } else {
+                p as u64
+            };
+            (page - 1) * limit
+        })
+    } else {
+        None
+    };
+
+    match GameService::list_games(
+        db.get_ref(),
+        cursor,
+        offset,
+        limit,
+        query.player_id,
+        status_enum,
+    )
+    .await
+    {
+        Ok((games, next_cursor, total_count)) => {
             let game_dtos: Vec<serde_json::Value> = games
                 .into_iter()
                 .map(|g| {
@@ -230,6 +254,7 @@ pub async fn list_games(
                 "message": "Games found",
                 "data": {
                     "games":       game_dtos,
+                    "total_count": total_count,
                     "next_cursor": next_cursor,
                     "limit":       limit,
                 }
@@ -251,7 +276,7 @@ pub async fn list_games(
     post,
     path = "/v1/games/{id}/join",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = JoinGameRequest,
     responses(
@@ -277,6 +302,14 @@ pub async fn join_game(
         Ok(id) => id,
         Err(resp) => return resp,
     };
+
+    // Reject if the JWT does not carry a valid player identity.
+    if player_id.is_nil() {
+        return HttpResponse::Unauthorized().json(json!({
+            "message": "Player identity could not be resolved from token"
+        }));
+    }
+
     let game_id = id.into_inner();
 
     match GameService::join_game(db.get_ref(), game_id, player_id).await {
@@ -306,7 +339,7 @@ pub async fn join_game(
     delete,
     path = "/v1/games/{id}",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     responses(
         (status = 200, description = "Game abandoned successfully"),
@@ -449,7 +482,7 @@ pub async fn import_game(
     put,
     path = "/v1/games/{id}/complete",
     params(
-        ("id" = String, Path, description = "Game ID in UUID format", format = "uuid")
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid")
     ),
     request_body = CompleteGameRequest,
     responses(

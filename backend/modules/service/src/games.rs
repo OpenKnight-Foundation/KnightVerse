@@ -3,74 +3,325 @@ use chess::pgn::ValidatedGame;
 use chess::{RatingConfig, RatingService};
 use chrono::{DateTime, TimeZone, Utc};
 use db_entity::{game, prelude::Game};
-use dto::games::{CreateGameRequest, GameDisplayDTO, GameStatus, MakeMoveRequest};
+use dto::games::{
+    CreateGameRequest, GameDisplayDTO, GameResult, GameStatus, MakeMoveRequest,
+};
 use error::error::ApiError;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
-    Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use sea_orm::{Condition, DatabaseConnection};
 use uuid::Uuid;
 
+/// Starting FEN for a standard chess game.
+const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
 pub struct GameService;
 
+/// Nil UUID used as a placeholder when a game is waiting for a second player.
+const NIL_UUID: Uuid = Uuid::nil();
+
 impl GameService {
+    /// Create a new game and persist it in the database.
+    ///
+    /// The creator is assigned as the white player.  The black player slot is
+    /// initialised with a nil UUID until an opponent joins via [`join_game`].
     pub async fn create_game(
-        _db: &DatabaseConnection,
-        _creator_id: Uuid,
-        _request: CreateGameRequest,
+        db: &DatabaseConnection,
+        creator_id: Uuid,
+        request: CreateGameRequest,
     ) -> Result<GameDisplayDTO, ApiError> {
-        Err(ApiError::NotImplemented(
-            "create_game not yet implemented".to_string(),
-        ))
+        let now = Utc::now();
+        let game_id = Uuid::new_v4();
+
+        let now_fixed = now.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+        let active_model = game::ActiveModel {
+            id: Set(game_id),
+            white_player: Set(creator_id),
+            black_player: Set(NIL_UUID),
+            fen: Set(STARTING_FEN.to_string()),
+            pgn: Set(serde_json::json!([])),
+            result: Set(None),
+            variant: Set(db_entity::game::GameVariant::Standard),
+            started_at: Set(now_fixed),
+            duration_sec: Set(request.time_control),
+            created_at: Set(now_fixed),
+            updated_at: Set(now_fixed),
+            is_imported: Set(false),
+            original_pgn: Set(None),
+        };
+
+        let model = active_model.insert(db).await.map_err(ApiError::from)?;
+        Ok(Self::model_to_dto(model))
     }
 
+    /// Fetch a single game by its UUID.
     pub async fn get_game(
-        _db: &DatabaseConnection,
-        _game_id: Uuid,
+        db: &DatabaseConnection,
+        game_id: Uuid,
     ) -> Result<GameDisplayDTO, ApiError> {
-        Err(ApiError::NotFound("Game not found".to_string()))
+        let model = game::Entity::find_by_id(game_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        Ok(Self::model_to_dto(model))
     }
 
+    /// Record a move for the given game.
+    ///
+    /// Validates that the game is active, the caller is a participant, and it is
+    /// the caller's turn.  The move string is appended to the PGN move history
+    /// stored in the game's `pgn` JSON column.
     pub async fn make_move(
-        _db: &DatabaseConnection,
-        _game_id: Uuid,
-        _player_id: Uuid,
-        _move_request: MakeMoveRequest,
+        db: &DatabaseConnection,
+        game_id: Uuid,
+        player_id: Uuid,
+        move_request: MakeMoveRequest,
     ) -> Result<GameDisplayDTO, ApiError> {
-        Err(ApiError::NotImplemented(
-            "make_move not yet implemented".to_string(),
-        ))
+        let model = game::Entity::find_by_id(game_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        // Game must be in progress (black_player must have joined).
+        if model.black_player == NIL_UUID {
+            return Err(ApiError::BadRequest(
+                "Game has not started yet – waiting for opponent".to_string(),
+            ));
+        }
+
+        // Game must not be completed.
+        if model.result.is_some()
+            && model.result.as_ref() != Some(&db_entity::game::ResultSide::Ongoing)
+        {
+            return Err(ApiError::BadRequest(
+                "Game is already completed".to_string(),
+            ));
+        }
+
+        // Determine whose turn it is from the move count.
+        let moves: Vec<String> = model
+            .pgn
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let is_white_turn = moves.len() % 2 == 0;
+        let is_white = model.white_player == player_id;
+
+        if player_id != model.white_player && player_id != model.black_player {
+            return Err(ApiError::Forbidden(
+                "You are not a participant in this game".to_string(),
+            ));
+        }
+
+        if is_white != is_white_turn {
+            return Err(ApiError::Forbidden("It is not your turn".to_string()));
+        }
+
+        // Append the move to the PGN history.
+        let mut new_moves = moves;
+        new_moves.push(move_request.chess_move.clone());
+
+        let mut active: game::ActiveModel = model.into();
+        active.pgn = Set(serde_json::json!(new_moves));
+        active.updated_at = Set(Utc::now().into());
+
+        let updated = active.update(db).await.map_err(ApiError::from)?;
+        Ok(Self::model_to_dto(updated))
     }
 
+    /// Join an existing game as the black player.
+    ///
+    /// The game must exist, must not already be completed, and must not already
+    /// have a second player.
     pub async fn join_game(
-        _db: &DatabaseConnection,
-        _game_id: Uuid,
-        _player_id: Uuid,
+        db: &DatabaseConnection,
+        game_id: Uuid,
+        player_id: Uuid,
     ) -> Result<GameDisplayDTO, ApiError> {
-        Err(ApiError::NotImplemented(
-            "join_game not yet implemented".to_string(),
-        ))
+        let model = game::Entity::find_by_id(game_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        // Cannot join a completed game.
+        if model.result.is_some()
+            && model.result.as_ref() != Some(&db_entity::game::ResultSide::Ongoing)
+        {
+            return Err(ApiError::BadRequest(
+                "Game is already completed".to_string(),
+            ));
+        }
+
+        // Black slot must be empty.
+        if model.black_player != NIL_UUID {
+            return Err(ApiError::BadRequest(
+                "Game already has two players".to_string(),
+            ));
+        }
+
+        // Creator cannot join their own game twice.
+        if model.white_player == player_id {
+            return Err(ApiError::BadRequest(
+                "Cannot join your own game as opponent".to_string(),
+            ));
+        }
+
+        let mut active: game::ActiveModel = model.into();
+        active.black_player = Set(player_id);
+        active.result = Set(Some(db_entity::game::ResultSide::Ongoing));
+        active.started_at = Set(Utc::now().into());
+        active.updated_at = Set(Utc::now().into());
+
+        let updated = active.update(db).await.map_err(ApiError::from)?;
+        Ok(Self::model_to_dto(updated))
     }
 
+    /// Abandon (forfeit) a game.
+    ///
+    /// Only a participant may abandon a game.  The result is set to
+    /// [`ResultSide::Abandoned`].
     pub async fn abandon_game(
-        _db: &DatabaseConnection,
-        _game_id: Uuid,
-        _player_id: Uuid,
+        db: &DatabaseConnection,
+        game_id: Uuid,
+        player_id: Uuid,
     ) -> Result<GameDisplayDTO, ApiError> {
-        Err(ApiError::NotImplemented(
-            "abandon_game not yet implemented".to_string(),
-        ))
+        let model = game::Entity::find_by_id(game_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        if player_id != model.white_player && player_id != model.black_player {
+            return Err(ApiError::Forbidden(
+                "You are not a participant in this game".to_string(),
+            ));
+        }
+
+        // Already finished?
+        if model.result.is_some()
+            && model.result.as_ref() != Some(&db_entity::game::ResultSide::Ongoing)
+        {
+            return Err(ApiError::BadRequest(
+                "Game is already completed".to_string(),
+            ));
+        }
+
+        let mut active: game::ActiveModel = model.into();
+        active.result = Set(Some(db_entity::game::ResultSide::Abandoned));
+        active.updated_at = Set(Utc::now().into());
+
+        let updated = active.update(db).await.map_err(ApiError::from)?;
+        Ok(Self::model_to_dto(updated))
     }
 
     pub async fn import_game(
-        _db: &DatabaseConnection,
+        db: &DatabaseConnection,
         _importer_id: Uuid,
-        _request: &ValidatedGame,
+        request: &ValidatedGame,
     ) -> Result<Uuid, ApiError> {
-        Err(ApiError::NotImplemented(
-            "import_game not yet implemented".to_string(),
-        ))
+        let now = Utc::now();
+        let game_id = Uuid::new_v4();
+
+        // Collect moves from the validated game into a JSON array.
+        let moves: Vec<String> = request
+            .moves
+            .iter()
+            .map(|m| m.to_string())
+            .collect();
+
+        let result = match request.headers.result {
+            chess::PgnGameResult::WhiteWins => Some(db_entity::game::ResultSide::WhiteWins),
+            chess::PgnGameResult::BlackWins => Some(db_entity::game::ResultSide::BlackWins),
+            chess::PgnGameResult::Draw => Some(db_entity::game::ResultSide::Draw),
+            chess::PgnGameResult::Ongoing => None,
+        };
+
+        let now_fixed = now.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+        let active_model = game::ActiveModel {
+            id: Set(game_id),
+            white_player: Set(Uuid::nil()), // unknown players for imports
+            black_player: Set(Uuid::nil()),
+            fen: Set(request.final_fen.clone()),
+            pgn: Set(serde_json::json!(moves)),
+            result: Set(result),
+            variant: Set(db_entity::game::GameVariant::Standard),
+            started_at: Set(now_fixed),
+            duration_sec: Set(0),
+            created_at: Set(now_fixed),
+            updated_at: Set(now_fixed),
+            is_imported: Set(true),
+            original_pgn: Set(None),
+        };
+
+        active_model.insert(db).await.map_err(ApiError::from)?;
+        Ok(game_id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: convert a DB game::Model into the API DTO.
+    // -----------------------------------------------------------------------
+    fn model_to_dto(model: game::Model) -> GameDisplayDTO {
+        let status = match &model.result {
+            None => GameStatus::Waiting,
+            Some(db_entity::game::ResultSide::Ongoing) => GameStatus::InProgress,
+            Some(db_entity::game::ResultSide::Abandoned) => GameStatus::Aborted,
+            _ => GameStatus::Completed,
+        };
+
+        let result = match &model.result {
+            Some(db_entity::game::ResultSide::WhiteWins) => GameResult::WhiteWin,
+            Some(db_entity::game::ResultSide::BlackWins) => GameResult::BlackWin,
+            Some(db_entity::game::ResultSide::Draw) => GameResult::Draw,
+            _ => GameResult::InProgress,
+        };
+
+        let move_history: Vec<String> = model
+            .pgn
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let black_player_id = if model.black_player == NIL_UUID {
+            None
+        } else {
+            Some(model.black_player)
+        };
+
+        let started_at = model.started_at.with_timezone(&Utc);
+        let created_at = model.created_at.with_timezone(&Utc);
+        let updated_at = model.updated_at.with_timezone(&Utc);
+
+        GameDisplayDTO {
+            id: model.id,
+            white_player_id: model.white_player,
+            black_player_id,
+            status,
+            result,
+            current_fen: model.fen,
+            move_history,
+            time_control: model.duration_sec,
+            increment: 0,
+            white_time_remaining: model.duration_sec,
+            black_time_remaining: model.duration_sec,
+            created_at,
+            started_at: Some(started_at),
+            updated_at,
+        }
     }
 
     /// Complete a game with the given result and update player ratings
@@ -167,54 +418,66 @@ impl GameService {
         chess::RatingService::get_player_rating(db, player_id).await
     }
 
-    /// List games with keyset pagination.
-    ///
+    /// List games with keyset or offset pagination.
+    /// 
     /// # Arguments
     /// * `db` - Database connection
-    /// * `cursor` - Optional cursor string (base64 encoded "timestamp,id")
+    /// * `cursor` - Optional cursor string (base64 encoded "timestamp,id") for keyset pagination
+    /// * `offset` - Optional offset for offset-based pagination (takes precedence over cursor if both provided)
     /// * `limit` - Number of items to return
     /// * `player_id` - Optional player ID filter (checks both white and black players)
     /// * `status` - Optional status filter (currently maps to result being not null for finished games, or specific status if column exists)
     ///
     /// Note: The current schema uses `result` to determine if a game is finished.
     /// Active games might have `result` as NULL (after our migration).
-    pub async fn list_games(
-        db: &DatabaseConnection,
-        cursor: Option<String>,
-        limit: u64,
+    /// Build the shared filter conditions for player_id and status.
+    fn build_filter_condition(
         player_id: Option<Uuid>,
-        status: Option<GameStatus>,
-    ) -> Result<(Vec<game::Model>, Option<String>), DbErr> {
-        let mut query = Game::find();
+        status: &Option<GameStatus>,
+    ) -> Option<Condition> {
+        let mut conditions: Vec<Condition> = Vec::new();
 
-        // 1. Apply Filtering
         if let Some(pid) = player_id {
-            // Filter by player (white OR black)
-            // effective union of indexes logic would be nice, but OR is simpler to write here.
-            // "idx_games_white_player_created_at_id" and "idx_games_black_player_created_at_id"
-            // Postgres creates a BitmapOr for these two indexes usually.
-            let condition = Condition::any()
+            let player_cond = Condition::any()
                 .add(game::Column::WhitePlayer.eq(pid))
                 .add(game::Column::BlackPlayer.eq(pid));
-            query = query.filter(condition);
+            conditions.push(player_cond);
         }
 
-        if let Some(s) = status {
+        if let Some(s) = status.as_ref() {
             match s {
                 GameStatus::Waiting | GameStatus::InProgress => {
-                    // Active games: result is NULL
-                    query = query.filter(game::Column::Result.is_null());
+                    conditions.push(Condition::all().add(game::Column::Result.is_null()));
                 }
                 GameStatus::Completed | GameStatus::Aborted => {
-                    // Finished games: result is NOT NULL
-                    // Note: "Aborted" vs "Completed" might need distinguishing via ResultSide if we had it,
-                    // but for now we just check if it has a result.
-                    query = query.filter(game::Column::Result.is_not_null());
+                    conditions.push(Condition::all().add(game::Column::Result.is_not_null()));
                 }
             }
         }
 
-        // 2. Apply Cursor (Keyset Pagination)
+        if conditions.is_empty() {
+            None
+        } else {
+            Some(conditions.into_iter().reduce(|acc, c| acc.add(c)).unwrap())
+        }
+    }
+
+    pub async fn list_games(
+        db: &DatabaseConnection,
+        cursor: Option<String>,
+        offset: Option<u64>,
+        limit: u64,
+        player_id: Option<Uuid>,
+        status: Option<GameStatus>,
+    ) -> Result<(Vec<game::Model>, Option<String>, u64), DbErr> {
+        let filter_condition = Self::build_filter_condition(player_id, &status);
+
+        let mut query = Game::find();
+        if let Some(ref cond) = filter_condition {
+            query = query.filter(cond.clone());
+        }
+
+        // 1. Apply Cursor (Keyset Pagination)
         // Sort by created_at DESC, id DESC
         query = query
             .order_by(game::Column::CreatedAt, Order::Desc)
@@ -256,7 +519,19 @@ impl GameService {
             }
         }
 
-        // 3. Limit and Execution
+        // 2. Count total matching games (before pagination)
+        let mut count_query = Game::find();
+        if let Some(ref cond) = filter_condition {
+            count_query = count_query.filter(cond.clone());
+        }
+        let total_count = count_query.count(db).await?;
+
+        // 3. Apply offset if provided (offset-based pagination)
+        if let Some(off) = offset {
+            query = query.offset(off);
+        }
+
+        // 4. Limit and Execution
         // Fetch limit + 1 to check if there is a next page
         let results = query.limit(limit + 1).all(db).await?;
 
@@ -274,7 +549,7 @@ impl GameService {
             }
         }
 
-        Ok((games, next_cursor))
+        Ok((games, next_cursor, total_count))
     }
 
     fn encode_cursor(timestamp: DateTime<Utc>, id: Uuid) -> String {
@@ -336,9 +611,14 @@ mod tests {
     #[tokio::test]
     async fn test_list_games_query_structure() {
         // Create Mock Database to verify the generated SQL
+        // We need two query result sets: one for count, one for the main query
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (empty list is fine, we check SQL)
+                // First query result (count)
+                vec![],
+            ])
+            .append_query_results(vec![
+                // Second query result (main data)
                 vec![game::Model {
                     id: Uuid::new_v4(),
                     white_player: Uuid::new_v4(),
@@ -358,15 +638,22 @@ mod tests {
             .into_connection();
 
         let player_id = Uuid::new_v4();
-
-        let _result = GameService::list_games(&db, None, 10, Some(player_id), None).await;
-
+        
+        let _result = GameService::list_games(
+            &db,
+            None,
+            None,
+            10,
+            Some(player_id),
+            None
+        ).await;
+        
         // Get transaction log to verify SQL
         let transaction_log = db.into_transaction_log();
-
-        // We expect one query
-        assert_eq!(transaction_log.len(), 1);
-
+        
+        // We expect two queries (count + data)
+        assert_eq!(transaction_log.len(), 2);
+        
         let log = &transaction_log[0];
         let log_str = format!("{:?}", log);
         println!("Log: {}", log_str);
@@ -388,25 +675,38 @@ mod tests {
         let cursor = GameService::encode_cursor(last_time, last_id);
 
         let db = MockDatabase::new(DbBackend::Postgres)
-            .append_query_results(vec![vec![game::Model {
-                id: Uuid::new_v4(),
-                white_player: Uuid::new_v4(),
-                black_player: Uuid::new_v4(),
-                fen: "fen".to_string(),
-                pgn: serde_json::json!({}),
-                result: None,
-                variant: db_entity::game::GameVariant::Standard,
-                started_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                duration_sec: 600,
-                created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                is_imported: false,
-                original_pgn: None,
+            .append_query_results(vec![
+                // First query result (count)
+                vec![],
+            ])
+            .append_query_results(vec![
+                // Second query result (main data)
+                vec![game::Model {
+                 id: Uuid::new_v4(),
+                    white_player: Uuid::new_v4(),
+                    black_player: Uuid::new_v4(),
+                    fen: "fen".to_string(),
+                    pgn: serde_json::json!({}),
+                    result: None,
+                    variant: db_entity::game::GameVariant::Standard,
+                    started_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    duration_sec: 600,
+                    created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+                    is_imported: false,
+                    original_pgn: None,
             }]])
             .into_connection();
-
-        let _result = GameService::list_games(&db, Some(cursor), 10, None, None).await;
-
+            
+        let _result = GameService::list_games(
+            &db,
+            Some(cursor),
+            None,
+            10,
+            None,
+            None
+        ).await;
+        
         let transaction_log = db.into_transaction_log();
         let log = &transaction_log[0];
         let log_str = format!("{:?}", log);

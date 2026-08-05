@@ -37,14 +37,13 @@ import { useMatchmakingContext } from "@/context/matchmakingContext";
 import { ChessVariantSelector } from "@/components/ChessVariantSelector";
 import { getChessVariantById } from "@/lib/chessVariants";
 import { HeroBranding } from "@/components/HeroBranding";
-import { GameResultOverlay } from "@/components/GameResultOverlay";
-import type { GameResult } from "@/components/GameResultOverlay";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
+import { endpoints } from "@/lib/api";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { endpoints } from "@/lib/api";
+import GameResultOverlay, { type GameResult } from "@/components/GameResultOverlay";
 
 export default function Home() {
   const [game] = useState(new Chess());
@@ -78,7 +77,6 @@ export default function Home() {
     joinMatchmaking,
     cancelMatchmaking,
     sendMove: matchmakingSendMove,
-    lastOpponentMove,
     gameId,
   } = useMatchmaking();
 
@@ -136,25 +134,6 @@ export default function Home() {
     }
   }, [matchmakingStatus, gameId, router]);
 
-  // Apply opponent's move in online mode
-  useEffect(() => {
-    if (!lastOpponentMove || gameMode !== "online") return;
-    try {
-      const move = game.move({
-        from: lastOpponentMove.from,
-        to: lastOpponentMove.to,
-        promotion: lastOpponentMove.promotion ?? "q",
-      });
-      if (move) {
-        setPosition(game.fen());
-        setViewIndex(null);
-      }
-    } catch {
-      // illegal move from server — ignore
-    }
-  }, [lastOpponentMove, game, gameMode]);
-
-  // Fetch online player count
   useEffect(() => {
     let isMounted = true;
     const fetchOnlinePlayers = async () => {

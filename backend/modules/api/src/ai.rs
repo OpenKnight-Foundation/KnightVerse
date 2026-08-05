@@ -7,6 +7,7 @@ use dto::{
     responses::ValidationErrorResponse,
 };
 use serde_json::json;
+use tracing::error;
 use validator::Validate;
 
 use service::engine_service::EngineService;
@@ -47,7 +48,7 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
                     computation_time_ms: elapsed,
                 }),
                 Err(e) => {
-                    log::error!("Engine error in get_ai_suggestion: {}", e);
+                    error!("Engine error in get_ai_suggestion: {}", e);
                     HttpResponse::InternalServerError().json(json!({
                         "error": "internal server error"
                     }))
@@ -104,7 +105,7 @@ pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpRes
                     })
                 }
                 Err(e) => {
-                    log::error!("Engine error in analyze_position: {}", e);
+                    error!("Engine error in analyze_position: {}", e);
                     HttpResponse::InternalServerError().json(json!({
                         "error": "internal server error"
                     }))

@@ -109,9 +109,9 @@ pub struct MakeMoveRequest {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct JoinGameRequest {
-    #[validate(custom = "validate_uuid")]
-    #[schema(value_type = String, format = "uuid", example = "123e4567-e89b-12d3-a456-426614174000")]
-    pub player_id: Uuid,
+    // player_id is now resolved exclusively from the validated JWT.
+    // The struct is kept (rather than removed) so the OpenAPI schema and
+    // route signature remain stable; clients may send an empty body `{}`.
 }
 
 // UUID validation function

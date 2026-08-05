@@ -248,6 +248,8 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// Player has reached the maximum number of active tournament escrows (SC-20)
+    MaxActiveEscrowsExceeded = 40,
 }
 
 #[contract]

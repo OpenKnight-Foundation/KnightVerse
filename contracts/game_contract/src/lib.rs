@@ -140,6 +140,11 @@ const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle co
 // Time-lock escrow for tournament prizes (#532)
 const TOURNAMENT_TIMELOCK: Symbol = symbol_short!("TL_DUR"); // u64 - lock duration in ledger sequences
 const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, TournamentEscrow>
+const PLAYER_ACTIVE_ESCROWS: Symbol = symbol_short!("PL_ACTV"); // Map<Address, u32>
+
+/// Maximum number of active (non-released) tournament escrows per player
+/// to prevent storage bloat attacks.
+const MAX_ACTIVE_ESCROWS: u32 = 100;
 
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
@@ -166,6 +171,7 @@ pub struct FeeProposal {
 pub struct TournamentEscrow {
     pub escrow_id: u64,
     pub game_id: u64,
+    pub player: Address,
     pub total_amount: i128,
     pub locked_until: u64, // ledger sequence when funds can be released
     pub released: bool,
@@ -242,6 +248,8 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// Player has reached the maximum number of active tournament escrows (SC-20)
+    MaxActiveEscrowsExceeded = 40,
 }
 
 #[contract]
@@ -2946,6 +2954,18 @@ impl GameContract {
 
         game.player1.require_auth();
 
+        // Check active escrow cap for this player
+        let mut player_counts: Map<Address, u32> = env
+            .storage()
+            .instance()
+            .get(&PLAYER_ACTIVE_ESCROWS)
+            .unwrap_or(Map::new(&env));
+
+        let current_count = player_counts.get(game.player1.clone()).unwrap_or(0);
+        if current_count >= MAX_ACTIVE_ESCROWS {
+            return Err(ContractError::MaxActiveEscrowsExceeded);
+        }
+
         let duration: u64 = env
             .storage()
             .instance()
@@ -2969,6 +2989,7 @@ impl GameContract {
         let escrow = TournamentEscrow {
             escrow_id,
             game_id,
+            player: game.player1.clone(),
             total_amount,
             locked_until,
             released: false,
@@ -2976,6 +2997,12 @@ impl GameContract {
 
         escrows.set(escrow_id, escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        // Increment player's active escrow count
+        player_counts.set(game.player1.clone(), current_count + 1);
+        env.storage()
+            .instance()
+            .set(&PLAYER_ACTIVE_ESCROWS, &player_counts);
 
         env.events().publish(
             (symbol_short!("tl_escrow"), symbol_short!("created")),
@@ -3084,10 +3111,25 @@ impl GameContract {
             token_client.transfer(&contract_address, &first_winner, &remainder);
         }
 
+        let escrow_player = escrow.player.clone();
         let mut released_escrow = escrow;
         released_escrow.released = true;
         escrows.set(escrow_id, released_escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
+
+        // Decrement player's active escrow count
+        let mut player_counts: Map<Address, u32> = env
+            .storage()
+            .instance()
+            .get(&PLAYER_ACTIVE_ESCROWS)
+            .unwrap_or(Map::new(&env));
+        let player_count = player_counts.get(escrow_player.clone()).unwrap_or(0);
+        if player_count > 0 {
+            player_counts.set(escrow_player, player_count - 1);
+        }
+        env.storage()
+            .instance()
+            .set(&PLAYER_ACTIVE_ESCROWS, &player_counts);
 
         env.events().publish(
             (symbol_short!("tl_escrow"), symbol_short!("released")),

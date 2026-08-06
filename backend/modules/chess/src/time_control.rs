@@ -46,9 +46,8 @@ impl PlayerClock {
     pub fn apply_delay(&mut self, delay: Duration) {
         if let Some(last_move_time) = self.last_move_time {
             let elapsed = last_move_time.elapsed();
-            if elapsed < delay {
-                self.remaining_time += delay - elapsed;
-            }
+            let refund = std::cmp::min(elapsed, delay);
+            self.remaining_time += refund;
         }
     }
 

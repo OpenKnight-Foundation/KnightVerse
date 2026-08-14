@@ -614,8 +614,10 @@ mod tests {
         // We need two query result sets: one for count, one for the main query
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (count)
-                vec![],
+                // First query result (count) — empty set; typed so `T: IntoMockRow`
+                // can be inferred. count() on no rows resolves to 0 and execution
+                // continues to the data query below.
+                Vec::<game::Model>::new(),
             ])
             .append_query_results(vec![
                 // Second query result (main data)
@@ -676,8 +678,10 @@ mod tests {
 
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (count)
-                vec![],
+                // First query result (count) — empty set; typed so `T: IntoMockRow`
+                // can be inferred. count() on no rows resolves to 0 and execution
+                // continues to the data query below.
+                Vec::<game::Model>::new(),
             ])
             .append_query_results(vec![
                 // Second query result (main data)

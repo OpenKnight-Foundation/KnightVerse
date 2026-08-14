@@ -168,17 +168,18 @@ fn parse_moves(move_text: &str) -> Vec<String> {
 
     // Split into tokens
     let tokens: Vec<&str> = without_variations.split_whitespace().collect();
-
-    // Filter out move numbers, results, and other non-move tokens
-    let move_number_regex = Regex::new(r"^\d+\.+$").unwrap();
+    
+    // Strip a leading move-number prefix from each token, then drop results and
+    // empty tokens. The prefix regex has no trailing `$` anchor, so it also handles
+    // the compact form where the number is glued to the move (e.g. `1.e4`,
+    // `10...Nf6`), not just the spaced form (`1. e4`).
+    let move_number_prefix = Regex::new(r"^\d+\.+").unwrap();
     let result_regex = Regex::new(r"^(1-0|0-1|1/2-1/2|\*)$").unwrap();
 
     tokens
         .into_iter()
-        .filter(|token| {
-            !move_number_regex.is_match(token) && !result_regex.is_match(token) && !token.is_empty()
-        })
-        .map(|s| s.to_string())
+        .map(|token| move_number_prefix.replace(token, "").into_owned())
+        .filter(|token| !token.is_empty() && !result_regex.is_match(token))
         .collect()
 }
 
@@ -328,6 +329,47 @@ mod tests {
         let parsed = parse_pgn(pgn).unwrap();
         assert_eq!(parsed.moves.len(), 4);
         assert_eq!(parsed.headers.result, GameResult::Draw);
+    }
+
+    #[test]
+    fn test_parse_compact_move_numbers() {
+        // Compact form: move number glued to the move (`1.e4`), as produced by
+        // many exporters. Previously these tokens slipped through the move-number
+        // filter and failed SAN validation.
+        let pgn = r#"[White "Player1"]
+[Black "Player2"]
+[Result "*"]
+
+1.e4 e5 2.Nf3 Nc6 3.Bb5 *"#;
+
+        let parsed = parse_pgn(pgn).unwrap();
+        assert_eq!(parsed.moves, vec!["e4", "e5", "Nf3", "Nc6", "Bb5"]);
+        assert!(validate_game(&parsed).is_ok());
+    }
+
+    #[test]
+    fn test_parse_compact_black_continuation() {
+        // Black move-number continuation glued to the move (`1...e5`).
+        let pgn = r#"[White "Player1"]
+[Black "Player2"]
+[Result "1-0"]
+
+1.e4 {comment} 1...e5 2.Nf3 1-0"#;
+
+        let parsed = parse_pgn(pgn).unwrap();
+        assert_eq!(parsed.moves, vec!["e4", "e5", "Nf3"]);
+    }
+
+    #[test]
+    fn test_parse_two_digit_move_numbers() {
+        let pgn = r#"[White "Player1"]
+[Black "Player2"]
+[Result "*"]
+
+10.Ba2 Bb7 11.Qe2 *"#;
+
+        let parsed = parse_pgn(pgn).unwrap();
+        assert_eq!(parsed.moves, vec!["Ba2", "Bb7", "Qe2"]);
     }
 
     #[test]

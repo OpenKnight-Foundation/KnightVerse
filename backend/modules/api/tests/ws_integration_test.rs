@@ -46,7 +46,7 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
     let game_id = "integration-game-1".to_string();
     let token = make_access_token(42, "magnus");
 
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let url = srv.url(&format!("/v1/ws/game/{}", game_id)).replace("http://", "ws://");
 
     let (_resp, mut connection) = awc::Client::new()
         .ws(url)
@@ -117,7 +117,7 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
 #[actix_web::test]
 async fn rejects_connection_with_no_authorization_header() {
     let (srv, _lobby) = start_ws_test_server();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), "game-no-auth").replace("http://", "ws://");
+    let url = srv.url("/v1/ws/game/game-no-auth").replace("http://", "ws://");
 
     let result = awc::Client::new().ws(url).connect().await;
 
@@ -127,7 +127,7 @@ async fn rejects_connection_with_no_authorization_header() {
 #[actix_web::test]
 async fn rejects_connection_with_an_invalid_token() {
     let (srv, _lobby) = start_ws_test_server();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), "game-bad-auth").replace("http://", "ws://");
+    let url = srv.url("/v1/ws/game/game-bad-auth").replace("http://", "ws://");
 
     let result = awc::Client::new()
         .ws(url)
@@ -142,9 +142,7 @@ async fn rejects_connection_with_an_invalid_token() {
 async fn two_clients_in_the_same_game_both_receive_broadcasts() {
     let (srv, lobby) = start_ws_test_server();
     let game_id = "integration-game-2".to_string();
-    let base = srv.url("");
-
-    let url_a = format!("{base}/v1/ws/game/{game_id}").replace("http://", "ws://");
+    let url_a = srv.url(&format!("/v1/ws/game/{game_id}")).replace("http://", "ws://");
     let url_b = url_a.clone();
 
     let (_r1, mut client_a) = awc::Client::new()
@@ -181,7 +179,7 @@ async fn two_clients_in_the_same_game_both_receive_broadcasts() {
 async fn client_ping_is_answered_with_pong() {
     let (srv, _lobby) = start_ws_test_server();
     let game_id = "integration-game-ping".to_string();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let url = srv.url(&format!("/v1/ws/game/{}", game_id)).replace("http://", "ws://");
     let token = make_access_token(7, "heartbeat_test");
 
     let (_resp, mut connection) = awc::Client::new()
@@ -214,7 +212,7 @@ async fn client_ping_is_answered_with_pong() {
 async fn client_sent_move_message_currently_produces_no_response() {
     let (srv, _lobby) = start_ws_test_server();
     let game_id = "integration-game-noop".to_string();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let url = srv.url(&format!("/v1/ws/game/{}", game_id)).replace("http://", "ws://");
     let token = make_access_token(9, "client_move_sender");
 
     let (_resp, mut connection) = awc::Client::new()

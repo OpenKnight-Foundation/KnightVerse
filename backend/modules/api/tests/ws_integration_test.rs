@@ -198,20 +198,16 @@ async fn client_ping_is_answered_with_pong() {
     }
 }
 
-/// Documents a real, current gap found while writing these tests (not
-/// asserted as a bug fix — flagged here so it isn't silently relied upon):
-/// `WsSession`'s `StreamHandler` for `ws::Message::Text` parses an incoming
-/// client message into a `WsMessage` but its match arm body is empty — a
-/// client sending a `Move` over the socket produces no broadcast, no
-/// validation, and no response today. All moves in this test suite are
-/// therefore simulated via the `Broadcast` actor message directly (as real
-/// move-processing logic elsewhere in the app presumably does), not by
-/// sending a `Move` WsMessage from the client. See PR description for the
-/// recommended follow-up.
+/// A `Move` sent by the client over the socket is parsed and broadcast to
+/// everyone in the game (see `WsSession`'s `StreamHandler` for
+/// `ws::Message::Text`). Because the sender is itself a member of the game's
+/// broadcast set, it receives its own move back, stamped with the server
+/// `version` field. (This previously asserted a no-op gap; the Text handler
+/// now broadcasts, so the test asserts that behavior instead.)
 #[actix_web::test]
-async fn client_sent_move_message_currently_produces_no_response() {
+async fn client_sent_move_is_parsed_and_broadcast_back() {
     let (srv, _lobby) = start_ws_test_server();
-    let game_id = "integration-game-noop".to_string();
+    let game_id = "integration-game-echo".to_string();
     let url = srv.url(&format!("/v1/ws/game/{}", game_id)).replace("http://", "ws://");
     let token = make_access_token(9, "client_move_sender");
 
@@ -222,17 +218,46 @@ async fn client_sent_move_message_currently_produces_no_response() {
         .await
         .unwrap();
 
+    let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
     let client_move = serde_json::json!({
         "type": "Move",
-        "payload": { "from": "e2", "to": "e4", "san": "e4", "fen": "..." }
+        "payload": { "from": "e2", "to": "e4", "san": "e4", "fen": fen }
     });
     connection.send(awc::ws::Message::Text(client_move.to_string().into())).await.unwrap();
 
-    // Race the (lack of a) response against a short timeout — if this ever
-    // starts failing because a response *does* arrive, that's good news:
-    // it means the no-op gap above has been fixed, and this test (along
-    // with its doc comment) should be updated to assert the new behavior
-    // instead of removed outright.
-    let outcome = tokio::time::timeout(std::time::Duration::from_millis(300), connection.next()).await;
-    assert!(outcome.is_err(), "expected no response to a client-sent Move (current behavior is a no-op)");
+    // The move is parsed and broadcast back to the sender within a short window.
+    let item = tokio::time::timeout(std::time::Duration::from_secs(2), connection.next())
+        .await
+        .expect("expected the client's move to be broadcast back within the timeout")
+        .expect("connection closed before receiving the broadcast")
+        .expect("WS transport error");
+
+    let text = match item {
+        awc::ws::Frame::Text(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
+        other => panic!("expected a text frame, got {other:?}"),
+    };
+
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["version"], "1.0", "server-sent messages are version-stamped");
+
+    let received: WsMessage = serde_json::from_value({
+        let mut v = value.clone();
+        if let serde_json::Value::Object(ref mut m) = v {
+            m.remove("version");
+        }
+        v
+    })
+    .expect("broadcast should round-trip back into WsMessage");
+
+    assert_eq!(
+        received,
+        WsMessage::Move {
+            from: "e2".into(),
+            to: "e4".into(),
+            san: "e4".into(),
+            fen: fen.into(),
+        }
+    );
+
+    let _ = connection.close().await;
 }

@@ -656,7 +656,9 @@ mod tests {
         // We expect two queries (count + data)
         assert_eq!(transaction_log.len(), 2);
         
-        let log = &transaction_log[0];
+        // Inspect the data query (index 1); index 0 is the COUNT query, which
+        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
+        let log = &transaction_log[1];
         let log_str = format!("{:?}", log);
         println!("Log: {}", log_str);
 
@@ -712,7 +714,9 @@ mod tests {
         ).await;
         
         let transaction_log = db.into_transaction_log();
-        let log = &transaction_log[0];
+        // Inspect the data query (index 1); index 0 is the COUNT query, which
+        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
+        let log = &transaction_log[1];
         let log_str = format!("{:?}", log);
         println!("Log with cursor: {}", log_str);
 

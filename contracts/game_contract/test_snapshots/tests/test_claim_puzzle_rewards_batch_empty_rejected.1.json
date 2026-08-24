@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "7fad82e67cc3507539ec98e1eb4d50551bb6035145efb7a112d54c3dcaf8997d"
+                  "bytes": "54aab279f1df31fb4d1eca88bab46bba529e3012dbeeda04ed16896d8918c271"
                 },
                 {
                   "i128": {
@@ -78,7 +78,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "7fad82e67cc3507539ec98e1eb4d50551bb6035145efb7a112d54c3dcaf8997d"
+                          "bytes": "54aab279f1df31fb4d1eca88bab46bba529e3012dbeeda04ed16896d8918c271"
                         }
                       },
                       {
@@ -229,7 +229,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "7fad82e67cc3507539ec98e1eb4d50551bb6035145efb7a112d54c3dcaf8997d"
+                  "bytes": "54aab279f1df31fb4d1eca88bab46bba529e3012dbeeda04ed16896d8918c271"
                 },
                 {
                   "i128": {

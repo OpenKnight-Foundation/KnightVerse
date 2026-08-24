@@ -1,8 +1,11 @@
 #![no_std]
+mod error;
+pub use error::ContractError;
+
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, Map, Symbol, Vec, contract, contracterror, contractimpl,
-    contracttype, symbol_short,
+    Address, Bytes, BytesN, Env, Map, Symbol, Vec, contract, contractimpl, contracttype,
+    panic_with_error, symbol_short,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -175,75 +178,6 @@ pub struct TournamentEscrow {
 // Errors
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-pub enum ContractError {
-    GameNotFound = 1,
-    NotYourTurn = 2,
-    GameNotInProgress = 3,
-    InvalidMove = 4,
-    InsufficientFunds = 5,
-    AlreadyJoined = 6,
-    GameFull = 7,
-    NotPlayer = 8,
-    GameAlreadyCompleted = 9,
-    DrawNotAvailable = 10,
-    ForfeitNotAllowed = 11,
-    InvalidPercentage = 12,
-    MismatchedLengths = 13,
-    /// Invalid or already-used backend signature  (#199)
-    Unauthorized = 14,
-    StakeLimitExceeded = 15,
-    /// Game has not timed out yet
-    TimeoutNotReached = 16,
-    /// Timeout feature not configured
-    TimeoutNotConfigured = 17,
-    /// Game is not in a disputable state
-    NotDisputable = 18,
-    /// Dispute not found
-    DisputeNotFound = 19,
-    /// Only arbitrator can resolve disputes
-    NotArbitrator = 20,
-    /// Insufficient dispute fee
-    InsufficientDisputeFee = 21,
-    /// Only the waiting player can claim a timeout win
-    InvalidTimeoutClaimant = 22,
-    /// Settlement or payout has already been processed
-    AlreadySettled = 23,
-    /// Amount value must be positive and within supported bounds
-    InvalidAmount = 24,
-    /// SEP-10 challenge has expired or is invalid (#529)
-    ChallengeExpired = 25,
-    /// SEP-10 challenge nonce already used (#529)
-    ChallengeAlreadyUsed = 26,
-    /// Address has not completed SEP-10 verification (#529)
-    NotVerified = 27,
-    /// Multi-sig: signer is not in the signers list (#535)
-    NotASigner = 28,
-    /// Multi-sig: no pending fee proposal to approve (#535)
-    NoProposal = 29,
-    /// Multi-sig: signer already approved this proposal (#535)
-    AlreadyApproved = 30,
-    /// Multi-sig: threshold must be ≥ 1 and ≤ number of signers (#535)
-    InvalidThreshold = 31,
-    /// Oracle contract not configured (#533)
-    OracleNotConfigured = 32,
-    /// Tournament escrow not found (#532)
-    EscrowNotFound = 33,
-    /// Tournament escrow is still locked (#532)
-    EscrowStillLocked = 34,
-    /// Tournament escrow already released (#532)
-    EscrowAlreadyReleased = 35,
-    /// Total prize pool would exceed the configured limit
-    PrizePoolLimitExceeded = 36,
-    /// claim_puzzle_rewards_batch called with an empty proof list
-    EmptyBatch = 37,
-    /// claim_puzzle_rewards_batch called with more proofs than MAX_BATCH_SIZE
-    BatchTooLarge = 38,
-    /// Contract is paused for emergency halt (SC-11)
-    ContractPaused = 39,
-}
-
 #[contract]
 pub struct GameContract;
 
@@ -262,7 +196,7 @@ impl GameContract {
     /// - If `TOKEN_CONTRACT` is already set in instance storage.
     pub fn initialize_token(env: Env, admin: Address, token_contract: Address) {
         if env.storage().instance().has(&TOKEN_CONTRACT) {
-            panic!("Contract already initialized");
+            panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
         admin.require_auth();
         env.storage()
@@ -293,10 +227,10 @@ impl GameContract {
             .get(&CONTRACT_ADMIN)
             .expect("Not initialized");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Already paused");
+            panic_with_error!(&env, ContractError::AlreadyPaused);
         }
         env.storage().instance().set(&PAUSED, &true);
         env.events()
@@ -313,10 +247,10 @@ impl GameContract {
             .get(&CONTRACT_ADMIN)
             .expect("Not initialized");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Not paused");
+            panic_with_error!(&env, ContractError::NotPaused);
         }
         env.storage().instance().set(&PAUSED, &false);
         env.events()
@@ -328,10 +262,10 @@ impl GameContract {
         env.storage().instance().get(&PAUSED).unwrap_or(false)
     }
 
-    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    /// Internal helper — panics with `ContractError::ContractPaused` when the contract is paused.
     fn check_not_paused(env: &Env) {
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Contract is paused");
+            panic_with_error!(env, ContractError::ContractPaused);
         }
     }
 
@@ -1350,19 +1284,19 @@ impl GameContract {
         treasury_address: Address,
     ) {
         if env.storage().instance().has(&CONTRACT_ADMIN) {
-            panic!("Already initialized");
+            panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
 
         admin.require_auth();
 
         if admin_public_key.len() != 32 {
-            panic!("Admin public key must be 32 bytes");
+            panic_with_error!(&env, ContractError::InvalidConfig);
         }
         if treasury_amount < 0 {
-            panic!("Treasury amount must be non-negative");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
         if fee_bips > 1000 {
-            panic!("Fee bips must be between 0 and 1000");
+            panic_with_error!(&env, ContractError::InvalidConfig);
         }
 
         env.storage().instance().set(&CONTRACT_ADMIN, &admin);
@@ -1398,10 +1332,10 @@ impl GameContract {
             .expect("Not initialized");
         current_admin.require_auth();
         if admin != current_admin {
-            panic!("Unauthorized admin address");
+            panic_with_error!(&env, ContractError::Unauthorized);
         }
         if new_limit <= 0 {
-            panic!("Max stake must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
         env.storage().instance().set(&MAX_STAKE, &new_limit);
     }
@@ -1428,10 +1362,10 @@ impl GameContract {
             .expect("Not initialized");
         current_admin.require_auth();
         if admin != current_admin {
-            panic!("Unauthorized admin address");
+            panic_with_error!(&env, ContractError::Unauthorized);
         }
         if new_limit <= 0 {
-            panic!("Max prize pool must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
         env.storage().instance().set(&MAX_PRIZE_POOL, &new_limit);
     }
@@ -1459,10 +1393,10 @@ impl GameContract {
         current_admin.require_auth();
 
         if admin != current_admin {
-            panic!("Unauthorized admin address");
+            panic_with_error!(&env, ContractError::Unauthorized);
         }
         if fee_bips > 1000 {
-            panic!("Fee bips must be between 0 and 1000");
+            panic_with_error!(&env, ContractError::InvalidConfig);
         }
 
         env.storage().instance().set(&FEE_BIPS, &fee_bips);
@@ -1485,10 +1419,10 @@ impl GameContract {
     /// - If `ADMIN_KEY` is not set (contract not initialised).
     pub fn upgrade_admin(env: Env, admin: Address) {
         if env.storage().instance().has(&CONTRACT_ADMIN) {
-            panic!("Admin already set");
+            panic_with_error!(&env, ContractError::AdminAlreadySet);
         }
         if !env.storage().instance().has(&ADMIN_KEY) {
-            panic!("Contract must be initialized first");
+            panic_with_error!(&env, ContractError::NotInitialized);
         }
         admin.require_auth();
         env.storage().instance().set(&CONTRACT_ADMIN, &admin);
@@ -1603,7 +1537,7 @@ impl GameContract {
         // 5. Deduct from Treasury
         let treasury: i128 = env.storage().instance().get(&TREASURY).unwrap_or(0);
         if treasury < reward_amount {
-            panic!("Insufficient treasury");
+            return Err(ContractError::InsufficientTreasury);
         }
         env.storage()
             .instance()
@@ -1766,7 +1700,7 @@ impl GameContract {
                 .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
 
             if treasury < reward_amount {
-                panic!("Insufficient treasury");
+                return Err(ContractError::InsufficientTreasury);
             }
             treasury -= reward_amount;
 
@@ -1841,10 +1775,10 @@ impl GameContract {
         current_admin.require_auth();
 
         if admin != current_admin {
-            panic!("Unauthorized admin address");
+            panic_with_error!(&env, ContractError::Unauthorized);
         }
         if dispute_fee < 0 {
-            panic!("Dispute fee must be non-negative");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         env.storage().instance().set(&ARBITRATOR, &arbitrator);
@@ -1875,10 +1809,10 @@ impl GameContract {
         current_admin.require_auth();
 
         if admin != current_admin {
-            panic!("Unauthorized admin address");
+            panic_with_error!(&env, ContractError::Unauthorized);
         }
         if duration == 0 {
-            panic!("Timeout duration must be greater than 0");
+            panic_with_error!(&env, ContractError::InvalidConfig);
         }
 
         env.storage().instance().set(&TIMEOUT_DURATION, &duration);
@@ -2895,7 +2829,7 @@ impl GameContract {
             return Err(ContractError::Unauthorized);
         }
         if duration == 0 {
-            panic!("Timelock duration must be greater than 0");
+            return Err(ContractError::InvalidConfig);
         }
         env.storage()
             .instance()

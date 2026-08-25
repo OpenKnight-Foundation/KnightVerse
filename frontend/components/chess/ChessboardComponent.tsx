@@ -370,6 +370,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         case "Escape":
           e.preventDefault();
           setSelectedSquare(null);
+          setFocusedSquare(null);
           return;
         default:
           return;
@@ -432,6 +433,18 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     );
   }
   return (
+    <div className="chessboard-wrapper w-full mx-auto relative" style={{ maxWidth: `${boardWidth}px` }}>
+      {/* Screen reader live region for move announcements — must be outside role="grid" */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {selectedSquare && (() => {
+          const [r, c] = selectedSquare.split(",").map(Number);
+          const actualR = orientation === "black" ? 7 - r : r;
+          const actualC = orientation === "black" ? 7 - c : c;
+          const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
+          const piece = displayRows[r][c];
+          return piece ? `Selected ${formatPieceName(piece)} on ${sq}` : `Focused ${sq}`;
+        })()}
+      </div>
     <div
       ref={boardRef}
       className="chessboard-container w-full mx-auto relative"
@@ -459,7 +472,6 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         transform: "scale(var(--board-scale, 1))",
         transformOrigin: "center center",
       }}
-      aria-live="polite"
     >
       {/* Screen reader live region for selection announcements */}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
@@ -495,14 +507,20 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               role="gridcell"
               aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
               aria-selected={isSelected}
+              aria-current={isFocused ? ("true" as const) : undefined}
               tabIndex={0}
+              onFocus={() => setFocusedSquare(squareKey)}
+              onBlur={() =>
+                setFocusedSquare((prev) =>
+                  prev === squareKey ? null : prev,
+                )
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   handleSquareClick(rowIndex, colIndex);
                 }
               }}
-              onFocus={() => setFocusedSquare(squareKey)}
               style={{
                 backgroundColor: isLight ? colors.dark : colors.light,
                 width: "100%",
@@ -512,6 +530,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 alignItems: "center",
                 cursor: piece ? "grab" : "default",
                 position: "relative",
+                outline: "none",
                 boxShadow: isSelected
                   ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
                   : isFocused
@@ -543,6 +562,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           );
         }),
       )}
+    </div>
     </div>
   );
 };

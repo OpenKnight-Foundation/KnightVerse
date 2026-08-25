@@ -1,358 +1,166 @@
 "use client";
 
-import React, { useState, useRef, useCallback, useId } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface KeyboardMoveInputProps {
-  /**
-   * Called when the user submits a valid SAN move string.
-   * Return `true` if the move was accepted, `false` / undefined if illegal.
-   */
-  onSubmitMove: (san: string) => boolean | undefined;
-  /** Whether it is currently the local player's turn. */
-  isPlayerTurn: boolean;
-  /** Disable the input entirely (e.g. game over). */
-  disabled?: boolean;
-  /** Optional Tailwind/CSS class additions for the wrapper div. */
-  className?: string;
+interface KeyboardMoveInputProps {
+  /** Submit a SAN move. Returns true if the move was legal and accepted. */
+  onSubmitMove: (san: string) => boolean;
+  /** Whether the game is still in progress */
+  isGameActive: boolean;
+  /** Whether it is the player's turn */
+  isMyTurn: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// SAN validation helpers
-// ---------------------------------------------------------------------------
+const PLACEHOLDER_HINTS = [
+  "Type a move, e.g. e4, Nf3, O-O, Bxc6",
+  "Press Enter to submit",
+];
 
-/**
- * Very permissive SAN syntax check — the real validation happens in chess.js
- * when `onSubmitMove` is called.  This just prevents obvious garbage from
- * ever reaching the game engine.
- *
- * Accepts:
- *   - Pawn moves:           e4, exd5, e8=Q, exd8=Q
- *   - Piece moves:          Nf3, Bxe5, Qh5+, Rd1#
- *   - Castling:             O-O, O-O-O  (also allows 0-0 / 0-0-0)
- *   - With check/checkmate: trailing + or #
- */
-function looksLikeSan(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-
-  // Castling (both O and 0 variants are common in digital notation)
-  if (/^[Oo0]-[Oo0](-[Oo0])?[+#]?$/.test(trimmed)) return true;
-
-  // Piece moves: optional piece [KQRBN], optional source disambiguation,
-  // optional capture x, destination square, optional promotion, optional check
-  if (/^[KQRBNa-h]?[a-h1-8]?x?[a-h][1-8](=[QRBNqrbn])?[+#]?$/.test(trimmed))
-    return true;
-
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-/**
- * KeyboardMoveInput
- *
- * A keyboard-accessible text field that accepts FIDE / standard algebraic
- * notation (SAN) move strings (e.g. "e4", "Nf3", "O-O", "exd5=Q+").
- *
- * Layout:
- *  - An "Enter move" button (or keyboard shortcut Enter//) focuses the input.
- *  - The input has proper ARIA labelling (aria-labelledby, aria-describedby, aria-invalid).
- *  - Escape cancels and returns focus to the board.
- *  - Feedback (error / success) is surfaced via an aria-live region.
- *
- * This component is intentionally unstyled beyond structure so that it can be
- * dropped into any Tailwind dark-mode layout.
- */
 export function KeyboardMoveInput({
   onSubmitMove,
-  isPlayerTurn,
-  disabled = false,
-  className = "",
+  isGameActive,
+  isMyTurn,
 }: KeyboardMoveInputProps) {
-  const [value, setValue] = useState("");
-  const [feedback, setFeedback] = useState<{
-    message: string;
-    type: "error" | "success" | "info";
-  } | null>(null);
-  const [isActive, setIsActive] = useState(false);
-
+  const [inputValue, setInputValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const feedbackId = useId();
-  const inputId = useId();
-  const labelId = useId();
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  const clearFeedback = useCallback(() => {
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = null;
+    }
+  }, []);
 
-  const clearFeedback = useCallback(() => setFeedback(null), []);
-
-  const showFeedback = useCallback(
-    (message: string, type: "error" | "success" | "info") => {
-      // Clear first so the live region re-fires for identical messages
-      setFeedback(null);
-      setTimeout(() => setFeedback({ message, type }), 0);
-    },
-    [],
-  );
-
-  const activate = useCallback(() => {
-    if (disabled) return;
-    setIsActive(true);
-    // Defer focus slightly so the state commit renders the input first
-    setTimeout(() => inputRef.current?.focus(), 0);
-  }, [disabled]);
-
-  const deactivate = useCallback(() => {
-    setIsActive(false);
-    setValue("");
-    clearFeedback();
+  useEffect(() => {
+    return () => clearFeedback();
   }, [clearFeedback]);
 
-  // ── Event handlers ────────────────────────────────────────────────────────
+  // Global shortcut: press Enter when input is not focused to focus the input
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Don't capture when typing in another input or modal
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.key === "Enter" && isGameActive && isMyTurn) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleGlobalKeyDown);
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [isGameActive, isMyTurn]);
 
   const handleSubmit = useCallback(
-    (e?: React.FormEvent) => {
-      e?.preventDefault();
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const san = inputValue.trim();
+      if (!san) return;
 
-      const trimmed = value.trim();
-      if (!trimmed) return;
+      clearFeedback();
 
-      if (!isPlayerTurn) {
-        showFeedback("Not your turn", "error");
-        return;
-      }
-
-      if (!looksLikeSan(trimmed)) {
-        showFeedback(
-          `"${trimmed}" doesn't look like a valid move. Try: e4, Nf3, O-O`,
-          "error",
-        );
-        return;
-      }
-
-      const accepted = onSubmitMove(trimmed);
-
+      const accepted = onSubmitMove(san);
       if (accepted) {
-        showFeedback(`Move ${trimmed} played`, "success");
-        setValue("");
-        // Auto-collapse after a successful move
-        setTimeout(() => deactivate(), 800);
+        setInputValue("");
+        setSuccess(`Move submitted: ${san}`);
+        feedbackTimeoutRef.current = setTimeout(() => setSuccess(null), 2000);
       } else {
-        showFeedback(`Illegal move: ${trimmed}`, "error");
-        // Keep input active so user can correct the move
-        requestAnimationFrame(() => inputRef.current?.select());
+        setError(`Illegal move: ${san}. Try again.`);
+        feedbackTimeoutRef.current = setTimeout(() => setError(null), 3000);
       }
     },
-    [value, isPlayerTurn, onSubmitMove, showFeedback, deactivate],
+    [inputValue, onSubmitMove, clearFeedback],
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        deactivate();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [deactivate, handleSubmit],
-  );
-
-  /** Allow the board's global keydown to activate the input via "/" */
-  const handleGlobalKeyForActivation = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (!isActive && !disabled && (e.key === "/" || e.key === "Enter")) {
-        e.preventDefault();
-        activate();
-      } else if (isActive && e.key === "Escape") {
-        // If active, allow Escape to deactivate even when focus is elsewhere
-        e.preventDefault();
-        deactivate();
-      }
-    },
-    [activate, deactivate, isActive, disabled],
-  );
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  const isEffectivelyDisabled = disabled || !isPlayerTurn;
-  const feedbackColor =
-    feedback?.type === "error"
-      ? "text-red-400"
-      : feedback?.type === "success"
-        ? "text-emerald-400"
-        : "text-gray-400";
+  if (!isGameActive) return null;
 
   return (
-    <div
-      className={`keyboard-move-input ${className}`}
-      onKeyDown={handleGlobalKeyForActivation}
+    <form
+      onSubmit={handleSubmit}
+      className="w-full"
+      aria-label="Keyboard move input"
     >
-      {/* Activate button — visible when input is NOT active */}
-      {!isActive && (
+      <div className="flex items-center gap-2">
+        <label htmlFor="keyboard-move-input" className="sr-only">
+          Enter chess move in algebraic notation
+        </label>
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            id="keyboard-move-input"
+            type="text"
+            value={inputValue}
+            onChange={(e) => {
+              setInputValue(e.target.value.toUpperCase() === e.target.value && e.target.value.length > 0 ? e.target.value : e.target.value);
+              setError(null);
+            }}
+            placeholder={isMyTurn ? PLACEHOLDER_HINTS[0] : "Waiting for opponent..."}
+            disabled={!isMyTurn}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            aria-describedby="keyboard-move-hint keyboard-move-error keyboard-move-success"
+            aria-invalid={!!error}
+            className="w-full px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700/50 text-white text-sm font-mono placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+          />
+          {/* Blinking cursor indicator when focused and it's the player's turn */}
+          {isMyTurn && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-blue-400 pointer-events-none" aria-hidden="true">
+              ⌨
+            </span>
+          )}
+        </div>
         <button
-          type="button"
-          onClick={activate}
-          disabled={isEffectivelyDisabled}
-          aria-label={
-            isEffectivelyDisabled
-              ? "Move input (not your turn)"
-              : "Type a move in algebraic notation (press Enter or /)"
-          }
-          aria-haspopup="true"
-          aria-expanded={isActive}
-          className={[
-            "w-full flex items-center justify-between gap-2 px-4 py-2.5",
-            "rounded-xl border transition-all duration-200 text-sm",
-            isEffectivelyDisabled
-              ? "border-gray-700/30 bg-gray-800/20 text-gray-600 cursor-not-allowed opacity-50"
-              : "border-gray-600/50 bg-gray-800/50 text-gray-300",
-            "hover:enabled:bg-gray-700/50 hover:enabled:border-gray-500/60",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500",
-          ].join(" ")}
+          type="submit"
+          disabled={!isMyTurn || !inputValue.trim()}
+          aria-label="Submit move"
+          className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500/50"
         >
-          <span className="flex items-center gap-2">
-            {/* Keyboard icon */}
-            <svg
-              aria-hidden="true"
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 12h.01M15 12h.01M9 16h.01M15 16h.01M12 12h.01M12 16h.01M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-            Type a move
-          </span>
-          <kbd
-            aria-hidden="true"
-            className="px-1.5 py-0.5 rounded bg-gray-700/50 border border-gray-600/50 text-xs text-gray-400 font-mono"
-          >
-            /
-          </kbd>
+          Submit
         </button>
+      </div>
+
+      {/* Hint text */}
+      <p id="keyboard-move-hint" className="mt-1 text-xs text-gray-500" aria-hidden="true">
+        Press <kbd className="px-1 py-0.5 rounded bg-gray-700/60 text-gray-400 text-[10px]">Enter</kbd> to focus. Type SAN notation (e.g. <span className="font-mono">e4</span>, <span className="font-mono">Nf3</span>, <span className="font-mono">O-O</span>, <span className="font-mono">Qh5#</span>).
+      </p>
+
+      {/* Error feedback */}
+      <div
+        id="keyboard-move-error"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {error}
+      </div>
+      {error && (
+        <p className="mt-1 text-xs text-red-400 font-medium" aria-hidden="true">
+          {error}
+        </p>
       )}
 
-      {/* Expanded input form */}
-      {isActive && (
-        <form
-          onSubmit={handleSubmit}
-          role="search"
-          aria-label="Enter chess move"
-          className="flex flex-col gap-1.5"
-          noValidate
-        >
-          <div className="flex items-center gap-2">
-            {/* Label (visually hidden, associated via htmlFor) */}
-            <label
-              id={labelId}
-              htmlFor={inputId}
-              className="sr-only"
-            >
-              Enter move in algebraic notation (e.g. e4, Nf3, O-O)
-            </label>
-
-            <input
-              ref={inputRef}
-              id={inputId}
-              type="text"
-              aria-labelledby={labelId}
-              aria-describedby={feedback ? feedbackId : undefined}
-              aria-invalid={feedback?.type === "error" ? "true" : "false"}
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                clearFeedback();
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder="e4, Nf3, O-O …"
-              maxLength={10}
-              className={[
-                "flex-1 px-3 py-2 rounded-xl border text-sm font-mono bg-gray-900",
-                "placeholder:text-gray-600 text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500",
-                feedback?.type === "error"
-                  ? "border-red-500/60"
-                  : "border-gray-600/50",
-                "transition-colors duration-150",
-              ].join(" ")}
-            />
-
-            {/* Submit */}
-            <button
-              type="submit"
-              aria-label="Submit move"
-              className={[
-                "px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200",
-                "bg-teal-600 hover:bg-teal-500 text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400",
-                "disabled:opacity-50 disabled:cursor-not-allowed",
-              ].join(" ")}
-              disabled={!value.trim()}
-            >
-              Move
-            </button>
-
-            {/* Cancel */}
-            <button
-              type="button"
-              onClick={deactivate}
-              aria-label="Cancel move input"
-              className={[
-                "px-3 py-2 rounded-xl text-sm transition-all duration-200",
-                "border border-gray-600/50 bg-gray-800/50 text-gray-400 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500",
-              ].join(" ")}
-            >
-              <span aria-hidden="true">✕</span>
-            </button>
-          </div>
-
-          {/* Hint */}
-          <p className="text-xs text-gray-500 pl-0.5">
-            Type a move (e.g.{" "}
-            <code className="font-mono text-gray-400">e4</code>,{" "}
-            <code className="font-mono text-gray-400">Nf3</code>,{" "}
-            <code className="font-mono text-gray-400">O-O</code>) then press{" "}
-            <kbd className="px-1 py-0.5 rounded bg-gray-700/50 border border-gray-600/50 text-xs font-mono">
-              Enter
-            </kbd>{" "}
-            or click Move. Press{" "}
-            <kbd className="px-1 py-0.5 rounded bg-gray-700/50 border border-gray-600/50 text-xs font-mono">
-              Esc
-            </kbd>{" "}
-            to cancel.
-          </p>
-
-          {/* Aria-live feedback region */}
-          <div
-            id={feedbackId}
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className={`text-xs pl-0.5 min-h-[1rem] ${feedbackColor}`}
-          >
-            {feedback?.message ?? ""}
-          </div>
-        </form>
+      {/* Success feedback */}
+      <div
+        id="keyboard-move-success"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {success}
+      </div>
+      {success && (
+        <p className="mt-1 text-xs text-emerald-400" aria-hidden="true">
+          {success}
+        </p>
       )}
-    </div>
+    </form>
   );
 }
-
-export default KeyboardMoveInput;

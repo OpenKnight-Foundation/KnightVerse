@@ -93,7 +93,6 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [boardWidth, setBoardWidth] = useState(width || 560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
-  // focusedSquare tracks which cell currently owns DOM focus for arrow-key navigation.
   const [focusedSquare, setFocusedSquare] = useState<string | null>(null);
   const touchStartSquare = useRef<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -334,12 +333,20 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     e.preventDefault();
   }, []);
 
+  const focusSquare = useCallback((row: number, col: number) => {
+    const key = `${row},${col}`;
+    setFocusedSquare(key);
+    const nextCell = boardRef.current?.querySelector(
+      `[data-square="${row}-${col}"]`,
+    ) as HTMLElement | null;
+    nextCell?.focus();
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Determine which square to navigate from: prefer focusedSquare, fall back to selectedSquare
-      const origin = focusedSquare ?? selectedSquare;
-      if (!origin) return;
-      const [row, col] = origin.split(",").map(Number);
+      // Determine the anchor: use focusedSquare if set, otherwise default to 0,0
+      const anchor = focusedSquare ?? selectedSquare ?? "0,0";
+      const [row, col] = anchor.split(",").map(Number);
       let nextRow = row;
       let nextCol = col;
 
@@ -361,6 +368,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           nextCol = Math.min(7, col + 1);
           break;
         case "Escape":
+          e.preventDefault();
           setSelectedSquare(null);
           setFocusedSquare(null);
           return;
@@ -368,18 +376,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           return;
       }
 
-      const nextKey = `${nextRow},${nextCol}`;
-      setFocusedSquare(nextKey);
-      // Also move the selection highlight so the visual cursor follows focus
-      if (selectedSquare) setSelectedSquare(nextKey);
-
-      // Move actual DOM focus to the target cell
-      const nextCell = boardRef.current?.querySelector(
-        `[data-square="${nextRow}-${nextCol}"]`,
-      ) as HTMLElement | null;
-      nextCell?.focus();
+      focusSquare(nextRow, nextCol);
     },
-    [focusedSquare, selectedSquare],
+    [focusedSquare, selectedSquare, focusSquare],
   );
 
   const getSquareFromTouch = useCallback((touch: React.Touch): [number, number] | null => {
@@ -474,25 +473,39 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         transformOrigin: "center center",
       }}
     >
+      {/* Screen reader live region for selection announcements */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {selectedSquare && (() => {
+          const [r, c] = selectedSquare.split(",").map(Number);
+          const actualR = orientation === "black" ? 7 - r : r;
+          const actualC = orientation === "black" ? 7 - c : c;
+          const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
+          const piece = displayRows[r][c];
+          return `Selected ${piece} on ${sq}. Use arrow keys to navigate, Space to move, Escape to deselect.`;
+        })()}
+      </div>
       {displayRows.map((row, rowIndex) =>
         row.map((piece, colIndex) => {
           const isLight = (rowIndex + colIndex) % 2 === 1;
           const squareKey = `${rowIndex},${colIndex}`;
           const isSelected = selectedSquare === squareKey;
-          const isHovered = hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
           const isFocused = focusedSquare === squareKey;
+          const isHovered = hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
 
           // Compute actual board coordinates for the aria-label
           const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
           const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
           const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
 
+          const selectionHint = isSelected ? ". Piece selected. Press Space on another square to move, or Escape to deselect." : "";
+          const focusHint = isFocused && !isSelected ? ". Press Space to select this piece." : "";
+
           return (
             <div
               key={`${rowIndex}-${colIndex}`}
               data-square={`${rowIndex}-${colIndex}`}
               role="gridcell"
-              aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}`}
+              aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
               aria-selected={isSelected}
               aria-current={isFocused ? ("true" as const) : undefined}
               tabIndex={0}
@@ -521,9 +534,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 boxShadow: isSelected
                   ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
                   : isFocused
-                  ? "inset 0 0 0 3px rgba(255, 200, 0, 0.85)"
+                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
                   : isHovered
-                  ? "inset 0 0 0 3px rgba(0, 200, 170, 0.7)"
+                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
                   : "none",
                 transition: "background-color 0.2s ease, box-shadow 0.1s ease",
               }}

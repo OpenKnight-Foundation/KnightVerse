@@ -13,6 +13,8 @@ import type { GameResult } from "@/components/GameResultOverlay";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
+import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -55,6 +57,7 @@ export default function PlayGameEngine() {
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
   const isMobile = useIsMobile();
+  const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
 
   const handleFlipBoard = useCallback(() => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -131,11 +134,21 @@ export default function PlayGameEngine() {
           Math.ceil(game.moveNumber() / 2),
         );
         checkGameStatus();
+
+        // Announce opponent move
+        announceMove({
+          color: playerColor === "white" ? "b" : "w",
+          isCapture: move.captured != null,
+          isCheck: game.isCheck(),
+          piece: move.piece.toUpperCase(),
+          from: move.from,
+          to: move.to,
+        });
       }
     } catch {
       // illegal move from server — ignore
     }
-  }, [lastOpponentMove, game, checkGameStatus, recordCheatMove, playerColor]);
+  }, [lastOpponentMove, game, checkGameStatus, recordCheatMove, playerColor, announceMove]);
 
   const isMyTurn =
     socketStatus === "connected" &&
@@ -172,13 +185,78 @@ export default function PlayGameEngine() {
           Math.ceil(game.moveNumber() / 2),
         );
         checkGameStatus();
+
+        // Announce player move
+        announceMove({
+          color: playerColor === "white" ? "w" : "b",
+          isCapture: move.captured != null,
+          isCheck: game.isCheck(),
+          piece: move.piece.toUpperCase(),
+          from: move.from,
+          to: move.to,
+        });
+        return true;
+      } catch {
+        return false;
+      }    }, [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor, announceMove],
+  );
+
+  const handleSanMove = useCallback(
+    (san: string): boolean => {
+      if (!isMyTurn || gameStatus !== "playing") return false;
+      try {
+        const fenBeforeMyMove = game.fen();
+        const move = game.move(san);
+        if (move === null) return false;
+
+        requestAnimationFrame(() => setPosition(game.fen()));
+        setMoveHistory((prev: string[]) => [...prev, move.san]);
+        sendMove({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+        recordCheatMove(
+          move.san,
+          move,
+          fenBeforeMyMove,
+          playerColor === "white" ? "w" : "b",
+          Math.ceil(game.moveNumber() / 2),
+        );
+        checkGameStatus();
+
+        announceMove({
+          color: playerColor === "white" ? "w" : "b",
+          isCapture: move.captured != null,
+          isCheck: game.isCheck(),
+          piece: move.piece.toUpperCase(),
+          from: move.from,
+          to: move.to,
+        });
         return true;
       } catch {
         return false;
       }
     },
-    [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor],
+    [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor, announceMove],
   );
+
+  // Time alert announcements
+  useEffect(() => {
+    if (whiteTime === 30 && playerColor === "white") {
+      announceTimeAlert("30 seconds remaining for White");
+    } else if (whiteTime === 10 && playerColor === "white") {
+      announceTimeAlert("10 seconds remaining for White");
+    } else if (whiteTime === 0 && playerColor === "white") {
+      announceTimeAlert("Time is up for White!");
+    }
+  }, [whiteTime, playerColor, announceTimeAlert]);
+
+  useEffect(() => {
+    if (blackTime === 30 && playerColor === "black") {
+      announceTimeAlert("30 seconds remaining for Black");
+    } else if (blackTime === 10 && playerColor === "black") {
+      announceTimeAlert("10 seconds remaining for Black");
+    } else if (blackTime === 0 && playerColor === "black") {
+      announceTimeAlert("Time is up for Black!");
+    }
+  }, [blackTime, playerColor, announceTimeAlert]);
 
   const handleResign = useCallback(() => {
     setGameStatus("resigned");
@@ -324,6 +402,14 @@ export default function PlayGameEngine() {
               </div>
             </div>
 
+            <div className="mt-3">
+              <KeyboardMoveInput
+                onSubmitMove={handleSanMove}
+                isGameActive={gameStatus === "playing"}
+                isMyTurn={isMyTurn}
+              />
+            </div>
+
             <div className="flex items-center gap-2 mt-3 lg:hidden">
               <button
                 onClick={handleFlipBoard}
@@ -459,6 +545,16 @@ export default function PlayGameEngine() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* ARIA live announcer for screen readers */}
+      <div
+        role="status"
+        aria-live="assertive"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
       </div>
 
       {overlayResult && (

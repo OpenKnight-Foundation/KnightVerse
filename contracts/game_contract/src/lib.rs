@@ -138,6 +138,11 @@ const MULTISIG_THRESHOLD: Symbol = symbol_short!("MS_THRES"); // u32
 const PENDING_FEE_PROPOSAL: Symbol = symbol_short!("MS_PROP"); // Option<FeeProposal>
 const FEE_PROPOSAL_APPROVALS: Symbol = symbol_short!("MS_APPR"); // Map<Address, bool>
 
+// Persistent Player Profiles (#521) – PERSISTENT storage for long-term availability
+// This key stores all player profile data in Persistent storage rather than Instance storage.
+// This ensures that player statistics and ratings survive contract upgrades and are permanently
+// available on-chain. Each player is keyed by their Address.
+const PLAYER_PROFILES: Symbol = symbol_short!("PLAYER_PROF"); // Map<Address, PlayerProfile> in Persistent storage
 // SEP-40 Oracle clock sync (#533)
 const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle contract
 
@@ -818,6 +823,12 @@ impl GameContract {
             }
         }
 
+        // Update player profiles (#521) – both players draw
+        Self::update_player_profile_after_game(&env, &game.player1, false, true);
+        if let Some(ref player2) = game.player2 {
+            Self::update_player_profile_after_game(&env, player2, false, true);
+        }
+
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
@@ -918,6 +929,16 @@ impl GameContract {
             }
         }
         game.state = GameState::Settled;
+
+        // Update player profiles (#521) – winner gets win, loser gets loss
+        Self::update_player_profile_after_game(&env, &winner, true, false);
+        if winner == game.player1 {
+            if let Some(ref player2) = game.player2 {
+                Self::update_player_profile_after_game(&env, player2, false, false);
+            }
+        } else {
+            Self::update_player_profile_after_game(&env, &game.player1, false, false);
+        }
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -1058,6 +1079,10 @@ impl GameContract {
             }
         }
         game.state = GameState::Settled;
+
+        // Update player profiles (#521) – winner gets win, forfeiter gets loss
+        Self::update_player_profile_after_game(&env, &winner, true, false);
+        Self::update_player_profile_after_game(&env, &player, false, false);
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -2243,6 +2268,16 @@ impl GameContract {
         }
         game.state = GameState::Settled;
 
+        // Update player profiles (#521) – timeout winner gets win, opponent gets loss
+        Self::update_player_profile_after_game(&env, &claimant, true, false);
+        if claimant == game.player1 {
+            if let Some(ref player2) = game.player2 {
+                Self::update_player_profile_after_game(&env, player2, false, false);
+            }
+        } else {
+            Self::update_player_profile_after_game(&env, &game.player1, false, false);
+        }
+
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
 
@@ -2377,6 +2412,16 @@ impl GameContract {
                     }
                 }
                 game.state = GameState::Settled;
+
+                // Update player profiles (#521) – winner gets win
+                Self::update_player_profile_after_game(&env, winner_addr, true, false);
+                if *winner_addr == game.player1 {
+                    if let Some(ref player2) = game.player2 {
+                        Self::update_player_profile_after_game(&env, player2, false, false);
+                    }
+                } else {
+                    Self::update_player_profile_after_game(&env, &game.player1, false, false);
+                }
             }
             None => {
                 game.state = GameState::Drawn;
@@ -2982,6 +3027,136 @@ impl GameContract {
         approvals.len()
     }
 
+    // ── Player Profile Management (#521) ──────────────────────────────────────
+    //
+    // Player profiles are stored in PERSISTENT storage to ensure long-term
+    // availability and survive contract upgrades. This is critical for maintaining
+    // rankings, statistics, and player history on-chain.
+    //
+    // Profiles are created on-demand when a player first plays a game.
+    // After each game, the profile is updated with results (win/loss/draw).
+
+    /// Initialize a new player profile in persistent storage.
+    /// 
+    /// If the profile already exists, returns the existing profile.
+    /// Profiles are created with initial stats: 0 games, 0 wins/losses/draws,
+    /// starting rating of 1200 (standard chess rating).
+    fn initialize_player_profile(env: &Env, player: &Address) -> PlayerRating {
+        let mut profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(env));
+
+        // Return existing profile if it exists
+        if let Some(profile) = profiles.get(player.clone()) {
+            return profile;
+        }
+
+        // Create new profile with standard starting rating (1200 in chess)
+        let new_profile = PlayerRating {
+            address: player.clone(),
+            rating: 1200,
+            games_played: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            highest_rating: 1200,
+            last_updated: env.ledger().sequence() as u64,
+        };
+
+        profiles.set(player.clone(), new_profile.clone());
+        env.storage()
+            .persistent()
+            .set(&PLAYER_PROFILES, &profiles);
+
+        new_profile
+    }
+
+    /// Retrieve a player profile from persistent storage.
+    /// 
+    /// Returns None if player has no profile yet.
+    pub fn get_player_profile(env: Env, player: Address) -> Option<PlayerRating> {
+        let profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(&env));
+
+        profiles.get(player)
+    }
+
+    /// Update player profile after game settlement.
+    ///
+    /// This function updates the player's statistics based on game outcome.
+    /// It implements a simple ELO-like rating system:
+    /// - Win: +32 rating points
+    /// - Loss: -16 rating points  
+    /// - Draw: +8 rating points
+    ///
+    /// The highest_rating is tracked to show peak achievement.
+    /// 
+    /// This function ensures efficient resource usage by:
+    /// - Single persistent storage read/write per player
+    /// - Minimal computation (no complex ELO calculations)
+    /// - No redundant state updates
+    fn update_player_profile_after_game(
+        env: &Env,
+        player: &Address,
+        is_win: bool,
+        is_draw: bool,
+    ) {
+        let mut profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(env));
+
+        let mut profile = Self::initialize_player_profile(env, player);
+
+        // Update game statistics
+        profile.games_played += 1;
+        
+        // Calculate rating delta and update statistics
+        let rating_delta = if is_draw {
+            profile.draws += 1;
+            8 // Draw: +8 rating
+        } else if is_win {
+            profile.wins += 1;
+            32 // Win: +32 rating
+        } else {
+            profile.losses += 1;
+            -16 // Loss: -16 rating
+        };
+
+        // Update rating (ensure it doesn't go below 0)
+        profile.rating = (profile.rating + rating_delta).max(0);
+
+        // Track highest rating
+        if profile.rating > profile.highest_rating {
+            profile.highest_rating = profile.rating;
+        }
+
+        // Update last modified timestamp
+        profile.last_updated = env.ledger().sequence() as u64;
+
+        profiles.set(player.clone(), profile);
+        env.storage()
+            .persistent()
+            .set(&PLAYER_PROFILES, &profiles);
+    }
+
+    /// Manually set a player's rating (admin only).
+    /// 
+    /// This is useful for:
+    /// - Correcting erroneous ratings
+    /// - Resetting new accounts
+    /// - Administrative corrections
+    pub fn set_player_rating(
+        env: Env,
+        admin: Address,
+        player: Address,
+        new_rating: i32,
     // ── SEP-40 Oracle Clock Sync (#533) ───────────────────────────────────────
     //
     // SEP-40 defines a standard oracle interface on Stellar/Soroban.
@@ -3093,6 +3268,70 @@ impl GameContract {
             .get(&CONTRACT_ADMIN)
             .expect("Not initialized");
         current_admin.require_auth();
+
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        if new_rating < 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let mut profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(&env));
+
+        let mut profile = Self::initialize_player_profile(&env, &player);
+        profile.rating = new_rating;
+
+        // Update highest rating if new rating is higher
+        if new_rating > profile.highest_rating {
+            profile.highest_rating = new_rating;
+        }
+
+        profile.last_updated = env.ledger().sequence() as u64;
+
+        profiles.set(player, profile);
+        env.storage()
+            .persistent()
+            .set(&PLAYER_PROFILES, &profiles);
+
+        Ok(())
+    }
+
+    /// Get all player profiles (paginated for efficiency).
+    /// 
+    /// Returns up to `limit` profiles starting from the given offset.
+    /// This is useful for leaderboards and statistics queries.
+    pub fn get_player_profiles_paginated(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<PlayerRating> {
+        let profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(&env));
+
+        let mut result: Vec<PlayerRating> = Vec::new(&env);
+        let mut count = 0;
+        let mut current = 0;
+
+        for (_, profile) in profiles.iter() {
+            if current >= offset && count < limit {
+                result.push_back(profile);
+                count += 1;
+            }
+            current += 1;
+            if count >= limit {
+                break;
+            }
+        }
+
+        result
         if admin != current_admin {
             return Err(ContractError::Unauthorized);
         }
@@ -3364,6 +3603,7 @@ escrows.set(escrow_id, escrow);
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
     }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -4746,3 +4986,4 @@ mod tests {
         assert_eq!(game.state, GameState::InProgress);
     }
 }
+

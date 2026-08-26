@@ -22,6 +22,7 @@ interface ChessboardComponentProps {
   onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
   width?: number; // Added width as optional prop
   orientation?: "white" | "black"; // Board orientation: white = normal, black = flipped
+  lastMove?: { from: string; to: string } | [string, string] | null;
 }
 
 // Parse FEN string to board state - memoized pure function
@@ -88,6 +89,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   onDrop,
   width,
   orientation = "white",
+  lastMove,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [boardWidth, setBoardWidth] = useState(width || 560);
@@ -496,9 +498,22 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
           const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
           const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+          const isLastMoveSquare = Boolean(
+            lastMove &&
+              (Array.isArray(lastMove)
+                ? lastMove.includes(squareLabel)
+                : lastMove.from === squareLabel || lastMove.to === squareLabel)
+          );
 
           const selectionHint = isSelected ? ". Piece selected. Press Space on another square to move, or Escape to deselect." : "";
           const focusHint = isFocused && !isSelected ? ". Press Space to select this piece." : "";
+
+          const selectedShadow = colors.selected
+            ? `inset 0 0 0 3px ${colors.selected}`
+            : "inset 0 0 0 3px rgba(0, 93, 173, 0.75)";
+          const lastMoveShadow = colors.lastMove
+            ? `inset 0 0 0 3px ${colors.lastMove}`
+            : "inset 0 0 0 2px rgba(245, 246, 130, 0.75)";
 
           return (
             <div
@@ -532,9 +547,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 position: "relative",
                 outline: "none",
                 boxShadow: isSelected
-                  ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
+                  ? selectedShadow
                   : isFocused
                   ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                  : isLastMoveSquare
+                  ? lastMoveShadow
                   : isHovered
                   ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
                   : "none",

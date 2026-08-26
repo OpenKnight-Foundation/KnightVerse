@@ -25,6 +25,12 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 173 80% 40%;
     --radius: 0.5rem;
+
+    /* Chessboard Theme Variables */
+    --board-light: #eeeed2;
+    --board-dark: #779954;
+    --board-selected: #baca44;
+    --board-last-move: #f5f682;
   }
 
   .dark {
@@ -47,6 +53,12 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 173 80% 40%;
+
+    /* Chessboard Theme Variables */
+    --board-light: #eeeed2;
+    --board-dark: #779954;
+    --board-selected: #baca44;
+    --board-last-move: #f5f682;
   }
 }
 

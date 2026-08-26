@@ -9,8 +9,9 @@ use uuid::Uuid;
 
 use super::models::*;
 
-const ELO_RANGE_INCREMENT_PER_MINUTE: u32 = 50;
-const DEFAULT_MAX_ELO_DIFF: u32 = 200;
+const ELO_RANGE_INCREMENT_PER_5_SECONDS: u32 = 25;
+const INITIAL_ELO_RANGE: u32 = 50;
+const MAX_ELO_RANGE: u32 = 300;
 const DEFAULT_ESTIMATED_WAIT_TIME: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
@@ -352,14 +353,23 @@ impl MatchmakingService {
         let mut conn = self.get_redis_connection().await?;
         let key = "matchmaking:queue:rated";
         let player_elo = request.player.elo;
-        let max_elo_diff = request.max_elo_diff.unwrap_or(DEFAULT_MAX_ELO_DIFF);
 
-        // Lua script for atomic find-and-remove operation
+        // Calculate expanding search window based on wait time
+        let wait_seconds = Utc::now()
+            .signed_duration_since(request.player.join_time)
+            .num_seconds()
+            .max(0) as u32;
+        let expansion_steps = wait_seconds / 5;
+        let search_range = (INITIAL_ELO_RANGE
+            + expansion_steps * ELO_RANGE_INCREMENT_PER_5_SECONDS)
+            .min(MAX_ELO_RANGE);
+
+        // Lua script for atomic find-and-remove operation with expanding range
         // This prevents race conditions where two players try to match with the same opponent
         let lua_script = r#"
             local key = KEYS[1]
             local player_elo = tonumber(ARGV[1])
-            local max_elo_diff = tonumber(ARGV[2])
+            local search_range = tonumber(ARGV[2])
             
             local members = redis.call('ZRANGE', key, 0, -1)
             
@@ -367,7 +377,7 @@ impl MatchmakingService {
                 local opponent = cjson.decode(member)
                 local elo_diff = math.abs(opponent.player.elo - player_elo)
                 
-                if elo_diff <= max_elo_diff then
+                if elo_diff <= search_range then
                     redis.call('ZREM', key, member)
                     return member
                 end
@@ -379,14 +389,13 @@ impl MatchmakingService {
         let result: Option<String> = redis::Script::new(lua_script)
             .key(key)
             .arg(player_elo)
-            .arg(max_elo_diff)
+            .arg(search_range)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| format!("Redis Lua script failed: {}", e))?;
 
         if let Some(opponent_json) = result {
             if let Ok(opponent_request) = MatchRequest::from_redis_value(&opponent_json) {
-                // Create match
                 let match_id = Uuid::new_v4();
                 let new_match = Match {
                     id: match_id,
@@ -473,28 +482,25 @@ impl MatchmakingService {
         for (member, score) in members {
             if let Ok(mut request) = MatchRequest::from_redis_value(&member) {
                 let wait_time = now.signed_duration_since(request.player.join_time);
-                let minutes_waiting = wait_time.num_minutes();
+                let wait_seconds = wait_time.num_seconds().max(0) as u32;
+                let expansion_steps = wait_seconds / 5;
+                let new_range = (INITIAL_ELO_RANGE
+                    + expansion_steps * ELO_RANGE_INCREMENT_PER_5_SECONDS)
+                    .min(MAX_ELO_RANGE);
 
-                if minutes_waiting > 0 {
-                    let additional_range = minutes_waiting as u32 * ELO_RANGE_INCREMENT_PER_MINUTE;
-                    request.max_elo_diff = Some(
-                        request.max_elo_diff.unwrap_or(DEFAULT_MAX_ELO_DIFF) + additional_range,
-                    );
+                request.max_elo_diff = Some(new_range);
 
-                    // Update in Redis
-                    let updated_value = request
-                        .to_redis_value()
-                        .map_err(|e| format!("Serialization error: {}", e))?;
+                let updated_value = request
+                    .to_redis_value()
+                    .map_err(|e| format!("Serialization error: {}", e))?;
 
-                    // Remove old entry and add updated one
-                    conn.zrem::<_, _, ()>(key, &member)
-                        .await
-                        .map_err(|e| format!("Redis ZREM failed: {}", e))?;
+                conn.zrem::<_, _, ()>(key, &member)
+                    .await
+                    .map_err(|e| format!("Redis ZREM failed: {}", e))?;
 
-                    conn.zadd::<_, _, _, ()>(key, &updated_value, score)
-                        .await
-                        .map_err(|e| format!("Redis ZADD failed: {}", e))?;
-                }
+                conn.zadd::<_, _, _, ()>(key, &updated_value, score)
+                    .await
+                    .map_err(|e| format!("Redis ZADD failed: {}", e))?;
             }
         }
 

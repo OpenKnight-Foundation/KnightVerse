@@ -1,5 +1,7 @@
 // src/server.rs
 
+pub mod request_id;
+
 use crate::ai::{analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, refresh, register};
 use crate::config::AppConfig;
@@ -9,6 +11,7 @@ use crate::games::{
 };
 use crate::players::{add_player, delete_player, find_player_by_id, update_player};
 use crate::rate_limiter::RedisRateLimiter;
+use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, LobbyState};
 use actix::Actor;
 use actix_cors::Cors;
@@ -36,6 +39,39 @@ use crate::openapi::ApiDoc;
 /// Health check endpoint
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "ok"}))
+}
+
+/// Redis health check endpoint
+async fn health_redis(
+    redis_pool: web::Data<deadpool_redis::Pool>,
+) -> impl Responder {
+    use redis::AsyncCommands;
+    let start = std::time::Instant::now();
+    match redis_pool.get().await {
+        Ok(mut conn) => {
+            let ping_result: Result<String, _> = redis::cmd("PING")
+                .query_async(&mut conn)
+                .await;
+            let latency_ms = start.elapsed().as_millis() as u64;
+            match ping_result {
+                Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+                    "status": "ok",
+                    "redis": "connected",
+                    "latency_ms": latency_ms
+                })),
+                Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
+                    "status": "error",
+                    "redis": "ping_failed",
+                    "error": e.to_string()
+                })),
+            }
+        }
+        Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
+            "status": "error",
+            "redis": "connection_failed",
+            "error": e.to_string()
+        })),
+    }
 }
 
 /// Welcome endpoint
@@ -197,6 +233,7 @@ pub async fn main() -> std::io::Result<()> {
         );
 
         App::new()
+            .wrap(RequestIdMiddleware)
             .wrap(TracingLogger::default())
             .wrap(actix_web::middleware::DefaultHeaders::new().add(("Strict-Transport-Security", "max-age=31536000; includeSubDomains")))
             // Global middleware
@@ -207,8 +244,10 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(lobby.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            .app_data(web::Data::from(rate_limiter_pool.clone()))
             // Register your routes
             .route("/health", web::get().to(health))
+            .route("/health/redis", web::get().to(health_redis))
             .route("/", web::get().to(greet))
             // Puzzle routes
             .configure(configure_puzzle_routes)

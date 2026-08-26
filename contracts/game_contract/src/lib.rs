@@ -144,6 +144,22 @@ const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, Tourname
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
 
+// Nonce replay protection (#983)
+const NONCE_REGISTRY: Symbol = symbol_short!("NONCE_R"); // Map<Address, u64> (address → last used nonce)
+const USED_NONCES: Symbol = symbol_short!("USED_NON"); // Map<(Address, u64), bool>
+
+// Guild escrow splits (#984)
+const GUILDS: Symbol = symbol_short!("GUILD"); // Map<Address, Guild>
+const GUILD_ESCROWS: Symbol = symbol_short!("G_ESC"); // Map<u64, GuildEscrow>
+
+// Royalty enforcement (#991)
+const ROYALTY_CONFIG: Symbol = symbol_short!("ROY_CFG"); // RoyaltyConfig
+const ROYALTY_PAYMENTS: Symbol = symbol_short!("ROY_PAY"); // Map<u64, Vec<RoyaltyPayment>>
+
+// AI Agent fusion (#992)
+const AI_AGENTS: Symbol = symbol_short!("AI_AGT"); // Map<Address, AiAgent>
+const AGENT_FUSIONS: Symbol = symbol_short!("AG_FUS"); // Map<u64, AgentFusion>
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -169,6 +185,90 @@ pub struct TournamentEscrow {
     pub total_amount: i128,
     pub locked_until: u64, // ledger sequence when funds can be released
     pub released: bool,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Guild escrow types (#984)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Guild {
+    pub guild_id: Address,
+    pub name: String,
+    pub treasury: Address,
+    pub members: Vec<Address>,
+    pub share_bips: u32, // Guild's share in basis points
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GuildEscrow {
+    pub escrow_id: u64,
+    pub guild_id: Address,
+    pub game_id: u64,
+    pub amount: i128,
+    pub distributed: bool,
+    pub distributed_at: Option<u64>,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Royalty enforcement types (#991)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RoyaltyConfig {
+    pub platform_royalty_bips: u32,  // Platform's royalty in basis points
+    pub creator_royalty_bips: u32,   // Original creator's royalty
+    pub max_royalty_bips: u32,       // Maximum allowed total royalty
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RoyaltyPayment {
+    pub game_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+    pub royalty_type: RoyaltyType,
+    pub paid_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RoyaltyType {
+    Platform,
+    Creator,
+    Custom(BytesN<32>),
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AI Agent fusion types (#992)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AiAgent {
+    pub agent_id: Address,
+    pub owner: Address,
+    pub name: String,
+    pub strength: u32, // ELO-like rating
+    pub style_hash: BytesN<32>,
+    pub created_at: u64,
+    pub is_active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AgentFusion {
+    pub fusion_id: u64,
+    pub agent_a: Address,
+    pub agent_b: Address,
+    pub result_agent: Address,
+    pub fusion_cost: i128,
+    pub fused_at: u64,
+    pub success: bool,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -242,6 +342,26 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// Nonce already used (#983)
+    NonceAlreadyUsed = 40,
+    /// Invalid nonce (#983)
+    InvalidNonce = 41,
+    /// Guild not found (#984)
+    GuildNotFound = 42,
+    /// Not a guild member (#984)
+    NotGuildMember = 43,
+    /// Royalty exceeded maximum (#991)
+    RoyaltyExceeded = 44,
+    /// Royalty payment already made (#991)
+    RoyaltyAlreadyPaid = 45,
+    /// Agent not found (#992)
+    AgentNotFound = 46,
+    /// Agent already fused (#992)
+    AgentAlreadyFused = 47,
+    /// Insufficient fusion cost (#992)
+    InsufficientFusionCost = 48,
+    /// Agent owner mismatch (#992)
+    AgentOwnerMismatch = 49,
 }
 
 #[contract]
@@ -3119,6 +3239,524 @@ impl GameContract {
             .get(&TOURNAMENT_ESCROWS)
             .ok_or(ContractError::EscrowNotFound)?;
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Nonce Replay Protection (#983)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Get the next valid nonce for an address
+    pub fn get_next_nonce(env: Env, address: Address) -> u64 {
+        let nonces: Map<Address, u64> = env
+            .storage()
+            .instance()
+            .get(&NONCE_REGISTRY)
+            .unwrap_or(Map::new(&env));
+        nonces.get(address).unwrap_or(0) + 1
+    }
+
+    /// Consume a nonce (mark as used)
+    pub fn consume_nonce(env: Env, address: Address, nonce: u64) -> Result<(), ContractError> {
+        address.require_auth();
+
+        let mut nonces: Map<Address, u64> = env
+            .storage()
+            .instance()
+            .get(&NONCE_REGISTRY)
+            .unwrap_or(Map::new(&env));
+        let last_nonce = nonces.get(address.clone()).unwrap_or(0);
+
+        // Nonce must be exactly last_nonce + 1
+        if nonce != last_nonce + 1 {
+            return Err(ContractError::InvalidNonce);
+        }
+
+        // Check if nonce was already used
+        let mut used: Map<(Address, u64), bool> = env
+            .storage()
+            .instance()
+            .get(&USED_NONCES)
+            .unwrap_or(Map::new(&env));
+
+        if used.get((address.clone(), nonce)).unwrap_or(false) {
+            return Err(ContractError::NonceAlreadyUsed);
+        }
+
+        // Mark nonce as used
+        used.set((address.clone(), nonce), true);
+        env.storage().instance().set(&USED_NONCES, &used);
+
+        // Update last used nonce
+        nonces.set(address, nonce);
+        env.storage().instance().set(&NONCE_REGISTRY, &nonces);
+
+        Ok(())
+    }
+
+    /// Check if a nonce has been used
+    pub fn is_nonce_used(env: Env, address: Address, nonce: u64) -> bool {
+        let used: Map<(Address, u64), bool> = env
+            .storage()
+            .instance()
+            .get(&USED_NONCES)
+            .unwrap_or(Map::new(&env));
+        used.get((address, nonce)).unwrap_or(false)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Guild Escrow Splits (#984)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a guild
+    pub fn create_guild(
+        env: Env,
+        guild_id: Address,
+        name: String,
+        treasury: Address,
+        share_bips: u32,
+    ) -> Result<(), ContractError> {
+        guild_id.require_auth();
+
+        if share_bips > 10000 {
+            return Err(ContractError::InvalidPercentage);
+        }
+
+        let guild = Guild {
+            guild_id: guild_id.clone(),
+            name,
+            treasury,
+            members: Vec::new(&env),
+            share_bips,
+            created_at: env.ledger().sequence() as u64,
+        };
+
+        let mut guilds: Map<Address, Guild> = env
+            .storage()
+            .instance()
+            .get(&GUILDS)
+            .unwrap_or(Map::new(&env));
+        guilds.set(guild_id, guild);
+        env.storage().instance().set(&GUILDS, &guilds);
+
+        Ok(())
+    }
+
+    /// Add a member to a guild
+    pub fn add_guild_member(
+        env: Env,
+        guild_id: Address,
+        member: Address,
+    ) -> Result<(), ContractError> {
+        guild_id.require_auth();
+
+        let mut guilds: Map<Address, Guild> = env
+            .storage()
+            .instance()
+            .get(&GUILDS)
+            .ok_or(ContractError::GuildNotFound)?;
+        let mut guild = guilds.get(guild_id.clone()).ok_or(ContractError::GuildNotFound)?;
+
+        // Check if already a member
+        for m in guild.members.iter() {
+            if m == member {
+                return Ok(()); // Already a member
+            }
+        }
+
+        guild.members.push_back(member);
+        guilds.set(guild_id, guild);
+        env.storage().instance().set(&GUILDS, &guilds);
+
+        Ok(())
+    }
+
+    /// Create a guild escrow for a game
+    pub fn create_guild_escrow(
+        env: Env,
+        guild_id: Address,
+        game_id: u64,
+        amount: i128,
+    ) -> Result<u64, ContractError> {
+        guild_id.require_auth();
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // Verify guild exists
+        let guilds: Map<Address, Guild> = env
+            .storage()
+            .instance()
+            .get(&GUILDS)
+            .ok_or(ContractError::GuildNotFound)?;
+        let guild = guilds.get(guild_id.clone()).ok_or(ContractError::GuildNotFound)?;
+
+        // Transfer from guild treasury to contract
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer_from(
+            &guild.treasury,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        let escrow_id = env
+            .storage()
+            .instance()
+            .get(&GUILD_ESCROWS)
+            .unwrap_or(Map::new(&env))
+            .len() as u64
+            + 1;
+
+        let escrow = GuildEscrow {
+            escrow_id,
+            guild_id,
+            game_id,
+            amount,
+            distributed: false,
+            distributed_at: None,
+        };
+
+        let mut escrows: Map<u64, GuildEscrow> = env
+            .storage()
+            .instance()
+            .get(&GUILD_ESCROWS)
+            .unwrap_or(Map::new(&env));
+        escrows.set(escrow_id, escrow);
+        env.storage().instance().set(&GUILD_ESCROWS, &escrows);
+
+        Ok(escrow_id)
+    }
+
+    /// Distribute guild escrow to members
+    pub fn distribute_guild_escrow(
+        env: Env,
+        escrow_id: u64,
+    ) -> Result<(), ContractError> {
+        let mut escrows: Map<u64, GuildEscrow> = env
+            .storage()
+            .instance()
+            .get(&GUILD_ESCROWS)
+            .ok_or(ContractError::EscrowNotFound)?;
+        let mut escrow = escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)?;
+
+        if escrow.distributed {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        // Get guild members
+        let guilds: Map<Address, Guild> = env
+            .storage()
+            .instance()
+            .get(&GUILDS)
+            .ok_or(ContractError::GuildNotFound)?;
+        let guild = guilds.get(escrow.guild_id).ok_or(ContractError::GuildNotFound)?;
+
+        if guild.members.is_empty() {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // Split evenly among members
+        let per_member = escrow.amount / guild.members.len() as i128;
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+
+        for member in guild.members.iter() {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &member,
+                &per_member,
+            );
+        }
+
+        escrow.distributed = true;
+        escrow.distributed_at = Some(env.ledger().sequence() as u64);
+        escrows.set(escrow_id, escrow);
+        env.storage().instance().set(&GUILD_ESCROWS, &escrows);
+
+        Ok(())
+    }
+
+    /// Get guild information
+    pub fn get_guild(env: Env, guild_id: Address) -> Result<Guild, ContractError> {
+        let guilds: Map<Address, Guild> = env
+            .storage()
+            .instance()
+            .get(&GUILDS)
+            .ok_or(ContractError::GuildNotFound)?;
+        guilds.get(guild_id).ok_or(ContractError::GuildNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Royalty Enforcement (#991)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Initialize royalty configuration
+    pub fn initialize_royalty_config(
+        env: Env,
+        platform_royalty_bips: u32,
+        creator_royalty_bips: u32,
+        max_royalty_bips: u32,
+    ) {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        if platform_royalty_bips + creator_royalty_bips > max_royalty_bips {
+            panic!("Total royalties exceed maximum");
+        }
+
+        let config = RoyaltyConfig {
+            platform_royalty_bips,
+            creator_royalty_bips,
+            max_royalty_bips,
+        };
+        env.storage().instance().set(&ROYALTY_CONFIG, &config);
+    }
+
+    /// Pay royalties for a game
+    pub fn pay_royalties(
+        env: Env,
+        game_id: u64,
+        total_amount: i128,
+        creator: Address,
+    ) -> Result<(), ContractError> {
+        let config: RoyaltyConfig = env
+            .storage()
+            .instance()
+            .get(&ROYALTY_CONFIG)
+            .ok_or(ContractError::RoyaltyExceeded)?;
+
+        let platform_amount = total_amount * config.platform_royalty_bips as i128 / 10000;
+        let creator_amount = total_amount * config.creator_royalty_bips as i128 / 10000;
+
+        if platform_amount + creator_amount > total_amount {
+            return Err(ContractError::RoyaltyExceeded);
+        }
+
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        let treasury: Address = env.storage().instance().get(&TREASURY_ADDR).unwrap();
+
+        // Pay platform royalty
+        if platform_amount > 0 {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &treasury,
+                &platform_amount,
+            );
+        }
+
+        // Pay creator royalty
+        if creator_amount > 0 {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &creator,
+                &creator_amount,
+            );
+        }
+
+        // Record payments
+        let mut payments: Map<u64, Vec<RoyaltyPayment>> = env
+            .storage()
+            .instance()
+            .get(&ROYALTY_PAYMENTS)
+            .unwrap_or(Map::new(&env));
+        let mut game_payments = payments.get(game_id).unwrap_or(Vec::new(&env));
+
+        if platform_amount > 0 {
+            game_payments.push_back(RoyaltyPayment {
+                game_id,
+                recipient: treasury,
+                amount: platform_amount,
+                royalty_type: RoyaltyType::Platform,
+                paid_at: env.ledger().sequence() as u64,
+            });
+        }
+
+        if creator_amount > 0 {
+            game_payments.push_back(RoyaltyPayment {
+                game_id,
+                recipient: creator,
+                amount: creator_amount,
+                royalty_type: RoyaltyType::Creator,
+                paid_at: env.ledger().sequence() as u64,
+            });
+        }
+
+        payments.set(game_id, game_payments);
+        env.storage().instance().set(&ROYALTY_PAYMENTS, &payments);
+
+        Ok(())
+    }
+
+    /// Get royalty payments for a game
+    pub fn get_royalty_payments(env: Env, game_id: u64) -> Vec<RoyaltyPayment> {
+        let payments: Map<u64, Vec<RoyaltyPayment>> = env
+            .storage()
+            .instance()
+            .get(&ROYALTY_PAYMENTS)
+            .unwrap_or(Map::new(&env));
+        payments.get(game_id).unwrap_or(Vec::new(&env))
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AI Agent Fusion (#992)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create an AI agent
+    pub fn create_ai_agent(
+        env: Env,
+        owner: Address,
+        name: String,
+        strength: u32,
+        style_hash: BytesN<32>,
+    ) -> Result<Address, ContractError> {
+        owner.require_auth();
+
+        // Generate agent ID from owner + timestamp
+        let agent_id = Address::from_internal_env(&env); // Simplified
+
+        let agent = AiAgent {
+            agent_id: agent_id.clone(),
+            owner: owner.clone(),
+            name,
+            strength,
+            style_hash,
+            created_at: env.ledger().sequence() as u64,
+            is_active: true,
+        };
+
+        let mut agents: Map<Address, AiAgent> = env
+            .storage()
+            .instance()
+            .get(&AI_AGENTS)
+            .unwrap_or(Map::new(&env));
+        agents.set(agent_id.clone(), agent);
+        env.storage().instance().set(&AI_AGENTS, &agents);
+
+        Ok(agent_id)
+    }
+
+    /// Fuse two AI agents to create a stronger one
+    pub fn fuse_agents(
+        env: Env,
+        agent_a_id: Address,
+        agent_b_id: Address,
+        fusion_cost: i128,
+    ) -> Result<u64, ContractError> {
+        let agents: Map<Address, AiAgent> = env
+            .storage()
+            .instance()
+            .get(&AI_AGENTS)
+            .ok_or(ContractError::AgentNotFound)?;
+
+        let agent_a = agents.get(agent_a_id.clone()).ok_or(ContractError::AgentNotFound)?;
+        let agent_b = agents.get(agent_b_id.clone()).ok_or(ContractError::AgentNotFound)?;
+
+        // Verify ownership
+        if agent_a.owner != env-invoker() && agent_b.owner != env-invoker() {
+            return Err(ContractError::AgentOwnerMismatch);
+        }
+
+        // Transfer fusion cost
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer_from(
+            &env-invoker(),
+            &env.current_contract_address(),
+            &fusion_cost,
+        );
+
+        // Create fused agent with combined strength
+        let fused_strength = (agent_a.strength + agent_b.strength) / 2 + 100; // Bonus for fusion
+        let fused_name = String::from_str(&env, "Fused Agent");
+
+        let fused_agent = AiAgent {
+            agent_id: agent_a_id.clone(), // Reuse agent A's ID
+            owner: env-invoker(),
+            name: fused_name,
+            strength: fused_strength,
+            style_hash: agent_a.style_hash, // Keep agent A's style
+            created_at: env.ledger().sequence() as u64,
+            is_active: true,
+        };
+
+        // Update agent A with fused stats
+        let mut agents_mut: Map<Address, AiAgent> = env
+            .storage()
+            .instance()
+            .get(&AI_AGENTS)
+            .unwrap_or(Map::new(&env));
+        agents_mut.set(agent_a_id.clone(), fused_agent);
+        env.storage().instance().set(&AI_AGENTS, &agents_mut);
+
+        // Deactivate agent B
+        let mut agent_b_deactivated = agent_b;
+        agent_b_deactivated.is_active = false;
+        let mut agents_mut2: Map<Address, AiAgent> = env
+            .storage()
+            .instance()
+            .get(&AI_AGENTS)
+            .unwrap_or(Map::new(&env));
+        agents_mut2.set(agent_b_id, agent_b_deactivated);
+        env.storage().instance().set(&AI_AGENTS, &agents_mut2);
+
+        // Record fusion
+        let fusion_id = env
+            .storage()
+            .instance()
+            .get(&AGENT_FUSIONS)
+            .unwrap_or(Map::new(&env))
+            .len() as u64
+            + 1;
+
+        let fusion = AgentFusion {
+            fusion_id,
+            agent_a: agent_a_id,
+            agent_b: agent_b_id,
+            result_agent: agent_a_id,
+            fusion_cost,
+            fused_at: env.ledger().sequence() as u64,
+            success: true,
+        };
+
+        let mut fusions: Map<u64, AgentFusion> = env
+            .storage()
+            .instance()
+            .get(&AGENT_FUSIONS)
+            .unwrap_or(Map::new(&env));
+        fusions.set(fusion_id, fusion);
+        env.storage().instance().set(&AGENT_FUSIONS, &fusions);
+
+        Ok(fusion_id)
+    }
+
+    /// Get AI agent details
+    pub fn get_ai_agent(env: Env, agent_id: Address) -> Result<AiAgent, ContractError> {
+        let agents: Map<Address, AiAgent> = env
+            .storage()
+            .instance()
+            .get(&AI_AGENTS)
+            .ok_or(ContractError::AgentNotFound)?;
+        agents.get(agent_id).ok_or(ContractError::AgentNotFound)
+    }
+
+    /// Get fusion history
+    pub fn get_fusion(env: Env, fusion_id: u64) -> Result<AgentFusion, ContractError> {
+        let fusions: Map<u64, AgentFusion> = env
+            .storage()
+            .instance()
+            .get(&AGENT_FUSIONS)
+            .ok_or(ContractError::AgentNotFound)?;
+        fusions.get(fusion_id).ok_or(ContractError::AgentNotFound)
     }
 }
 

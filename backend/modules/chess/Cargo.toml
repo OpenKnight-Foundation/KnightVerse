@@ -12,3 +12,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 db_entity = { path = "../db/entity" }
 error = { path = "../error" }
 matchmaking = { path = "../matchmaking" }
+serde = { version = "1.0", features = ["derive"] }

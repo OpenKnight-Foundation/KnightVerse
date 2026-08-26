@@ -16,6 +16,10 @@ dependencies = [
 [project.optional-dependencies]
 gpu = [
     "pynvml>=11.5",
+    "onnxruntime-gpu>=1.16",
+]
+cpu = [
+    "onnxruntime>=1.16",
 ]
 dev = [
     "pytest>=7.0",

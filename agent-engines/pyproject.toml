@@ -11,6 +11,7 @@ dependencies = [
     "chess>=1.10",
     "numpy>=1.24",
     "prometheus-client>=0.17.0",
+    "redis>=4.5.0",
 ]
 
 [project.optional-dependencies]

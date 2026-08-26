@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import prometheus_client
-from prometheus_client import Counter, Gauge
-
-# Prometheus Metrics for AI Worker Pool
-WORKER_COUNT = Gauge('ai_worker_pool_size', 'Number of active AI workers in the pool')
-JOBS_PROCESSED = Counter('ai_worker_jobs_processed_total', 'Total number of jobs processed by the AI worker pool')
-
 import asyncio
 import logging
+import signal
+import time
 from collections.abc import Callable
+from typing import Dict, Optional, Set, Any
+from dataclasses import dataclass
+from multiprocessing import Process, Queue, Event
+
+import prometheus_client
+from prometheus_client import Counter, Gauge
 
 from gpu_worker.anomaly import BotFarmAnomalyDetector
 from gpu_worker.anomaly_logger import log_anomaly_report
@@ -22,49 +23,216 @@ from gpu_worker.maia_config import MaiaConfig
 
 logger = logging.getLogger("KnightVerse.WorkerPool")
 
+# Prometheus Metrics for AI Worker Pool
+WORKER_COUNT = Gauge('ai_worker_pool_size', 'Number of active AI workers in the pool')
+JOBS_PROCESSED = Counter('ai_worker_jobs_processed_total', 'Total number of jobs processed by the AI worker pool')
+WORKER_STARTUP_TIME = Gauge('ai_worker_startup_seconds', 'Time taken to start a worker', ['worker_id'])
+GRACEFUL_SHUTDOWNS = Counter('ai_worker_graceful_shutdowns_total', 'Number of graceful worker shutdowns')
+FORCED_SHUTDOWNS = Counter('ai_worker_forced_shutdowns_total', 'Number of forced worker shutdowns')
 
-class WorkerPool:
-    """Pool of GPU analysis workers with least-loaded dispatch."""
+
+@dataclass
+class ProcessWorkerInfo:
+    """Information about a worker process for autoscaling."""
+    process_id: int
+    gpu_device_id: int
+    worker_config: WorkerConfig
+    process_handle: Process
+    started_at: float
+    last_active: float
+    is_busy: bool = False
+    shutdown_requested: bool = False
+    graceful_shutdown_timeout: float = 30.0
+
+
+class AutoscalingWorkerPool:
+    """
+    Enhanced worker pool with autoscaling capabilities and graceful process management.
+    Integrates with the autoscaling daemon for dynamic worker lifecycle management.
+    """
 
     def __init__(
         self,
-        configs: list[WorkerConfig],
+        base_configs: list[WorkerConfig],
         maia_configs: list[MaiaConfig],
         *,
         worker_factory: Callable[[WorkerConfig, OpeningBook | None], GPUAnalysisWorker] | None = None,
         maia_worker_factory: Callable[[WorkerConfig, MaiaConfig], MaiaWorker] | None = None,
         anomaly_detector: BotFarmAnomalyDetector | None = None,
         opening_book: OpeningBook | None = None,
+        enable_autoscaling: bool = True,
+        min_workers: int = 2,
+        max_workers: int = 10,
     ) -> None:
-        if not configs and not maia_configs:
+        if not base_configs and not maia_configs:
             raise ValueError("WorkerPool requires at least one worker configuration")
         
+        self.base_configs = base_configs
+        self.maia_configs = maia_configs
+        self.min_workers = min_workers
+        self.max_workers = max_workers
+        self.enable_autoscaling = enable_autoscaling
+        
         factory = worker_factory or (lambda cfg, book: GPUAnalysisWorker(cfg, opening_book=book))
-        self._workers = [factory(config, opening_book) for config in configs]
+        self._workers = [factory(config, opening_book) for config in base_configs]
 
         maia_factory = maia_worker_factory or (lambda cfg, maia_cfg: MaiaWorker(cfg, maia_cfg.path))
-        self._maia_workers = [maia_factory(configs[0], maia_config) for maia_config in maia_configs]
+        self._maia_workers = [maia_factory(base_configs[0], maia_config) for maia_config in maia_configs]
 
         self._reservations = [0 for _ in self._workers]
         self._maia_reservations = [0 for _ in self._maia_workers]
         self._condition = asyncio.Condition()
         self._started = False
         self.anomaly_detector = anomaly_detector or BotFarmAnomalyDetector()
-
+        
+        # Process management for autoscaling
+        self._process_workers: Dict[int, ProcessWorkerInfo] = {}
+        self._shutdown_event = asyncio.Event()
+        self._shutdown_requested = False
+        self._graceful_shutdown_timeout = 30.0
+        
+        # Signal handling setup
+        self._original_sigterm_handler = None
+        self._original_sigint_handler = None
+        
     async def start_all(self) -> None:
-        """Initialize all workers in parallel."""
+        """Initialize all workers in parallel and set up signal handlers."""
 
         if self._started:
             return
+            
+        # Set up signal handlers for graceful shutdown
+        self._setup_signal_handlers()
+        
         await asyncio.gather(*(worker.start() for worker in self._workers))
         await asyncio.gather(*(worker.start() for worker in self._maia_workers))
+        
+        # Update Prometheus metrics
+        WORKER_COUNT.set(len(self._workers) + len(self._maia_workers))
+        
         self._started = True
+        logger.info(f"Worker pool started with {len(self._workers)} standard and {len(self._maia_workers)} Maia workers")
+
+    def _setup_signal_handlers(self) -> None:
+        """Set up signal handlers for graceful shutdown."""
+        try:
+            # Store original handlers
+            self._original_sigterm_handler = signal.signal(signal.SIGTERM, self._signal_handler)
+            self._original_sigint_handler = signal.signal(signal.SIGINT, self._signal_handler)
+            logger.debug("Signal handlers configured for graceful shutdown")
+        except ValueError as e:
+            # Signal handling might not be available in some contexts (e.g., threads)
+            logger.warning(f"Could not set up signal handlers: {e}")
+            
+    def _signal_handler(self, signum: int, frame) -> None:
+        """Handle shutdown signals gracefully."""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown")
+        self._shutdown_requested = True
+        self._shutdown_event.set()
+        
+        # Schedule graceful shutdown
+        asyncio.create_task(self.shutdown_all(wait_for_pending=True))
+        
+    async def add_worker(self, config: WorkerConfig, gpu_device_id: int) -> bool:
+        """
+        Add a new worker to the pool dynamically.
+        Returns True if worker was successfully added, False otherwise.
+        """
+        if len(self._workers) >= self.max_workers:
+            logger.warning(f"Cannot add worker: already at maximum capacity ({self.max_workers})")
+            return False
+            
+        try:
+            start_time = time.time()
+            
+            # Create and start new worker
+            factory = lambda cfg, book: GPUAnalysisWorker(cfg, opening_book=None)
+            new_worker = factory(config, None)
+            
+            await new_worker.start()
+            
+            # Add to workers list
+            async with self._condition:
+                self._workers.append(new_worker)
+                self._reservations.append(0)
+                self._condition.notify_all()
+                
+            # Update metrics
+            startup_time = time.time() - start_time
+            WORKER_COUNT.set(len(self._workers) + len(self._maia_workers))
+            WORKER_STARTUP_TIME.labels(worker_id=new_worker.worker_id).set(startup_time)
+            
+            logger.info(f"Added new worker {new_worker.worker_id} on GPU {gpu_device_id} (startup: {startup_time:.2f}s)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to add worker on GPU {gpu_device_id}: {e}")
+            return False
+            
+    async def remove_worker(self, worker_index: int, graceful: bool = True) -> bool:
+        """
+        Remove a worker from the pool dynamically.
+        Returns True if worker was successfully removed, False otherwise.
+        """
+        if worker_index < 0 or worker_index >= len(self._workers):
+            logger.error(f"Invalid worker index: {worker_index}")
+            return False
+            
+        if len(self._workers) <= self.min_workers:
+            logger.warning(f"Cannot remove worker: already at minimum capacity ({self.min_workers})")
+            return False
+            
+        try:
+            async with self._condition:
+                worker = self._workers[worker_index]
+                reservation_count = self._reservations[worker_index]
+                
+                if graceful and reservation_count > 0:
+                    logger.info(f"Worker {worker.worker_id} has {reservation_count} active tasks, waiting for completion")
+                    
+                    # Wait for worker to become idle
+                    timeout = time.time() + self._graceful_shutdown_timeout
+                    while self._reservations[worker_index] > 0 and time.time() < timeout:
+                        await asyncio.sleep(0.1)
+                        
+                    if self._reservations[worker_index] > 0:
+                        logger.warning(f"Worker {worker.worker_id} still has active tasks after timeout, forcing shutdown")
+                        FORCED_SHUTDOWNS.inc()
+                    else:
+                        GRACEFUL_SHUTDOWNS.inc()
+                else:
+                    if reservation_count > 0:
+                        FORCED_SHUTDOWNS.inc()
+                    else:
+                        GRACEFUL_SHUTDOWNS.inc()
+                
+                # Shutdown and remove worker
+                await worker.shutdown()
+                self._workers.pop(worker_index)
+                self._reservations.pop(worker_index)
+                
+                # Update indices in reservations for remaining workers
+                self._condition.notify_all()
+                
+            # Update metrics
+            WORKER_COUNT.set(len(self._workers) + len(self._maia_workers))
+            
+            logger.info(f"Removed worker {worker.worker_id} from pool")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to remove worker at index {worker_index}: {e}")
+            return False
 
     async def submit(self, request: AnalysisRequest, opening_book: OpeningBook | None = None) -> AnalysisResult:
         """Dispatch an analysis request to the least-loaded worker."""
 
         if not self._started:
             raise RuntimeError("worker pool has not been started")
+            
+        if self._shutdown_requested:
+            raise RuntimeError("worker pool is shutting down")
+            
         anomaly_report = self.anomaly_detector.record_request(request)
         if anomaly_report.findings:
             log_anomaly_report(anomaly_report)
@@ -75,7 +243,9 @@ class WorkerPool:
             worker = await self._acquire_maia_worker(elo)
             worker_index = self._maia_workers.index(worker)
             try:
-                return await worker.analyze(request)
+                result = await worker.analyze(request)
+                JOBS_PROCESSED.inc()
+                return result
             finally:
                 async with self._condition:
                     self._maia_reservations[worker_index] -= 1
@@ -85,7 +255,9 @@ class WorkerPool:
             worker_index = self._workers.index(worker)
             try:
                 # Pass the opening book to the worker's analyze method.
-                return await worker.analyze(request)
+                result = await worker.analyze(request)
+                JOBS_PROCESSED.inc()
+                return result
             finally:
                 async with self._condition:
                     self._reservations[worker_index] -= 1
@@ -120,26 +292,96 @@ class WorkerPool:
             wait_for_pending: Whether to wait for pending tasks to complete before shutdown
             timeout: Maximum time to wait for pending tasks in seconds
         """
+        if not self._started:
+            return
+            
+        logger.info("Initiating worker pool shutdown")
+        self._shutdown_requested = True
+        
         if wait_for_pending:
             try:
                 await self.wait_for_pending_tasks(timeout=timeout)
             except asyncio.TimeoutError:
-                logger.warning(f"Timed out waiting for {sum(self._reservations)} standard and {sum(self._maia_reservations)} Maia pending tasks to complete, proceeding with shutdown")
+                pending_standard = sum(self._reservations)
+                pending_maia = sum(self._maia_reservations)
+                logger.warning(f"Timed out waiting for {pending_standard} standard and {pending_maia} Maia pending tasks to complete, proceeding with shutdown")
+                FORCED_SHUTDOWNS.inc()
 
-        await asyncio.gather(*(worker.shutdown() for worker in self._workers))
-        await asyncio.gather(*(worker.shutdown() for worker in self._maia_workers))
+        # Shutdown all workers
+        try:
+            await asyncio.gather(*(worker.shutdown() for worker in self._workers), return_exceptions=True)
+            await asyncio.gather(*(worker.shutdown() for worker in self._maia_workers), return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Error during worker shutdown: {e}")
+            
+        # Restore original signal handlers
+        self._restore_signal_handlers()
+        
         self._started = False
+        WORKER_COUNT.set(0)
+        logger.info("Worker pool shutdown completed")
+        
+    def _restore_signal_handlers(self) -> None:
+        """Restore original signal handlers."""
+        try:
+            if self._original_sigterm_handler is not None:
+                signal.signal(signal.SIGTERM, self._original_sigterm_handler)
+            if self._original_sigint_handler is not None:
+                signal.signal(signal.SIGINT, self._original_sigint_handler)
+        except ValueError as e:
+            logger.debug(f"Could not restore signal handlers: {e}")
 
     def get_pool_status(self) -> list[WorkerInfo]:
         """Return per-worker monitoring information."""
-
         return [worker.get_info() for worker in self._workers]
+        
+    def get_detailed_status(self) -> Dict[str, Any]:
+        """Return detailed pool status including autoscaling information."""
+        return {
+            "started": self._started,
+            "shutdown_requested": self._shutdown_requested,
+            "worker_count": len(self._workers),
+            "maia_worker_count": len(self._maia_workers),
+            "min_workers": self.min_workers,
+            "max_workers": self.max_workers,
+            "pending_tasks": sum(self._reservations),
+            "pending_maia_tasks": sum(self._maia_reservations),
+            "autoscaling_enabled": self.enable_autoscaling,
+            "workers": [
+                {
+                    "worker_id": worker.worker_id,
+                    "load": worker.load,
+                    "reservations": self._reservations[i],
+                    "status": worker.get_info().status.value if hasattr(worker.get_info().status, 'value') else str(worker.get_info().status)
+                }
+                for i, worker in enumerate(self._workers)
+            ]
+        }
+        
+    def can_scale_up(self) -> bool:
+        """Check if the pool can add more workers."""
+        return len(self._workers) < self.max_workers and self.enable_autoscaling
+        
+    def can_scale_down(self) -> bool:
+        """Check if the pool can remove workers."""
+        return len(self._workers) > self.min_workers and self.enable_autoscaling
+        
+    def get_idle_workers(self) -> list[int]:
+        """Get indices of workers that are currently idle."""
+        idle_workers = []
+        for i, (worker, reservations) in enumerate(zip(self._workers, self._reservations)):
+            if worker.load == 0 and reservations == 0:
+                idle_workers.append(i)
+        return idle_workers
 
     async def _acquire_worker(self) -> GPUAnalysisWorker:
         """Wait until a worker has capacity and return the least-loaded one."""
 
         async with self._condition:
             while True:
+                if self._shutdown_requested:
+                    raise RuntimeError("Pool is shutting down")
+                    
                 indexed_candidates = [
                     (index, worker)
                     for index, worker in enumerate(self._workers)
@@ -163,6 +405,9 @@ class WorkerPool:
 
         async with self._condition:
             while True:
+                if self._shutdown_requested:
+                    raise RuntimeError("Pool is shutting down")
+                    
                 indexed_candidates = [
                     (index, worker)
                     for index, worker in enumerate(self._maia_workers)
@@ -181,3 +426,32 @@ class WorkerPool:
                     self._maia_reservations[worker_index] += 1
                     return worker
                 await self._condition.wait()
+
+
+# Legacy WorkerPool class for backward compatibility
+class WorkerPool(AutoscalingWorkerPool):
+    """Legacy WorkerPool class that extends AutoscalingWorkerPool for backward compatibility."""
+    
+    def __init__(
+        self,
+        configs: list[WorkerConfig],
+        maia_configs: list[MaiaConfig],
+        *,
+        worker_factory: Callable[[WorkerConfig, OpeningBook | None], GPUAnalysisWorker] | None = None,
+        maia_worker_factory: Callable[[WorkerConfig, MaiaConfig], MaiaWorker] | None = None,
+        anomaly_detector: BotFarmAnomalyDetector | None = None,
+        opening_book: OpeningBook | None = None,
+    ) -> None:
+        # Initialize with autoscaling disabled for legacy behavior
+        super().__init__(
+            configs,
+            maia_configs,
+            worker_factory=worker_factory,
+            maia_worker_factory=maia_worker_factory,
+            anomaly_detector=anomaly_detector,
+            opening_book=opening_book,
+            enable_autoscaling=False,
+            min_workers=len(configs),
+            max_workers=len(configs)
+        )
+

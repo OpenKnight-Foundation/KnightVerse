@@ -37,6 +37,7 @@ pub struct Game {
     pub created_at: u64,
     pub winner: Option<Address>,
     pub last_move_at: u64, // Ledger sequence of last move
+    pub board_fen: Bytes,
 }
 
 #[contracttype]
@@ -490,6 +491,7 @@ impl GameContract {
         env: Env,
         player1: Address,
         wager_amount: i128,
+        initial_board: Bytes,
     ) -> Result<u64, ContractError> {
         Self::check_not_paused(&env);
         let max_stake: i128 = env.storage().instance().get(&MAX_STAKE).unwrap_or(1_000);
@@ -537,6 +539,7 @@ impl GameContract {
             created_at: env.ledger().sequence() as u64,
             winner: None,
             last_move_at: env.ledger().sequence() as u64,
+            board_fen: initial_board,
         };
 
         let mut games: Map<u64, Game> = env
@@ -691,6 +694,8 @@ impl GameContract {
         game_id: u64,
         player: Address,
         move_data: Vec<u32>,
+        new_board: Bytes,
+        game_status: u32,
     ) -> Result<(), ContractError> {
         Self::check_not_paused(&env);
         let mut games: Map<u64, Game> = env
@@ -731,6 +736,19 @@ impl GameContract {
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
         game.last_move_at = env.ledger().sequence() as u64;
+        game.board_fen = new_board;
+
+        // Auto settlement logic based on status flag
+        if game_status == 1 {
+            // Checkmate: submitting player wins
+            game.state = GameState::Completed;
+            game.winner = Some(player.clone());
+            Self::process_payout(&env, &game, &player)?;
+        } else if game_status == 2 {
+            // Draw
+            game.state = GameState::Drawn;
+            Self::process_draw_payout(&env, &game)?;
+        }
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -3718,7 +3736,7 @@ mod tests {
 
         // Create & join game with wager = 5 (pool = 10)
         let wager: i128 = 5;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         // player1 forfeits → player2 wins
@@ -3778,7 +3796,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 500; // pool = 1000
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
         client.forfeit(&game_id, &player1); // player2 wins
 
@@ -3818,7 +3836,7 @@ mod tests {
         client.initialize_token(&admin, &token_address);
 
         let initial_wager: i128 = 100;
-        let game_id = client.create_game(&player1, &initial_wager);
+        let game_id = client.create_game(&player1, &initial_wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
         client.forfeit(&game_id, &player1);
 
@@ -4141,7 +4159,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         env.as_contract(&contract_id, || {
@@ -4193,7 +4211,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let result = client.try_claim_timeout_win(&game_id, &player2);
@@ -4234,7 +4252,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let remaining = client.get_timeout_remaining(&game_id);
@@ -4287,7 +4305,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let reason = Bytes::from_slice(&env, b"Engine abuse");
@@ -4337,7 +4355,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let reason = Bytes::from_slice(&env, b"Illegal move");
@@ -4390,7 +4408,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
         client.forfeit(&game_id, &player1);
 
@@ -4434,7 +4452,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let reason = Bytes::from_slice(&env, b"Illegal move");
@@ -4486,7 +4504,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         env.as_contract(&contract_id, || {
@@ -4536,16 +4554,16 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let first_move = Vec::from_array(&env, [12u32, 28u32]);
-        client.submit_move(&game_id, &player1, &first_move);
+        client.submit_move(&game_id, &player1, &first_move, &Bytes::new(&env), &0u32);
 
         env.ledger().set_sequence_number(2);
 
         let second_move = Vec::from_array(&env, [52u32, 36u32]);
-        client.submit_move(&game_id, &player2, &second_move);
+        client.submit_move(&game_id, &player2, &second_move, &Bytes::new(&env), &0u32);
 
         let game = client.get_game(&game_id);
         assert_eq!(game.current_turn, 1);
@@ -4603,15 +4621,15 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         let early_move = Vec::from_array(&env, [52u32, 36u32]);
-        let result = client.try_submit_move(&game_id, &player2, &early_move);
+        let result = client.try_submit_move(&game_id, &player2, &early_move, &Bytes::new(&env), &0u32);
         assert_eq!(result, Err(Ok(ContractError::NotYourTurn)));
 
         let empty_move = Vec::new(&env);
-        let result = client.try_submit_move(&game_id, &player1, &empty_move);
+        let result = client.try_submit_move(&game_id, &player1, &empty_move, &Bytes::new(&env), &0u32);
         assert_eq!(result, Err(Ok(ContractError::InvalidMove)));
     }
 
@@ -4651,7 +4669,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         // File dispute

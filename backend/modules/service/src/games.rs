@@ -614,8 +614,10 @@ mod tests {
         // We need two query result sets: one for count, one for the main query
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (count)
-                vec![],
+                // First query result (count) — empty set; typed so `T: IntoMockRow`
+                // can be inferred. count() on no rows resolves to 0 and execution
+                // continues to the data query below.
+                Vec::<game::Model>::new(),
             ])
             .append_query_results(vec![
                 // Second query result (main data)
@@ -654,7 +656,9 @@ mod tests {
         // We expect two queries (count + data)
         assert_eq!(transaction_log.len(), 2);
         
-        let log = &transaction_log[0];
+        // Inspect the data query (index 1); index 0 is the COUNT query, which
+        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
+        let log = &transaction_log[1];
         let log_str = format!("{:?}", log);
         println!("Log: {}", log_str);
 
@@ -676,8 +680,10 @@ mod tests {
 
         let db = MockDatabase::new(DbBackend::Postgres)
             .append_query_results(vec![
-                // First query result (count)
-                vec![],
+                // First query result (count) — empty set; typed so `T: IntoMockRow`
+                // can be inferred. count() on no rows resolves to 0 and execution
+                // continues to the data query below.
+                Vec::<game::Model>::new(),
             ])
             .append_query_results(vec![
                 // Second query result (main data)
@@ -708,7 +714,9 @@ mod tests {
         ).await;
         
         let transaction_log = db.into_transaction_log();
-        let log = &transaction_log[0];
+        // Inspect the data query (index 1); index 0 is the COUNT query, which
+        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
+        let log = &transaction_log[1];
         let log_str = format!("{:?}", log);
         println!("Log with cursor: {}", log_str);
 

@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Symbol, token};
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, panic_with_error, symbol_short, Address, Env, String, Symbol, token};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -16,6 +16,12 @@ pub enum RegistryError {
     TournamentAlreadyExists = 9,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 10,
+    /// Caller is not the contract admin
+    NotAdmin = 11,
+    /// Contract is already paused
+    AlreadyPaused = 12,
+    /// Contract is not currently paused
+    NotPaused = 13,
 }
 
 #[contracttype]
@@ -78,10 +84,10 @@ impl GameRegistry {
             .ok_or(RegistryError::NotInitialized)?;
         caller.require_auth();
         if caller != admin {
-            panic!("Not admin");
+            return Err(RegistryError::NotAdmin);
         }
         if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
-            panic!("Already paused");
+            return Err(RegistryError::AlreadyPaused);
         }
         env.storage().instance().set(&DataKey::Paused, &true);
         env.events()
@@ -99,10 +105,10 @@ impl GameRegistry {
             .ok_or(RegistryError::NotInitialized)?;
         caller.require_auth();
         if caller != admin {
-            panic!("Not admin");
+            return Err(RegistryError::NotAdmin);
         }
         if !env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
-            panic!("Not paused");
+            return Err(RegistryError::NotPaused);
         }
         env.storage().instance().set(&DataKey::Paused, &false);
         env.events()
@@ -115,10 +121,10 @@ impl GameRegistry {
         env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
     }
 
-    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    /// Internal helper — returns `ContractError::ContractPaused` when the contract is paused.
     fn check_not_paused(env: &Env) {
         if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
-            panic!("Contract is paused");
+            panic_with_error!(env, RegistryError::ContractPaused);
         }
     }
 

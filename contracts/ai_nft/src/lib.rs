@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map,
-    String, Symbol,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    BytesN, Env, Map, String, Symbol,
 };
 
 // AI NFT metadata structure
@@ -37,6 +37,14 @@ pub enum ContractError {
     MinterMismatch = 6,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 7,
+    /// Contract has already been initialized
+    AlreadyInitialized = 8,
+    /// Caller is not the contract admin
+    NotAdmin = 9,
+    /// Contract is already paused
+    AlreadyPaused = 10,
+    /// Contract is not currently paused
+    NotPaused = 11,
 }
 
 #[contract]
@@ -47,7 +55,7 @@ impl AINFTContract {
     /// Initialize the AI NFT contract with an admin address
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&ADMIN) {
-            panic!("Contract already initialized");
+            panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
         admin.require_auth();
         env.storage().instance().set(&ADMIN, &admin);
@@ -67,10 +75,10 @@ impl AINFTContract {
         caller.require_auth();
         let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Already paused");
+            panic_with_error!(&env, ContractError::AlreadyPaused);
         }
         env.storage().instance().set(&PAUSED, &true);
         env.events()
@@ -83,10 +91,10 @@ impl AINFTContract {
         caller.require_auth();
         let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Not paused");
+            panic_with_error!(&env, ContractError::NotPaused);
         }
         env.storage().instance().set(&PAUSED, &false);
         env.events()
@@ -98,10 +106,10 @@ impl AINFTContract {
         env.storage().instance().get(&PAUSED).unwrap_or(false)
     }
 
-    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    /// Internal helper — panics with `ContractError::ContractPaused` when the contract is paused.
     fn check_not_paused(env: &Env) {
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Contract is paused");
+            panic_with_error!(env, ContractError::ContractPaused);
         }
     }
 

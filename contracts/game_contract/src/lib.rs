@@ -984,6 +984,53 @@ impl GameContract {
         env.storage().instance().set(&CONTRACT_ADMIN, &admin);
     }
 
+    /// Rotate the ED25519 backend signing key used to authorise puzzle-reward
+    /// claims.  Only the current `CONTRACT_ADMIN` may call this.
+    ///
+    /// # Arguments
+    /// * `admin`           – Must match the stored `CONTRACT_ADMIN` address and
+    ///                       provide a valid Soroban authorization.
+    /// * `new_public_key`  – Replacement 32-byte ED25519 public key.
+    ///
+    /// # Errors / panics
+    /// * Panics with `"Not initialized"` if the contract has not been set up.
+    /// * Panics with `"Unauthorized admin address"` if `admin` != stored admin.
+    /// * Panics with `"Admin public key must be 32 bytes"` for wrong-length keys.
+    /// * Panics with `"New key must differ from current key"` if the caller
+    ///   supplies the same key that is already stored (guards against accidents).
+    pub fn rotate_admin_key(env: Env, admin: Address, new_public_key: Bytes) {
+        // 1. Load and authenticate against the stored admin address.
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+
+        current_admin.require_auth();
+
+        if admin != current_admin {
+            panic!("Unauthorized admin address");
+        }
+
+        // 2. Validate the new key.
+        if new_public_key.len() != 32 {
+            panic!("Admin public key must be 32 bytes");
+        }
+
+        let current_key: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        if new_public_key == current_key {
+            panic!("New key must differ from current key");
+        }
+
+        // 3. Persist the rotated key.
+        env.storage().instance().set(&ADMIN_KEY, &new_public_key);
+    }
+
     // ── #199 – claim_puzzle_reward ────────────────────────────────────────────
     //
     // Accepts a backend ED25519 signature that proves the user solved a puzzle,

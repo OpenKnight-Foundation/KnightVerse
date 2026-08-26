@@ -155,7 +155,15 @@ const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is pa
 // Token whitelist (SC-17)
 const ALLOWED_TOKENS: Symbol = symbol_short!("ALLWD_T"); // Vec<Address> - whitelisted token addresses
 
-// ────────────────────────────────────────────────────────────────────────────
+// Reentrancy guard (#860)
+const R_GUARD: Symbol = symbol_short!("R_GUARD");
+
+// Admin key rotation timelock (#890): 24h = 17280 ledger sequences at 5s/ledger
+const ADMIN_TIMELOCK: Symbol = symbol_short!("ADM_TLK"); // u64 - lock duration (ledger sequences)
+const PENDING_ADMIN_KEY: Symbol = symbol_short!("PEND_ADM"); // Option<BytesN<32>> - proposed new admin key
+const PENDING_ADMIN_TIMESTAMP: Symbol = symbol_short!("PEND_TS"); // u64 - ledger sequence when proposal was made
+
+// �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -428,6 +436,8 @@ impl GameContract {
         // Dust to first winner
         let remainder = total_pool - distributed;
 
+        Self::non_reentrant_enter(&env)?;
+
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
 
@@ -443,6 +453,7 @@ impl GameContract {
         games.set(game_id, settled_game);
         env.storage().instance().set(&GAMES, &games);
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -497,6 +508,7 @@ impl GameContract {
         let contract_address = env.current_contract_address();
 
         if token_client.balance(&player1) < wager_amount {
+            Self::non_reentrant_exit(&env);
             return Err(ContractError::InsufficientFunds);
         }
 
@@ -612,6 +624,7 @@ impl GameContract {
         let contract_address = env.current_contract_address();
 
         if token_client.balance(&player2) < game.wager_amount {
+            Self::non_reentrant_exit(&env);
             return Err(ContractError::InsufficientFunds);
         }
 
@@ -789,8 +802,16 @@ impl GameContract {
         env.crypto()
             .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
 
+        Self::non_reentrant_enter(&env)?;
+
         game.state = GameState::Drawn;
-        Self::process_draw_payout(&env, &game)?;
+        match Self::process_draw_payout(&env, &game) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);
@@ -879,8 +900,16 @@ impl GameContract {
         env.crypto()
             .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
 
+        Self::non_reentrant_enter(&env)?;
+
         game.winner = Some(winner.clone());
-        Self::process_payout(&env, &game, &winner)?;
+        match Self::process_payout(&env, &game, &winner) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
         game.state = GameState::Settled;
 
         games.set(game_id, game);
@@ -931,6 +960,8 @@ impl GameContract {
         }
 
         player.require_auth();
+
+        Self::non_reentrant_enter(&env)?;
 
         // Refund player1's staked wager
         let mut escrow: Map<Address, i128> = env
@@ -1007,8 +1038,16 @@ impl GameContract {
             game.player1.clone()
         };
 
+        Self::non_reentrant_enter(&env)?;
+
         game.winner = Some(winner.clone());
-        Self::process_payout(&env, &game, &winner)?;
+        match Self::process_payout(&env, &game, &winner) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
         game.state = GameState::Settled;
 
         games.set(game_id, game);
@@ -1064,7 +1103,15 @@ impl GameContract {
 
         winner.require_auth();
 
-        Self::process_payout(&env, &game, &winner)?;
+        Self::non_reentrant_enter(&env)?;
+
+        match Self::process_payout(&env, &game, &winner) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
         game.state = GameState::Settled;
 
         games.set(game_id, game);
@@ -1153,6 +1200,8 @@ impl GameContract {
             total_pool = game.wager_amount * 2;
         }
 
+        Self::non_reentrant_enter(&env)?;
+
         // Deduct wagers first to prevent double-counting
         escrow.set(game.player1.clone(), player1_escrow - game.wager_amount);
         if let Some(ref player2) = game.player2 {
@@ -1173,6 +1222,7 @@ impl GameContract {
         }
 
         if total_percentage != 100 {
+            Self::non_reentrant_exit(&env);
             return Err(ContractError::InvalidPercentage);
         }
 
@@ -1508,6 +1558,85 @@ impl GameContract {
         env.storage().instance().set(&CONTRACT_ADMIN, &admin);
     }
 
+    /// Propose a new admin key with a 24-hour timelock.
+    /// Only the current admin (CONTRACT_ADMIN) can propose.
+    pub fn propose_new_admin_key(
+        env: Env,
+        admin: Address,
+        new_key: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .ok_or(ContractError::NotAuthorized)?;
+        if admin != stored_admin {
+            return Err(ContractError::NotAuthorized);
+        }
+        if env.storage().instance().has(&PENDING_ADMIN_KEY) {
+            return Err(ContractError::AdminKeyAlreadyPending);
+        }
+
+        let current_seq = env.ledger().sequence();
+        env.storage().instance().set(&PENDING_ADMIN_KEY, &new_key);
+        env.storage()
+            .instance()
+            .set(&PENDING_ADMIN_TIMESTAMP, &current_seq);
+        env.storage()
+            .instance()
+            .set(&ADMIN_TIMELOCK, &(current_seq + ADMIN_TIMELOCK_DURATION));
+
+        env.events().publish(
+            (symbol_short!("admin_key_proposed"),),
+            (admin, new_key.clone(), current_seq),
+        );
+
+        Ok(())
+    }
+
+    /// Accept a pending admin key proposal after the timelock expires.
+    /// Anyone can call this once the 24-hour window has elapsed.
+    pub fn accept_new_admin_key(env: Env) -> Result<(), ContractError> {
+        let proposed_key: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&PENDING_ADMIN_KEY)
+            .ok_or(ContractError::NoPendingAdminKey)?;
+
+        let proposal_seq: u64 = env
+            .storage()
+            .instance()
+            .get(&PENDING_ADMIN_TIMESTAMP)
+            .ok_or(ContractError::NoPendingAdminKey)?;
+
+        let current_seq = env.ledger().sequence();
+        let lock_duration: u64 = env
+            .storage()
+            .instance()
+            .get(&ADMIN_TIMELOCK)
+            .unwrap_or(ADMIN_TIMELOCK_DURATION);
+
+        if current_seq < proposal_seq + lock_duration {
+            return Err(ContractError::TimelockNotExpired);
+        }
+
+        env.storage().instance().set(&ADMIN_KEY, &proposed_key);
+        env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_TIMESTAMP);
+        env.storage().instance().remove(&ADMIN_TIMELOCK);
+
+        env.events().publish(
+            (symbol_short!("admin_key_accepted"),),
+            (proposed_key,),
+        );
+
+        Ok(())
+    }
+
+    /// Admin key rotation timelock duration (default: 17280 ledger sequences = 24 hours at 5s/ledger).
+    pub const ADMIN_TIMELOCK_DURATION: u64 = 17280;
+
     // ── #199 – claim_puzzle_reward ────────────────────────────────────────────
     //
     // Accepts a backend ED25519 signature that proves the user solved a puzzle,
@@ -1610,6 +1739,8 @@ impl GameContract {
         env.crypto()
             .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
 
+        Self::non_reentrant_enter(&env)?;
+
         // 4. Mark nonce as used (state-before-interaction pattern)
         nonces.set(nonce, true);
         env.storage().instance().set(&USED_NONCE, &nonces);
@@ -1638,6 +1769,7 @@ impl GameContract {
         env.events()
             .publish((symbol_short!("pzl_rwd"), recipient.clone()), reward_amount);
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1740,6 +1872,8 @@ impl GameContract {
 
         let mut total_claimed: i128 = 0;
 
+        Self::non_reentrant_enter(&env)?;
+
         for proof in proofs.iter() {
             let Proof {
                 recipient,
@@ -1749,12 +1883,14 @@ impl GameContract {
             } = proof;
 
             if reward_amount <= 0 || reward_amount > i64::MAX as i128 {
+                Self::non_reentrant_exit(&env);
                 return Err(ContractError::InvalidAmount);
             }
 
             // Replay protection — also rejects duplicate nonces within the
             // same batch, since `nonces` is updated as we go.
             if nonces.get(nonce).unwrap_or(false) {
+                Self::non_reentrant_exit(&env);
                 return Err(ContractError::Unauthorized);
             }
 
@@ -1803,6 +1939,7 @@ impl GameContract {
         env.events()
             .publish((symbol_short!("pzlbatch"),), (proofs.len(), total_claimed));
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1957,12 +2094,15 @@ impl GameContract {
 
         filer.require_auth();
 
+        Self::non_reentrant_enter(&env)?;
+
         let dispute_fee: i128 = env.storage().instance().get(&DISPUTE_FEE).unwrap_or(0);
         if dispute_fee > 0 {
             let token_client = Self::token_client(&env);
             let contract_address = env.current_contract_address();
 
             if token_client.balance(&filer) < dispute_fee {
+                Self::non_reentrant_exit(&env);
                 return Err(ContractError::InsufficientDisputeFee);
             }
 
@@ -1999,6 +2139,7 @@ impl GameContract {
             (dispute_counter, filer),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(dispute_counter)
     }
 
@@ -2075,8 +2216,16 @@ impl GameContract {
             return Err(ContractError::TimeoutNotReached);
         }
 
+        Self::non_reentrant_enter(&env)?;
+
         game.winner = Some(claimant.clone());
-        Self::process_payout(&env, &game, &claimant)?;
+        match Self::process_payout(&env, &game, &claimant) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
         game.state = GameState::Settled;
 
         games.set(game_id, game);
@@ -2087,6 +2236,7 @@ impl GameContract {
             (claimant, timeout_duration),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -2192,20 +2342,35 @@ impl GameContract {
             return Err(ContractError::GameAlreadyCompleted);
         }
 
+        Self::non_reentrant_enter(&env)?;
+
         match winner {
             Some(ref winner_addr) => {
                 if *winner_addr != game.player1 && Some(winner_addr.clone()) != game.player2 {
+                    Self::non_reentrant_exit(&env);
                     return Err(ContractError::NotPlayer);
                 }
                 game.state = GameState::Completed;
                 game.winner = Some(winner_addr.clone());
-                Self::process_payout(&env, &game, winner_addr)?;
+                match Self::process_payout(&env, &game, winner_addr) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        Self::non_reentrant_exit(&env);
+                        return Err(e);
+                    }
+                }
                 game.state = GameState::Settled;
             }
             None => {
                 game.state = GameState::Drawn;
                 game.winner = None;
-                Self::process_draw_payout(&env, &game)?;
+                match Self::process_draw_payout(&env, &game) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        Self::non_reentrant_exit(&env);
+                        return Err(e);
+                    }
+                }
             }
         }
 
@@ -2222,6 +2387,7 @@ impl GameContract {
             (dispute_id, winner),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -2281,6 +2447,8 @@ impl GameContract {
             return Err(ContractError::GameAlreadyCompleted);
         }
 
+        Self::non_reentrant_enter(&env)?;
+
         // Update dispute status
         dispute.status = DisputeStatus::Rejected;
         dispute.resolution = Some(reason);
@@ -2302,6 +2470,7 @@ impl GameContract {
             (dispute_id, filer),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -3097,6 +3266,8 @@ impl GameContract {
             return Err(ContractError::InvalidPercentage);
         }
 
+        Self::non_reentrant_enter(&env)?;
+
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
         let total = escrow.total_amount;
@@ -3142,6 +3313,7 @@ impl GameContract {
             escrow_id,
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -4458,5 +4630,96 @@ mod tests {
 
         let escrow = client.get_tournament_escrow(&escrow_id);
         assert!(escrow.released);
+    }
+
+    // ── Reentrancy Guard Tests (#860) ──────────────────────────────────────────
+
+    #[test]
+    fn test_reentrancy_guard_normal_call_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+        stellar_asset_client.mint(&player1, &1_000i128);
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        let game_id = client.create_game(&player1, &100);
+        assert!(game_id > 0);
+    }
+
+    #[test]
+    fn test_reentrancy_guard_rejects_nested_entry() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+        stellar_asset_client.mint(&player1, &1_000i128);
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        env.as_contract(&contract_id, || {
+            env.storage().instance().set(&R_GUARD, &1u32);
+        });
+        let result = client.try_create_game(&player1, &100);
+        assert_eq!(result, Err(Ok(ContractError::ReentrantCall)));
+    }
+
+    #[test]
+    fn test_reentrancy_guard_released_after_call() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let issuer = Address::generate(&env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let treasury_addr = Address::generate(&env);
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(&env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+
+        // First call: create_game enters and exits guard
+        let game_id = client.create_game(&player1, &100);
+
+        // Guard should be released, allowing join_game to proceed
+        client.join_game(&game_id, &player2);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.state, GameState::InProgress);
     }
 }

@@ -1252,4 +1252,117 @@ fn fuzz_payout_even_split() {
             assert_eq!(v1 + v2, pool, "[iter {iter}] 50/50 total");
         });
     }
+    #[test]
+    fn test_reentrancy_guard_payout_tournament() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let wager: i128 = 1000;
+        let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
+        let winner1 = Address::generate(&env);
+        let mut winners = Vec::new(&env);
+        winners.push_back(winner1.clone());
+        let mut percentages = Vec::new(&env);
+        percentages.push_back(100);
+        client.mock_all_auths().payout_tournament(&game_id, &winners, &percentages);
+        let games: Map<u64, Game> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&GAMES).unwrap()
+        });
+        let game = games.get(game_id).unwrap();
+        assert_eq!(game.state, GameState::Settled);
+    }
+
+    #[test]
+    fn test_reentrancy_guard_claim_win() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let wager: i128 = 1000;
+        let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
+        let winner = Address::generate(&env);
+        client.mock_all_auths().claim_win(&game_id, &winner);
+        let games: Map<u64, Game> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&GAMES).unwrap()
+        });
+        let game = games.get(game_id).unwrap();
+        assert_eq!(game.state, GameState::Settled);
+    }
+
+    // ADMIN_KEY Rotation Timelock Tests (#890)
+
+    #[test]
+    fn test_propose_new_admin_key_admin_only() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
+        env.mock_all_auths();
+        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        let stranger = Address::generate(&env);
+        let new_key = BytesN::from_array(&env, &[2u8; 32]);
+        let res = client.try_propose_new_admin_key(&stranger, &new_key);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_propose_new_admin_key_sets_pending() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
+        env.mock_all_auths();
+        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        let new_key = BytesN::from_array(&env, &[2u8; 32]);
+        client.propose_new_admin_key(&admin, &new_key);
+        env.as_contract(&contract_id, || {
+            let pending: BytesN<32> = env.storage().instance().get(&PENDING_ADMIN_KEY).unwrap();
+            assert_eq!(pending, new_key);
+        });
+    }
+
+    #[test]
+    fn test_accept_new_admin_key_no_pending() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let res = client.try_accept_new_admin_key();
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_accept_new_admin_key_timelock_not_expired() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
+        env.mock_all_auths();
+        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        let new_key = BytesN::from_array(&env, &[2u8; 32]);
+        client.propose_new_admin_key(&admin, &new_key);
+        let res = client.try_accept_new_admin_key();
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_propose_new_admin_key_already_pending() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
+        env.mock_all_auths();
+        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        let key1 = BytesN::from_array(&env, &[2u8; 32]);
+        let key2 = BytesN::from_array(&env, &[3u8; 32]);
+        client.propose_new_admin_key(&admin, &key1);
+        let res = client.try_propose_new_admin_key(&admin, &key2);
+        assert!(res.is_err());
+    }
 }

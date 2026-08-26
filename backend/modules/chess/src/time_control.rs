@@ -68,6 +68,6 @@ impl PlayerClock {
     }
 
     pub fn time_out(&self) -> bool {
-        self.remaining_time.is_zero()
+        self.get_real_time_remaining().is_zero()
     }
 }

@@ -170,15 +170,31 @@ fn parse_moves(move_text: &str) -> Vec<String> {
     let tokens: Vec<&str> = without_variations.split_whitespace().collect();
 
     // Filter out move numbers, results, and other non-move tokens
-    let move_number_regex = Regex::new(r"^\d+\.+$").unwrap();
+    // Match standalone move numbers like "1." or "1..." (spaced format)
+    let standalone_move_number_regex = Regex::new(r"^\d+\.+$").unwrap();
+    // Strip leading move-number prefix from tokens like "1.e4" or "10...Nf3"
+    let move_number_prefix_regex = Regex::new(r"^\d+\.+").unwrap();
     let result_regex = Regex::new(r"^(1-0|0-1|1/2-1/2|\*)$").unwrap();
 
     tokens
         .into_iter()
-        .filter(|token| {
-            !move_number_regex.is_match(token) && !result_regex.is_match(token) && !token.is_empty()
+        .filter(|token| !token.is_empty())
+        .filter_map(|token| {
+            // Skip standalone results
+            if result_regex.is_match(token) {
+                return None;
+            }
+            // Skip standalone move numbers (spaced PGN: "1." "2." etc.)
+            if standalone_move_number_regex.is_match(token) {
+                return None;
+            }
+            // Strip leading move-number prefix from compact tokens (e.g. "1.e4" → "e4")
+            let cleaned = move_number_prefix_regex.replace(token, "");
+            if cleaned.is_empty() {
+                return None;
+            }
+            Some(cleaned.to_string())
         })
-        .map(|s| s.to_string())
         .collect()
 }
 
@@ -328,6 +344,24 @@ mod tests {
         let parsed = parse_pgn(pgn).unwrap();
         assert_eq!(parsed.moves.len(), 4);
         assert_eq!(parsed.headers.result, GameResult::Draw);
+    }
+
+    #[test]
+    fn test_parse_compact_pgn_with_glued_move_numbers() {
+        let pgn = r#"[White "A"]
+[Black "B"]
+[Result "*"]
+
+1.e4 e5 2.Nf3 Nc6 *"#;
+
+        let result = parse_pgn(pgn);
+        assert!(result.is_ok());
+
+        let parsed = result.unwrap();
+        assert_eq!(parsed.moves, vec!["e4", "e5", "Nf3", "Nc6"]);
+
+        let validated = validate_game(&parsed);
+        assert!(validated.is_ok());
     }
 
     #[test]

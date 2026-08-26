@@ -202,6 +202,132 @@ pub struct TournamentEscrow {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Puzzle bounty types (#982)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PuzzleBounty {
+    pub bounty_id: u64,
+    pub puzzle_id: u64,
+    pub creator: Address,
+    pub reward_amount: i128,
+    pub total_submissions: u32,
+    pub max_winners: u32,
+    pub deadline: u64, // ledger sequence
+    pub claimed: bool,
+    pub winner: Option<Address>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BountySubmission {
+    pub solver: Address,
+    pub puzzle_id: u64,
+    pub solution_hash: BytesN<32>,
+    pub submitted_at: u64,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Time-decay penalty types (#986)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PenaltyRecord {
+    pub player: Address,
+    pub penalty_amount: i128,
+    pub issued_at: u64,       // ledger sequence
+    pub expires_at: u64,       // ledger sequence when penalty expires
+    pub reason: Bytes,
+    pub decay_rate_bips: u32, // basis points per ledger (e.g., 10 = 0.1%)
+    pub original_amount: i128,
+    pub is_banned: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DecayConfig {
+    pub min_penalty_threshold: i128, // minimum penalty to trigger decay
+    pub max_decay_duration: u64,     // max ledger sequences for decay
+    pub base_decay_rate_bips: u32,   // default decay rate in basis points
+    pub ban_threshold: i128,         // penalty amount that triggers ban
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Token-gated VIP types (#987)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VipTier {
+    None,
+    Bronze,
+    Silver,
+    Gold,
+    Diamond,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VipHolder {
+    pub address: Address,
+    pub tier: VipTier,
+    pub token_balance: i128,
+    pub joined_at: u64,
+    pub expires_at: Option<u64>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VipConfig {
+    pub bronze_threshold: i128,
+    pub silver_threshold: i128,
+    pub gold_threshold: i128,
+    pub diamond_threshold: i128,
+    pub fee_discount_bronze: u32, // basis points discount
+    pub fee_discount_silver: u32,
+    pub fee_discount_gold: u32,
+    pub fee_discount_diamond: u32,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Soulbound trophy types (#994)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Trophy {
+    pub trophy_id: u64,
+    pub owner: Address,
+    pub trophy_type: TrophyType,
+    pub earned_at: u64,
+    pub metadata_uri: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrophyType {
+    FirstWin,
+    WinStreak(u32),      // e.g., WinStreak(10) = 10 wins in a row
+    PuzzleMaster,         // Solved 100 puzzles
+    TournamentChampion,   // Won a tournament
+    RatingMilestone(i32), // e.g., RatingMilestone(2000)
+    Custom(BytesN<32>),   // Custom trophy with hash identifier
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TrophyMetadata {
+    pub trophy_id: u64,
+    pub trophy_type: TrophyType,
+    pub name: String,
+    pub description: String,
+    pub image_uri: String,
+    pub total_minted: u32,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Errors
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -3735,6 +3861,487 @@ escrows.set(escrow_id, escrow);
     }
 }
 
+
+// ────────────────────────────────────────────────────────────────────────────
+// Puzzle Bounty Proofs (#982)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a new puzzle bounty
+    pub fn create_puzzle_bounty(
+        env: Env,
+        creator: Address,
+        puzzle_id: u64,
+        reward_amount: i128,
+        max_winners: u32,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        creator.require_auth();
+
+        if reward_amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // Transfer reward from creator to contract escrow
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer_from(
+            &creator,                // from
+            &env.current_contract_address(), // to (this contract)
+            &reward_amount,
+        );
+
+        let mut bounty_counter: u64 = env
+            .storage()
+            .instance()
+            .get(&BOUNTY_COUNTER)
+            .unwrap_or(0);
+        bounty_counter += 1;
+        env.storage().instance().set(&BOUNTY_COUNTER, &bounty_counter);
+
+        let bounty = PuzzleBounty {
+            bounty_id: bounty_counter,
+            puzzle_id,
+            creator,
+            reward_amount,
+            total_submissions: 0,
+            max_winners,
+            deadline,
+            claimed: false,
+            winner: None,
+        };
+
+        let mut bounties: Map<u64, PuzzleBounty> = env
+            .storage()
+            .instance()
+            .get(&PUZZLE_BOUNTIES)
+            .unwrap_or(Map::new(&env));
+        bounties.set(bounty_counter, bounty);
+        env.storage().instance().set(&PUZZLE_BOUNTIES, &bounties);
+
+        Ok(bounty_counter)
+    }
+
+    /// Claim a puzzle bounty with proof
+    pub fn claim_puzzle_bounty(
+        env: Env,
+        bounty_id: u64,
+        solver: Address,
+        solution_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        solver.require_auth();
+
+        let mut bounties: Map<u64, PuzzleBounty> = env
+            .storage()
+            .instance()
+            .get(&PUZZLE_BOUNTIES)
+            .ok_or(ContractError::BountyNotFound)?;
+        let mut bounty = bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)?;
+
+        if bounty.claimed {
+            return Err(ContractError::BountyAlreadyClaimed);
+        }
+
+        if env.ledger().sequence() as u64 > bounty.deadline {
+            return Err(ContractError::TimeoutNotReached);
+        }
+
+        if bounty.total_submissions >= bounty.max_winners {
+            return Err(ContractError::BountyAlreadyClaimed);
+        }
+
+        // Record submission
+        let submission = BountySubmission {
+            solver: solver.clone(),
+            puzzle_id: bounty.puzzle_id,
+            solution_hash,
+            submitted_at: env.ledger().sequence() as u64,
+        };
+
+        // Mark as claimed and distribute reward
+        bounty.claimed = true;
+        bounty.winner = Some(solver.clone());
+        bounty.total_submissions += 1;
+        bounties.set(bounty_id, bounty);
+        env.storage().instance().set(&PUZZLE_BOUNTIES, &bounties);
+
+        // Transfer reward to solver
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        let treasury: Address = env.storage().instance().get(&TREASURY_ADDR).unwrap();
+        token_client.transfer(&treasury, &solver, &bounty.reward_amount);
+
+        Ok(())
+    }
+
+    /// Get puzzle bounty details
+    pub fn get_puzzle_bounty(env: Env, bounty_id: u64) -> Result<PuzzleBounty, ContractError> {
+        let bounties: Map<u64, PuzzleBounty> = env
+            .storage()
+            .instance()
+            .get(&PUZZLE_BOUNTIES)
+            .ok_or(ContractError::BountyNotFound)?;
+        bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Time-Decay Penalties (#986)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Initialize decay configuration
+    pub fn initialize_decay_config(
+        env: Env,
+        min_penalty_threshold: i128,
+        max_decay_duration: u64,
+        base_decay_rate_bips: u32,
+        ban_threshold: i128,
+    ) {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let config = DecayConfig {
+            min_penalty_threshold,
+            max_decay_duration,
+            base_decay_rate_bips,
+            ban_threshold,
+        };
+        env.storage().instance().set(&DECAY_CONFIG, &config);
+    }
+
+    /// Issue a time-decay penalty to a player
+    pub fn issue_penalty(
+        env: Env,
+        player: Address,
+        penalty_amount: i128,
+        reason: Bytes,
+    ) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let config: DecayConfig = env
+            .storage()
+            .instance()
+            .get(&DECAY_CONFIG)
+            .ok_or(ContractError::TimeoutNotConfigured)?;
+
+        if penalty_amount < config.min_penalty_threshold {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        let expires_at = current_ledger + config.max_decay_duration;
+
+        let is_banned = penalty_amount >= config.ban_threshold;
+
+        let penalty = PenaltyRecord {
+            player: player.clone(),
+            penalty_amount,
+            issued_at: current_ledger,
+            expires_at,
+            reason,
+            decay_rate_bips: config.base_decay_rate_bips,
+            original_amount: penalty_amount,
+            is_banned,
+        };
+
+        let mut penalties: Map<Address, PenaltyRecord> = env
+            .storage()
+            .instance()
+            .get(&PENALTIES)
+            .unwrap_or(Map::new(&env));
+        penalties.set(player, penalty);
+        env.storage().instance().set(&PENALTIES, &penalties);
+
+        Ok(())
+    }
+
+    /// Calculate current penalty amount after decay
+    pub fn get_current_penalty(env: Env, player: Address) -> Result<i128, ContractError> {
+        let penalties: Map<Address, PenaltyRecord> = env
+            .storage()
+            .instance()
+            .get(&PENALTIES)
+            .ok_or(ContractError::NotBanned)?;
+        let penalty = penalties.get(player).ok_or(ContractError::NotBanned)?;
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger >= penalty.expires_at {
+            return Ok(0); // Penalty has fully decayed
+        }
+
+        let elapsed = current_ledger - penalty.issued_at;
+        let decay_multiplier = 10000 - (elapsed * penalty.decay_rate_bips as u64 / 1000);
+        let current_amount = penalty.original_amount * decay_multiplier as i128 / 10000;
+
+        Ok(current_amount.max(0))
+    }
+
+    /// Check if a player is currently banned
+    pub fn is_player_banned(env: Env, player: Address) -> bool {
+        let penalties: Map<Address, PenaltyRecord> = env
+            .storage()
+            .instance()
+            .get(&PENALTIES)
+            .unwrap_or(Map::new(&env));
+
+        match penalties.get(player) {
+            Some(penalty) => {
+                let current_ledger = env.ledger().sequence() as u64;
+                penalty.is_banned && current_ledger < penalty.expires_at
+            }
+            None => false,
+        }
+    }
+
+    /// Reinstate a banned player (admin only)
+    pub fn reinstate_player(env: Env, player: Address) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let mut penalties: Map<Address, PenaltyRecord> = env
+            .storage()
+            .instance()
+            .get(&PENALTIES)
+            .ok_or(ContractError::NotBanned)?;
+        let mut penalty = penalties.get(player).ok_or(ContractError::NotBanned)?;
+
+        if !penalty.is_banned {
+            return Err(ContractError::NotBanned);
+        }
+
+        penalty.is_banned = false;
+        penalties.set(player, penalty);
+        env.storage().instance().set(&PENALTIES, &penalties);
+
+        Ok(())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Token-Gated VIP (#987)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Initialize VIP configuration
+    pub fn initialize_vip_config(
+        env: Env,
+        bronze_threshold: i128,
+        silver_threshold: i128,
+        gold_threshold: i128,
+        diamond_threshold: i128,
+        fee_discount_bronze: u32,
+        fee_discount_silver: u32,
+        fee_discount_gold: u32,
+        fee_discount_diamond: u32,
+    ) {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let config = VipConfig {
+            bronze_threshold,
+            silver_threshold,
+            gold_threshold,
+            diamond_threshold,
+            fee_discount_bronze,
+            fee_discount_silver,
+            fee_discount_gold,
+            fee_discount_diamond,
+        };
+        env.storage().instance().set(&VIP_CONFIG, &config);
+    }
+
+    /// Check and update VIP tier based on token balance
+    pub fn update_vip_tier(env: Env, player: Address) -> Result<VipTier, ContractError> {
+        player.require_auth();
+
+        let config: VipConfig = env
+            .storage()
+            .instance()
+            .get(&VIP_CONFIG)
+            .ok_or(ContractError::VipTierNotFound)?;
+
+        // Get player's token balance
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        let balance = token_client.balance(&player);
+
+        let tier = if balance >= config.diamond_threshold {
+            VipTier::Diamond
+        } else if balance >= config.gold_threshold {
+            VipTier::Gold
+        } else if balance >= config.silver_threshold {
+            VipTier::Silver
+        } else if balance >= config.bronze_threshold {
+            VipTier::Bronze
+        } else {
+            VipTier::None
+        };
+
+        let holder = VipHolder {
+            address: player.clone(),
+            tier: tier.clone(),
+            token_balance: balance,
+            joined_at: env.ledger().sequence() as u64,
+            expires_at: None,
+        };
+
+        let mut holders: Map<Address, VipHolder> = env
+            .storage()
+            .instance()
+            .get(&VIP_HOLDERS)
+            .unwrap_or(Map::new(&env));
+        holders.set(player, holder);
+        env.storage().instance().set(&VIP_HOLDERS, &holders);
+
+        Ok(tier)
+    }
+
+    /// Get VIP tier for a player
+    pub fn get_vip_tier(env: Env, player: Address) -> VipTier {
+        let holders: Map<Address, VipHolder> = env
+            .storage()
+            .instance()
+            .get(&VIP_HOLDERS)
+            .unwrap_or(Map::new(&env));
+
+        match holders.get(player) {
+            Some(holder) => holder.tier,
+            None => VipTier::None,
+        }
+    }
+
+    /// Get discounted fee basis points based on VIP tier
+    pub fn get_vip_discount(env: Env, player: Address) -> u32 {
+        let tier = Self::get_vip_tier(env.clone(), player);
+        let config: VipConfig = match env.storage().instance().get(&VIP_CONFIG) {
+            Some(c) => c,
+            None => return 0,
+        };
+
+        match tier {
+            VipTier::Bronze => config.fee_discount_bronze,
+            VipTier::Silver => config.fee_discount_silver,
+            VipTier::Gold => config.fee_discount_gold,
+            VipTier::Diamond => config.fee_discount_diamond,
+            VipTier::None => 0,
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Soulbound Trophies (#994)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Award a soulbound trophy to a player (admin only)
+    pub fn award_trophy(
+        env: Env,
+        player: Address,
+        trophy_type: TrophyType,
+        name: String,
+        description: String,
+        image_uri: String,
+    ) -> Result<u64, ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        // Check if player already has this trophy type
+        let trophies: Vec<Trophy> = env
+            .storage()
+            .instance()
+            .get(&TROPHIES)
+            .unwrap_or(Map::new(&env))
+            .get(player.clone())
+            .unwrap_or(Vec::new(&env));
+
+        for t in trophies.iter() {
+            if t.trophy_type == trophy_type {
+                return Err(ContractError::TrophyAlreadyOwned);
+            }
+        }
+
+        // Generate trophy ID
+        let mut trophy_counter: u64 = env
+            .storage()
+            .instance()
+            .get(&TROPHY_REGISTRY)
+            .unwrap_or(Map::new(&env))
+            .len() as u64;
+        trophy_counter += 1;
+
+        let trophy = Trophy {
+            trophy_id: trophy_counter,
+            owner: player.clone(),
+            trophy_type: trophy_type.clone(),
+            earned_at: env.ledger().sequence() as u64,
+            metadata_uri: image_uri.clone(),
+        };
+
+        // Store trophy metadata
+        let metadata = TrophyMetadata {
+            trophy_id: trophy_counter,
+            trophy_type,
+            name,
+            description,
+            image_uri,
+            total_minted: 1,
+        };
+
+        let mut registry: Map<u64, TrophyMetadata> = env
+            .storage()
+            .instance()
+            .get(&TROPHY_REGISTRY)
+            .unwrap_or(Map::new(&env));
+        registry.set(trophy_counter, metadata);
+        env.storage().instance().set(&TROPHY_REGISTRY, &registry);
+
+        // Add trophy to player's collection (soulbound - non-transferable)
+        let mut all_trophies: Map<Address, Vec<Trophy>> = env
+            .storage()
+            .instance()
+            .get(&TROPHIES)
+            .unwrap_or(Map::new(&env));
+        let mut player_trophies = all_trophies.get(player.clone()).unwrap_or(Vec::new(&env));
+        player_trophies.push_back(trophy);
+        all_trophies.set(player, player_trophies);
+        env.storage().instance().set(&TROPHIES, &all_trophies);
+
+        Ok(trophy_counter)
+    }
+
+    /// Get all trophies for a player
+    pub fn get_player_trophies(env: Env, player: Address) -> Vec<Trophy> {
+        let all_trophies: Map<Address, Vec<Trophy>> = env
+            .storage()
+            .instance()
+            .get(&TROPHIES)
+            .unwrap_or(Map::new(&env));
+        all_trophies.get(player).unwrap_or(Vec::new(&env))
+    }
+
+    /// Get trophy metadata
+    pub fn get_trophy_metadata(env: Env, trophy_id: u64) -> Result<TrophyMetadata, ContractError> {
+        let registry: Map<u64, TrophyMetadata> = env
+            .storage()
+            .instance()
+            .get(&TROPHY_REGISTRY)
+            .ok_or(ContractError::BountyNotFound)?;
+        registry.get(trophy_id).ok_or(ContractError::BountyNotFound)
+    }
+
+    /// Transfer is blocked for soulbound trophies - this always fails
+    pub fn transfer_trophy(
+        env: Env,
+        _trophy_id: u64,
+        _to: Address,
+    ) -> Result<(), ContractError> {
+        // Soulbound tokens cannot be transferred
+        Err(ContractError::NotTrophyOwner)
+    }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tests

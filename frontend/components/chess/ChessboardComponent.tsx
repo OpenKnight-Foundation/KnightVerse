@@ -1,8 +1,45 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import Image from "next/image";
 import { useBoardTheme } from "@/context/ThemeContext";
+import { Chess } from "chess.js";
+
+function parseFen(fen: string): (string | null)[][] {
+  const board = new Chess(fen);
+  return board.board().map((row) =>
+    row.map((cell) => {
+      if (!cell) return null;
+      const color = cell.color === "w" ? "w" : "b";
+      const piece = cell.type.toUpperCase();
+      return `${color}${piece}`;
+    }),
+  );
+}
+
+function formatPieceName(piece: string): string {
+  const pieceMap: Record<string, string> = {
+    wP: "White Pawn",
+    wR: "White Rook",
+    wN: "White Knight",
+    wB: "White Bishop",
+    wQ: "White Queen",
+    wK: "White King",
+    bP: "Black Pawn",
+    bR: "Black Rook",
+    bN: "Black Knight",
+    bB: "Black Bishop",
+    bQ: "Black Queen",
+    bK: "Black King",
+  };
+  return pieceMap[piece] || "Unknown Piece";
+}
 
 import WhiteKing from "./chesspieces/white-king.svg";
 import WhiteQueen from "./chesspieces/white-queen.svg";
@@ -17,6 +54,8 @@ import BlackKnight from "./chesspieces/black-knight.svg";
 import BlackRook from "./chesspieces/black-rook.svg";
 import BlackPawn from "./chesspieces/black-pawn.svg";
 
+import { PremoveService, PreMove } from "@/services/premoveService";
+
 interface ChessboardComponentProps {
   position: string;
   onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
@@ -25,80 +64,29 @@ interface ChessboardComponentProps {
   lastMove?: { from: string; to: string } | [string, string] | null;
 }
 
-// Parse FEN string to board state - memoized pure function
-const parseFen = (fen: string): string[][] => {
-  if (fen === "start") {
-    return [
-      ["bR", "bN", "bB", "bQ", "bK", "bB", "bN", "bR"],
-      ["bP", "bP", "bP", "bP", "bP", "bP", "bP", "bP"],
-      ["", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", ""],
-      ["wP", "wP", "wP", "wP", "wP", "wP", "wP", "wP"],
-      ["wR", "wN", "wB", "wQ", "wK", "wB", "wN", "wR"],
-    ];
-  }
-
-  try {
-    const fenParts = fen.split(" ");
-    const rows = fenParts[0].split("/");
-    const newBoard: string[][] = [];
-
-    rows.forEach((row) => {
-      const newRow: string[] = [];
-      for (let i = 0; i < row.length; i++) {
-        const char = row[i];
-        if (isNaN(parseInt(char))) {
-          const color = char === char.toUpperCase() ? "w" : "b";
-          newRow.push(`${color}${char.toUpperCase()}`);
-        } else {
-          for (let j = 0; j < parseInt(char); j++) {
-            newRow.push("");
-          }
-        }
-      }
-      newBoard.push(newRow);
-    });
-
-    return newBoard;
-  } catch (e) {
-    console.error("Error parsing FEN:", e);
-    return Array.from({ length: 8 }, () => Array(8).fill(""));
-  }
-};
-
-// Format piece code into a human-readable name for screen readers
-const formatPieceName = (piece: string): string => {
-  if (!piece) return "";
-  const color = piece[0] === "w" ? "white" : "black";
-  const names: Record<string, string> = {
-    K: "king",
-    Q: "queen",
-    R: "rook",
-    B: "bishop",
-    N: "knight",
-    P: "pawn",
-  };
-  return `${color} ${names[piece[1]] ?? piece[1]}`;
-};
-
-// ChessboardComponent with full memoization
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   position,
   onDrop,
-  width,
   orientation = "white",
   lastMove,
 }) => {
+  const [premoves, setPremoves] = useState<PreMove[]>([]);
+  const premoveService = useRef(new PremoveService());
+
+  const clearPremoves = (e: React.MouseEvent) => {
+    e.preventDefault();
+    premoveService.current.clearPremoves();
+    setPremoves([]);
+  };
+
   const [mounted, setMounted] = useState(false);
-  const [boardWidth, setBoardWidth] = useState(width || 560);
+  const [boardWidth] = useState(560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
   const [focusedSquare, setFocusedSquare] = useState<string | null>(null);
   const touchStartSquare = useRef<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  
+
   const { colors } = useBoardTheme();
 
   // Memoize board state parsing - prevents re-parsing on every render
@@ -113,40 +101,16 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   }, [boardState, orientation]);
 
   useEffect(() => {
-    const updateBoardSize = () => {
-      if (typeof document === "undefined") return;
-      const container = document.querySelector(
-        ".chessboard-container",
-      )?.parentElement;
-      if (!container) return;
-      const vw = Math.max(
-        document.documentElement.clientWidth || 0,
-        window.innerWidth || 0,
-      );
-      const containerWidth = container.clientWidth;
-      const maxSize = 560;
-      const minSize = Math.min(320, containerWidth);
-      let newWidth;
-      if (vw < 768) {
-        newWidth = Math.max(minSize, Math.min(containerWidth * 0.95, maxSize));
-      } else {
-        newWidth = Math.min(containerWidth, maxSize);
-      }
-
-      setBoardWidth(newWidth);
-    };
-
-    if (mounted) {
-      updateBoardSize();
-      window.addEventListener("resize", updateBoardSize);
-      window.addEventListener("orientationchange", updateBoardSize);
+    const { executedMove } =
+      premoveService.current.handleOpponentMove(position);
+    if (executedMove) {
+      onDrop({
+        sourceSquare: executedMove.from,
+        targetSquare: executedMove.to,
+      });
     }
-
-    return () => {
-      window.removeEventListener("resize", updateBoardSize);
-      window.removeEventListener("orientationchange", updateBoardSize);
-    };
-  }, [mounted]);
+    setPremoves(premoveService.current.getPremoves());
+  }, [position, onDrop]);
 
   useEffect(() => {
     setMounted(true);
@@ -303,33 +267,32 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     [selectedSquare, boardState, displayRows, attemptMove],
   );
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent, row: number, col: number) => {
-      e.dataTransfer.setData("text/plain", `${row},${col}`);
-      const draggedElement = e.currentTarget as HTMLElement;
-      if (draggedElement) {
-        draggedElement.style.opacity = "0.6";
-      }
-    },
-    [],
-  );
+  const [highlightedSquares, setHighlightedSquares] = useState<
+    { square: string; color: string }[]
+  >([]);
+  const [arrows, setArrows] = useState<[string, string][]>([]);
 
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    const draggedElement = e.currentTarget as HTMLElement;
-    if (draggedElement) {
-      draggedElement.style.opacity = "1";
-    }
-  }, []);
+  const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
+    e.preventDefault();
+    const square = `${row},${col}`;
+    const color = e.shiftKey
+      ? "red"
+      : e.altKey
+        ? "blue"
+        : e.ctrlKey
+          ? "yellow"
+          : "green";
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent, targetRow: number, targetCol: number) => {
-      e.preventDefault();
-      const data = e.dataTransfer.getData("text/plain");
-      const [sourceRow, sourceCol] = data.split(",").map(Number);
-      attemptMove(sourceRow, sourceCol, targetRow, targetCol);
-    },
-    [attemptMove],
-  );
+    setHighlightedSquares((prev) =>
+      prev.some((s) => s.square === square)
+        ? prev.filter((s) => s.square !== square)
+        : [...prev, { square, color }],
+    );
+  };
+
+  const handleDragStart = (e: React.DragEvent, row: number, col: number) => {
+    e.dataTransfer.setData("text/plain", `${row},${col}`);
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -383,16 +346,19 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     [focusedSquare, selectedSquare, focusSquare],
   );
 
-  const getSquareFromTouch = useCallback((touch: React.Touch): [number, number] | null => {
-    if (!boardRef.current) return null;
-    const rect = boardRef.current.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    const col = Math.floor((x / rect.width) * 8);
-    const row = Math.floor((y / rect.height) * 8);
-    if (col < 0 || col > 7 || row < 0 || row > 7) return null;
-    return [row, col];
-  }, []);
+  const getSquareFromTouch = useCallback(
+    (touch: React.Touch): [number, number] | null => {
+      if (!boardRef.current) return null;
+      const rect = boardRef.current.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      const col = Math.floor((x / rect.width) * 8);
+      const row = Math.floor((y / rect.height) * 8);
+      if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+      return [row, col];
+    },
+    [],
+  );
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent, row: number, col: number) => {
@@ -417,7 +383,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       if (!touchStartSquare.current) return;
       const sq = getSquareFromTouch(e.changedTouches[0]);
       if (sq) {
-        const [srcRow, srcCol] = touchStartSquare.current.split(",").map(Number);
+        const [srcRow, srcCol] = touchStartSquare.current
+          .split(",")
+          .map(Number);
         attemptMove(srcRow, srcCol, sq[0], sq[1]);
       }
       touchStartSquare.current = null;
@@ -427,6 +395,29 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     [getSquareFromTouch, attemptMove],
   );
 
+  const renderGhostPiece = (piece: string, square: string) => {
+    const pieceImage = getPieceImage(piece);
+    if (!pieceImage) return null;
+
+    const [row, col] = [parseInt(square[1]) - 1, square.charCodeAt(0) - 97];
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: `${row * 12.5}%`,
+          left: `${col * 12.5}%`,
+          width: "12.5%",
+          height: "12.5%",
+          opacity: 0.5,
+          pointerEvents: "none",
+        }}
+      >
+        {pieceImage}
+      </div>
+    );
+  };
+
   if (!mounted) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-800 rounded-md">
@@ -435,64 +426,97 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     );
   }
   return (
-    <div className="chessboard-wrapper w-full mx-auto relative" style={{ maxWidth: `${boardWidth}px` }}>
-      {/* Screen reader live region for move announcements — must be outside role="grid" */}
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {selectedSquare && (() => {
-          const [r, c] = selectedSquare.split(",").map(Number);
-          const actualR = orientation === "black" ? 7 - r : r;
-          const actualC = orientation === "black" ? 7 - c : c;
-          const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
-          const piece = displayRows[r][c];
-          return piece ? `Selected ${formatPieceName(piece)} on ${sq}` : `Focused ${sq}`;
-        })()}
-      </div>
     <div
-      ref={boardRef}
-      className="chessboard-container w-full mx-auto relative"
-      role="grid"
-      aria-label={`Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
-      aria-roledescription="chessboard"
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onKeyDown={handleKeyDown}
-      style={{
-        width: "100%",
-        maxWidth: `${boardWidth}px`,
-        minWidth: "min(280px, 90vw)",
-        aspectRatio: "1/1",
-        display: "grid",
-        gridTemplateColumns: `repeat(8, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(8, minmax(0, 1fr))`,
-        border: "2px solid #005dad",
-        borderRadius: "4px",
-        boxShadow: "0 8px 16px rgba(0, 93, 173, 0.3)",
-        overflow: "visible",
-        touchAction: "none",
-        margin: "0 auto",
-        padding: "1%",
-        transform: "scale(var(--board-scale, 1))",
-        transformOrigin: "center center",
-      }}
+      className="chessboard-wrapper w-full mx-auto relative"
+      style={{ maxWidth: `${boardWidth}px` }}
     >
-      {/* Screen reader live region for selection announcements */}
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {selectedSquare && (() => {
-          const [r, c] = selectedSquare.split(",").map(Number);
-          const actualR = orientation === "black" ? 7 - r : r;
-          const actualC = orientation === "black" ? 7 - c : c;
-          const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
-          const piece = displayRows[r][c];
-          return `Selected ${piece} on ${sq}. Use arrow keys to navigate, Space to move, Escape to deselect.`;
-        })()}
+      {/* Screen reader live region for move announcements — must be outside role="grid" */}
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {selectedSquare &&
+          (() => {
+            const [r, c] = selectedSquare.split(",").map(Number);
+            const actualR = orientation === "black" ? 7 - r : r;
+            const actualC = orientation === "black" ? 7 - c : c;
+            const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
+            const piece = displayRows[r][c];
+            return piece
+              ? `Selected ${formatPieceName(piece)} on ${sq}`
+              : `Focused ${sq}`;
+          })()}
       </div>
-      {displayRows.map((row, rowIndex) =>
-        row.map((piece, colIndex) => {
-          const isLight = (rowIndex + colIndex) % 2 === 1;
-          const squareKey = `${rowIndex},${colIndex}`;
-          const isSelected = selectedSquare === squareKey;
-          const isFocused = focusedSquare === squareKey;
-          const isHovered = hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
+      <div
+        ref={boardRef}
+        className="chessboard-container w-full mx-auto relative"
+        role="grid"
+        aria-label={`Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
+        aria-roledescription="chessboard"
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onKeyDown={handleKeyDown}
+        onContextMenu={clearPremoves}
+        style={{
+          width: "100%",
+          maxWidth: `${boardWidth}px`,
+          minWidth: "min(280px, 90vw)",
+          aspectRatio: "1/1",
+          display: "grid",
+          gridTemplateColumns: `repeat(8, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(8, minmax(0, 1fr))`,
+          border: "2px solid #005dad",
+          borderRadius: "4px",
+          boxShadow: "0 8px 16px rgba(0, 93, 173, 0.3)",
+          overflow: "visible",
+          touchAction: "none",
+          margin: "0 auto",
+          padding: "1%",
+          transform: "scale(var(--board-scale, 1))",
+          transformOrigin: "center center",
+        }}
+      >
+        {premoves.map(() => {
+          // const fromSquare = premove.from;
+          // const toSquare = premove.to;
+          // const color = index === 0 ? "blue" : "purple";
+          // return <PremoveArrow key={index} from={fromSquare} to={toSquare} color={color} />;
+        })}
+        {premoves.map((premove) => {
+          const toSquare = premove.to;
+          const piece = premove.piece;
+          return renderGhostPiece(piece, toSquare);
+        })}
+        {/* Screen reader live region for selection announcements */}
+        <div
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {selectedSquare &&
+            (() => {
+              const [r, c] = selectedSquare.split(",").map(Number);
+              const actualR = orientation === "black" ? 7 - r : r;
+              const actualC = orientation === "black" ? 7 - c : c;
+              const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
+              const piece = displayRows[r][c];
+              return `Selected ${piece} on ${sq}. Use arrow keys to navigate, Space to move, Escape to deselect.`;
+            })()}
+        </div>
+        {displayRows.map((row, rowIndex) =>
+          row.map((piece, colIndex) => {
+            const isLight = (rowIndex + colIndex) % 2 === 1;
+            const squareKey = `${rowIndex},${colIndex}`;
+            const isSelected = selectedSquare === squareKey;
+            const isFocused = focusedSquare === squareKey;
+            const isHovered =
+              hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
+            const highlightedSquare = highlightedSquares.find(
+              (s) => s.square === squareKey,
+            );
 
           // Compute actual board coordinates for the aria-label
           const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
@@ -505,8 +529,13 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 : lastMove.from === squareLabel || lastMove.to === squareLabel)
           );
 
-          const selectionHint = isSelected ? ". Piece selected. Press Space on another square to move, or Escape to deselect." : "";
-          const focusHint = isFocused && !isSelected ? ". Press Space to select this piece." : "";
+            const selectionHint = isSelected
+              ? ". Piece selected. Press Space on another square to move, or Escape to deselect."
+              : "";
+            const focusHint =
+              isFocused && !isSelected
+                ? ". Press Space to select this piece."
+                : "";
 
           const selectedShadow = colors.selected
             ? `inset 0 0 0 3px ${colors.selected}`

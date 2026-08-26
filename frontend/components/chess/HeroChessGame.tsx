@@ -7,7 +7,10 @@ import { FaUser } from "react-icons/fa";
 import { RiAliensFill } from "react-icons/ri";
 import { useChessSocket } from "@/hook/useChessSocket";
 import { useMatchmaking } from "@/hook/useMatchmaking";
-import { useStockfishWASM, AnalysisResult } from "@/components/chess/StockfishWASM";
+import {
+  useStockfishWASM,
+  AnalysisResult,
+} from "@/components/chess/StockfishWASM";
 import { useRouter } from "next/navigation";
 import { useMatchmakingContext } from "@/context/matchmakingContext";
 import { getChessVariantById } from "@/lib/chessVariants";
@@ -90,7 +93,11 @@ export default function HeroChessGame({
     reconnect: reconnectSocket,
   } = useChessSocket(gameId);
 
-  const { analyzePosition, isReady: stockfishReady, isAnalyzing } = useStockfishWASM({
+  const {
+    analyzePosition,
+    isReady: stockfishReady,
+    isAnalyzing,
+  } = useStockfishWASM({
     jsBridgePath: "/assets/stockfish.js",
     defaultTimeLimit: 250,
   });
@@ -100,14 +107,19 @@ export default function HeroChessGame({
     const tempGame = new Chess();
     const history = game.history();
     for (let i = 0; i <= viewIndex; i++) {
-      try { tempGame.move(history[i]); } catch {}
+      try {
+        tempGame.move(history[i]);
+      } catch {}
     }
     return tempGame.fen();
   }, [position, viewIndex, game]);
 
-  const handleMoveClick = useCallback((index: number) => {
-    setViewIndex(index === game.history().length - 1 ? null : index);
-  }, [game]);
+  const handleMoveClick = useCallback(
+    (index: number) => {
+      setViewIndex(index === game.history().length - 1 ? null : index);
+    },
+    [game],
+  );
 
   const sendMove = useCallback(
     (from: string, to: string, promotion?: string) => {
@@ -172,7 +184,9 @@ export default function HeroChessGame({
           const from = result.bestMove.substring(0, 2);
           const to = result.bestMove.substring(2, 4);
           const promotion =
-            result.bestMove.length > 4 ? result.bestMove.substring(4, 5) : undefined;
+            result.bestMove.length > 4
+              ? result.bestMove.substring(4, 5)
+              : undefined;
           game.move({ from, to, promotion });
           setPosition(game.fen());
           setViewIndex(null);
@@ -188,7 +202,15 @@ export default function HeroChessGame({
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
+  }, [
+    position,
+    gameMode,
+    analyzePosition,
+    aiPersonality,
+    game,
+    stockfishReady,
+    isAnalyzing,
+  ]);
 
   useEffect(() => {
     if (!game.isGameOver()) return;
@@ -220,6 +242,29 @@ export default function HeroChessGame({
     return true;
   })();
 
+  const makeMove = useCallback(
+    (move: { from: string; to: string; promotion?: string }) => {
+      try {
+        const moveResult = game.move(move);
+        if (moveResult === null) return false;
+
+        setBotAnalysis(null);
+        setHeroMoveCount((c) => c + 1);
+        requestAnimationFrame(() => setPosition(game.fen()));
+        if (gameMode === "online") {
+          sendMove(move.from, move.to, move.promotion);
+        }
+
+        setPosition(game.fen());
+        setViewIndex(null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [game, gameMode, sendMove],
+  );
+
   const handleMove = useCallback(
     ({
       sourceSquare,
@@ -229,34 +274,37 @@ export default function HeroChessGame({
       targetSquare: string;
     }) => {
       if (!isMyTurn || game.isGameOver()) return false;
-      if (viewIndex !== null) {
-        setViewIndex(null);
-        return false;
-      }
 
-      try {
-        const move = game.move({
+      const history = game.history({ verbose: true });
+      const currentMoveIndex = viewIndex ?? history.length - 1;
+
+      if (viewIndex !== null && viewIndex < history.length - 1) {
+        const parentMove = history[currentMoveIndex];
+        if (!parentMove.variations) {
+          parentMove.variations = [];
+        }
+
+        const tempGame = new Chess(parentMove.after);
+        const move = tempGame.move({
           from: sourceSquare,
           to: targetSquare,
           promotion: "q",
         });
-        if (move === null) return false;
 
-        setBotAnalysis(null);
-        setHeroMoveCount((c) => c + 1);
-        requestAnimationFrame(() => setPosition(game.fen()));
-        if (gameMode === "online") {
-          sendMove(sourceSquare, targetSquare, "q");
+        if (move) {
+          if (!parentMove.variations.some((v: any) => v[0].san === move.san)) {
+            parentMove.variations.push([move]);
+          }
+          game.load(tempGame.fen());
+          setPosition(game.fen());
+          setViewIndex(null);
         }
-        
-        setPosition(game.fen());
-        setViewIndex(null);
-        return true;
-      } catch {
-        return false;
+      } else {
+        makeMove({ from: sourceSquare, to: targetSquare, promotion: "q" });
       }
+      return true;
     },
-    [isMyTurn, game, gameMode, sendMove, viewIndex],
+    [game, isMyTurn, viewIndex, makeMove],
   );
 
   const handleHeroPlayAgain = useCallback(() => {
@@ -394,12 +442,17 @@ export default function HeroChessGame({
             </div>
 
             <div className="w-full min-w-[320px] flex flex-row items-stretch justify-center gap-2 md:gap-4">
-              <EvaluationBar evaluation={botAnalysis?.evaluation ?? null} />
+              <EvaluationBar
+                evaluation={botAnalysis?.evaluation ?? null}
+                mate={botAnalysis?.mate ?? null}
+                isFlipped={false}
+              />
               <div className="w-full">
                 <ErrorBoundary componentName="Chessboard">
                   <ChessboardComponent
                     position={currentDisplayPosition}
                     onDrop={handleMove}
+                    isMyTurn={isMyTurn}
                     aria-label="Chess board. You play as White. Click or drag pieces to move."
                   />
                 </ErrorBoundary>
@@ -432,10 +485,10 @@ export default function HeroChessGame({
           </div>
 
           <div className="w-full max-w-[280px] order-3 flex justify-center mt-4 lg:mt-0">
-            <MoveHistory 
-              history={game.history()} 
-              onMoveClick={handleMoveClick} 
-              currentMoveIndex={viewIndex ?? game.history().length - 1} 
+            <MoveTree
+              history={game.history({ verbose: true })}
+              onMoveClick={handleMoveClick}
+              currentMoveIndex={viewIndex ?? game.history().length - 1}
             />
           </div>
 
@@ -490,9 +543,7 @@ export default function HeroChessGame({
             </div>
             <div>
               <h2 className="text-base font-bold text-white">
-                {gameMode === "online"
-                  ? onlineStatusLabel()
-                  : "Playing vs Bot"}
+                {gameMode === "online" ? onlineStatusLabel() : "Playing vs Bot"}
               </h2>
               <p className="text-xs text-cyan-100/70">
                 {selectedVariant.label} / {selectedVariant.averageGameTime}

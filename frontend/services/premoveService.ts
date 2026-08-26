@@ -1,36 +1,51 @@
+import { Chess } from "chess.js";
+
 export interface PreMove {
-  from: number;
-  to: number;
-  timestamp: number;
+  from: string;
+  to: string;
+  piece: string;
 }
 
 export class PremoveService {
-  private premove: PreMove | null = null;
+  private premoves: PreMove[] = [];
+  private readonly MAX_PREMOVES = 3;
 
-  setPremove(from: number, to: number): void {
-    this.premove = { from, to, timestamp: Date.now() };
+  public addPremove(from: string, to: string, piece: string): void {
+    if (this.premoves.length < this.MAX_PREMOVES) {
+      this.premoves.push({ from, to, piece });
+    }
   }
 
-  getPremove(): PreMove | null {
-    return this.premove;
+  public getPremoves(): PreMove[] {
+    return [...this.premoves];
   }
 
-  clearPremove(): void {
-    this.premove = null;
+  public clearPremoves(): void {
+    this.premoves = [];
   }
 
-  isLegalPremove(fen: string): boolean {
-    if (!this.premove) return false;
-    return true;
-  }
+  public handleOpponentMove(fen: string): {
+    executedMove: PreMove | null;
+    illegal: boolean;
+  } {
+    if (this.premoves.length === 0) {
+      return { executedMove: null, illegal: false };
+    }
 
-  executePremove(): PreMove | null {
-    const move = this.premove;
-    this.premove = null;
-    return move;
-  }
+    const game = new Chess(fen);
+    const nextPremove = this.premoves[0];
 
-  cancelOnIllegal(): void {
-    this.clearPremove();
+    const legalMoves = game.moves({ verbose: true });
+    const isLegal = legalMoves.some(
+      (move) => move.from === nextPremove.from && move.to === nextPremove.to,
+    );
+
+    if (isLegal) {
+      this.premoves.shift();
+      return { executedMove: nextPremove, illegal: false };
+    } else {
+      this.clearPremoves();
+      return { executedMove: null, illegal: true };
+    }
   }
 }

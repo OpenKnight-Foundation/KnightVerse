@@ -1,0 +1,464 @@
+name: Agent Engines CI
+
+on:
+  pull_request:
+    paths:
+      - 'agent-engines/**'
+      - '.github/workflows/agent-engines.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent-engines/**'
+      - '.github/workflows/agent-engines.yml'
+
+jobs:
+  test:
+    name: Test Agent Engines
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('agent-engines/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install Redis for testing
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl start redis-server
+          redis-cli ping
+
+      - name: Run linting with ruff (if available)
+        working-directory: agent-engines
+        run: |
+          pip install ruff || echo "Ruff not available, skipping linting"
+          if command -v ruff &> /dev/null; then
+            ruff check gpu_worker/ --fix --exit-non-zero-on-fix || true
+            ruff format gpu_worker/ --check
+          fi
+        continue-on-error: true
+
+      - name: Run type checking with mypy (if available)
+        working-directory: agent-engines
+        run: |
+          pip install mypy || echo "MyPy not available, skipping type checking"
+          if command -v mypy &> /dev/null; then
+            mypy gpu_worker/ --ignore-missing-imports || true
+          fi
+        continue-on-error: true
+
+      - name: Run unit tests
+        working-directory: agent-engines
+        run: |
+          python -m pytest tests/ -v --tb=short --durations=10
+        env:
+          PYTHONPATH: .
+
+      - name: Run autoscaling-specific tests
+        working-directory: agent-engines
+        run: |
+          echo "Running autoscaling daemon tests..."
+          python -m pytest tests/test_autoscaling_daemon.py -v
+          
+          echo "Running autoscaling pool tests..."
+          python -m pytest tests/test_autoscaling_pool.py -v
+          
+          echo "Running resource monitor enhanced tests..."
+          python -m pytest tests/test_resource_monitor_enhanced.py -v
+          
+          echo "Running acceptance criteria tests..."
+          python -m pytest tests/test_acceptance_criteria.py -v
+        env:
+          PYTHONPATH: .
+          REDIS_URL: redis://localhost:6379
+
+      - name: Run integration tests
+        working-directory: agent-engines
+        run: |
+          echo "Running autoscaling integration tests..."
+          python -m pytest tests/test_autoscaling_integration.py -v --tb=short
+        env:
+          PYTHONPATH: .
+          REDIS_URL: redis://localhost:6379
+
+      - name: Test coverage report
+        working-directory: agent-engines
+        run: |
+          pip install pytest-cov
+          python -m pytest tests/ --cov=gpu_worker --cov-report=xml --cov-report=term-missing
+        env:
+          PYTHONPATH: .
+
+      - name: Upload coverage to Codecov (if token available)
+        uses: codecov/codecov-action@v3
+        with:
+          file: agent-engines/coverage.xml
+          directory: agent-engines/
+          flags: agent-engines
+          name: agent-engines-coverage
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  test-without-redis:
+    name: Test Without Redis (Fallback Mode)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (without Redis)
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Test graceful Redis failure handling
+        working-directory: agent-engines
+        run: |
+          echo "Testing autoscaling daemon without Redis..."
+          python -c "
+          import asyncio
+          from gpu_worker.resource_optimizer import AutoscalingConfig, AutoscalingDaemon
+          
+          async def test_no_redis():
+              config = AutoscalingConfig()
+              daemon = AutoscalingDaemon(config)
+              
+              # Should handle Redis connection failure gracefully
+              queue_metrics = await daemon._get_queue_metrics()
+              assert queue_metrics['error'] is not None
+              print('✓ Graceful Redis failure handling works')
+          
+          asyncio.run(test_no_redis())
+          "
+        env:
+          PYTHONPATH: .
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run safety check (if available)
+        working-directory: agent-engines
+        run: |
+          pip install safety || echo "Safety not available, skipping security scan"
+          if command -v safety &> /dev/null; then
+            safety check --json --output security-report.json || true
+            if [ -f security-report.json ]; then
+              echo "Security scan completed"
+              cat security-report.json
+            fi
+          fi
+        continue-on-error: true
+
+      - name: Run bandit security analysis (if available)
+        working-directory: agent-engines
+        run: |
+          pip install bandit || echo "Bandit not available, skipping security analysis"
+          if command -v bandit &> /dev/null; then
+            bandit -r gpu_worker/ -f json -o bandit-report.json || true
+            if [ -f bandit-report.json ]; then
+              echo "Bandit security analysis completed"
+              cat bandit-report.json
+            fi
+          fi
+        continue-on-error: true
+
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Redis for testing
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl start redis-server
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run performance stress test
+        working-directory: agent-engines
+        run: |
+          if [ -f stress_test.py ]; then
+            echo "Running existing stress test..."
+            python stress_test.py
+          else
+            echo "Running basic autoscaling performance test..."
+            python -c "
+            import asyncio
+            import time
+            from gpu_worker.resource_optimizer import AutoscalingConfig, AutoscalingDaemon
+            
+            async def performance_test():
+                config = AutoscalingConfig(monitoring_interval_seconds=0.1)
+                daemon = AutoscalingDaemon(config)
+                
+                start_time = time.time()
+                
+                # Test rapid queue metrics collection
+                for i in range(100):
+                    metrics = await daemon._get_queue_metrics()
+                    assert 'queue_length' in metrics
+                
+                end_time = time.time()
+                elapsed = end_time - start_time
+                
+                print(f'✓ 100 queue metric collections completed in {elapsed:.2f}s')
+                print(f'✓ Average time per collection: {elapsed/100*1000:.1f}ms')
+                
+                if elapsed > 5.0:
+                    print('⚠️ Performance may be slower than expected')
+                else:
+                    print('✓ Performance is acceptable')
+            
+            asyncio.run(performance_test())
+            "
+        env:
+          PYTHONPATH: .
+          REDIS_URL: redis://localhost:6379
+
+  docker-build:
+    name: Build Docker Image (if Dockerfile exists)
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for Dockerfile
+        id: dockerfile-check
+        working-directory: agent-engines
+        run: |
+          if [ -f Dockerfile ]; then
+            echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.dockerfile-check.outputs.dockerfile_exists == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (test build)
+        if: steps.dockerfile-check.outputs.dockerfile_exists == 'true'
+        working-directory: agent-engines
+        run: |
+          docker buildx build --platform linux/amd64 --tag agent-engines:test .
+
+  validate-dependencies:
+    name: Validate Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Validate pyproject.toml
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install tomli-w tomli || pip install toml
+          
+          python -c "
+          import sys
+          try:
+              import tomli as tomllib
+          except ImportError:
+              try:
+                  import tomllib
+              except ImportError:
+                  import toml as tomllib
+          
+          with open('pyproject.toml', 'rb') as f:
+              try:
+                  if hasattr(tomllib, 'load'):
+                      config = tomllib.load(f)
+                  else:
+                      f.seek(0)
+                      config = tomllib.loads(f.read().decode())
+                  print('✓ pyproject.toml is valid')
+                  
+                  # Check required dependencies for autoscaling
+                  deps = config.get('project', {}).get('dependencies', [])
+                  required_deps = ['redis', 'prometheus-client', 'psutil', 'pydantic']
+                  
+                  for dep in required_deps:
+                      found = any(dep in d for d in deps)
+                      if found:
+                          print(f'✓ Required dependency {dep} is present')
+                      else:
+                          print(f'❌ Missing required dependency: {dep}')
+                          sys.exit(1)
+                          
+              except Exception as e:
+                  print(f'❌ Invalid pyproject.toml: {e}')
+                  sys.exit(1)
+          "
+
+      - name: Check Redis dependency version
+        working-directory: agent-engines
+        run: |
+          pip install redis
+          python -c "
+          import redis
+          print(f'✓ Redis client version: {redis.__version__}')
+          
+          # Test basic Redis operations
+          try:
+              client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+              # This will fail if Redis is not available, but that's expected in CI
+              print('✓ Redis client can be instantiated')
+          except Exception as e:
+              print(f'ℹ️ Redis connection test failed (expected in CI without Redis): {e}')
+          "
+
+  deployment-test:
+    name: Test Deployment Configuration
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Test production-like configuration
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          
+          echo "Testing production configuration..."
+          python -c "
+          from gpu_worker.resource_optimizer import AutoscalingConfig
+          
+          # Test production-like configuration
+          config = AutoscalingConfig(
+              min_workers=4,
+              max_workers=20,
+              scale_up_queue_threshold=100,
+              scale_up_latency_threshold_ms=1000.0,
+              scale_down_idle_timeout_seconds=600,  # 10 minutes
+              redis_host='redis-prod.example.com',
+              monitoring_interval_seconds=30.0,
+              gpu_memory_threshold_percent=85.0
+          )
+          
+          print('✓ Production configuration is valid')
+          print(f'  - Min/Max workers: {config.min_workers}/{config.max_workers}')
+          print(f'  - Scale-up threshold: {config.scale_up_queue_threshold} tasks')
+          print(f'  - Latency threshold: {config.scale_up_latency_threshold_ms}ms')
+          print(f'  - Scale-down timeout: {config.scale_down_idle_timeout_seconds}s')
+          print(f'  - Monitoring interval: {config.monitoring_interval_seconds}s')
+          "
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, test-without-redis, security-scan, performance-test, validate-dependencies]
+    if: always()
+    
+    steps:
+      - name: Generate CI Summary
+        run: |
+          echo "## Agent Engines CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unit Tests**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Fallback Mode Tests**: ${{ needs.test-without-redis.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Scan**: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Performance Test**: ${{ needs.performance-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Validation**: ${{ needs.validate-dependencies.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check if any critical tests failed
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            echo "❌ **Critical**: Unit tests failed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "✅ **All autoscaling tests passed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Autoscaling Features Tested" >> $GITHUB_STEP_SUMMARY
+          echo "- Redis queue monitoring" >> $GITHUB_STEP_SUMMARY
+          echo "- Dynamic worker scaling (up/down)" >> $GITHUB_STEP_SUMMARY
+          echo "- Graceful worker termination" >> $GITHUB_STEP_SUMMARY
+          echo "- GPU memory protection" >> $GITHUB_STEP_SUMMARY
+          echo "- Prometheus metrics integration" >> $GITHUB_STEP_SUMMARY
+          echo "- Traffic spike simulation" >> $GITHUB_STEP_SUMMARY
+          echo "- Error handling and recovery" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

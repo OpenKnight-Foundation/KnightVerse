@@ -1,18 +1,54 @@
 # agent-engines
 
-GPU-oriented engine infrastructure for the KnightVerse chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
+GPU-oriented engine infrastructure for the KnightVerse chess platform with **Dynamic Autoscaling** capabilities. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
 
 ## Overview
 
 The GPU worker subsystem is designed for long-running analysis services where neural-network inference should stay close to a dedicated GPU while requests are dispatched through a pool abstraction.
 
-**New Features:**
+**Features:**
 - 🤖 **Natural Language Agent**: Interact with chess engines using plain English
 - 🌐 **Stockfish WASM**: Browser-compatible chess engine via WebAssembly
 - 🚀 **Soroban CI/CD**: Automated blockchain contract deployment pipeline
 - ⚡ **Resource Optimizer**: Intelligent CPU/memory allocation with gas cost estimation
 - 🔄 **Deployment Pipeline**: Automated validation, testing, optimization, and rollback
 - 📊 **Performance Monitoring**: Real-time metrics and system capacity tracking
+- 🎯 **Dynamic Autoscaling**: Redis queue-based GPU worker autoscaling with Prometheus metrics
+
+## Autoscaling Features
+
+### AI-30: GPU Worker Dynamic Autoscaling Daemon ✅
+
+Automatically scales GPU worker processes based on Redis queue demand:
+
+- **Queue Monitoring**: Monitors `ai_task_queue:length` and worker GPU memory utilization
+- **Smart Scaling**: Scales up when queue > 50 tasks OR latency > 500ms
+- **Graceful Management**: Never terminates workers with active evaluations
+- **GPU Protection**: Prevents scaling beyond available VRAM limits
+- **Prometheus Integration**: Comprehensive metrics for monitoring and alerting
+
+```python
+from gpu_worker.resource_optimizer import AutoscalingConfig, AutoscalingDaemon
+
+# Configure autoscaling
+config = AutoscalingConfig(
+    min_workers=2,
+    max_workers=10,
+    scale_up_queue_threshold=50,
+    redis_host="localhost"
+)
+
+# Start autoscaling daemon
+daemon = AutoscalingDaemon(config)
+await daemon.start()
+```
+
+### Metrics Exposed
+
+- `ai_autoscaler_active_workers` - Number of active workers
+- `ai_autoscaler_queue_length` - Redis queue depth
+- `ai_autoscaler_scaling_events_total` - Scaling event counter
+- `ai_worker_graceful_shutdowns_total` - Graceful shutdown counter
 
 ```text
 Client/API

@@ -19,6 +19,7 @@ use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use challenge::api::configure_puzzle_routes;
 use challenge::puzzle_validation::PuzzleValidationService;
+use db::DbPool;
 use dotenv::dotenv;
 use matchmaking::redis::{create_redis_pool, test_redis_connection};
 use matchmaking::MatchmakingService;
@@ -27,7 +28,6 @@ use migration::MigratorTrait;
 use security::jwt::{JwtAuthMiddleware, JwtService};
 use tracing::{info, warn, error};
 use tracing_actix_web::TracingLogger;
-use sea_orm::Database;
 use std::env;
 use std::sync::Arc;
 use utoipa::OpenApi;
@@ -79,6 +79,25 @@ async fn greet() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"message": "Welcome to KnightVerse API"}))
 }
 
+/// Prometheus metrics endpoint — exposes `db_pool_connections_*` and any other
+/// registered metrics in the default registry.
+async fn metrics(pool: web::Data<DbPool>) -> impl Responder {
+    // Snapshot pool stats into Prometheus gauges before encoding
+    pool.update_metrics();
+
+    match prometheus::TextEncoder::new()
+        .encode_to_string(&prometheus::gather())
+    {
+        Ok(body) => HttpResponse::Ok()
+            .content_type("text/plain; version=0.0.4")
+            .body(body),
+        Err(e) => {
+            tracing::error!("Failed to encode Prometheus metrics: {}", e);
+            HttpResponse::InternalServerError().body("Failed to encode metrics")
+        }
+    }
+}
+
 /// Main server initialization function
 pub async fn main() -> std::io::Result<()> {
     let openapi = ApiDoc::openapi();
@@ -107,7 +126,7 @@ pub async fn main() -> std::io::Result<()> {
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
+    let _database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     // JWT: strict env — crash on missing/insecure secret
     let jwt_service = JwtService::from_env();
@@ -122,32 +141,23 @@ pub async fn main() -> std::io::Result<()> {
     info!("Initializing KnightVerse Backend Server");
     info!("Server address: {}", server_addr);
 
-    // Connect to database
-    let db = match Database::connect(&database_url).await {
-        Ok(conn) => {
-            info!("Database connection successful");
-            conn
-        }
-        Err(e) => {
-            error!("Failed to connect to database: {}", e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Database connection failed",
-            ));
-        }
-    };
+    // Connect to database — dual pool (primary + optional replica)
+    let db_pool = DbPool::from_env().await;
+    info!(
+        "Database pool ready (has_replica={})",
+        db_pool.has_replica()
+    );
 
-    // Run database migrations automatically on startup
+    // Run database migrations against the primary
     eprintln!("Running database migrations...");
-    match Migrator::up(&db, None).await {
+    match Migrator::up(db_pool.primary(), None).await {
         Ok(_) => eprintln!("Database migrations completed successfully"),
         Err(e) => {
             eprintln!("Warning: Failed to run database migrations: {}", e);
-            // Don't abort server startup — allow running with existing schema
         }
     }
 
-    let db = std::sync::Arc::new(db); // Wrap db in Arc
+    let db_pool = Arc::new(db_pool);
 
     // Create a shared LobbyState actor
     let lobby = LobbyState::new().start();
@@ -174,7 +184,7 @@ pub async fn main() -> std::io::Result<()> {
 
     // Define the app factory closure
     let app_factory = move || {
-        let db = db.clone();
+        let db_pool = db_pool.clone();
         let jwt_service = jwt_service.clone();
         let jwt_secret = jwt_secret.clone();
         let matchmaking_service = matchmaking_service.clone();
@@ -240,7 +250,7 @@ pub async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .wrap(create_metricsMiddleware(metrics_collector.clone()))
             // App data
-            .app_data(web::Data::from(db.clone()))
+            .app_data(web::Data::from(db_pool.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(lobby.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))

@@ -1,4 +1,17 @@
+//! KnightVerse database crate.
+//!
+//! Provides [`DbPool`]: a dual-pool wrapper around sea-orm connections that
+//! routes read queries to a PostgreSQL replica and write queries to the primary.
+//! When `DATABASE_REPLICA_URL` is absent the pool transparently degrades to
+//! single-node mode.
+
 pub mod db;
+
+/// Convenience re-export so downstream crates can write `db::DbPool`.
+pub use db::db::DbPool;
+
+#[cfg(test)]
+mod integration_tests;
 
 #[cfg(test)]
 mod tests {
@@ -23,7 +36,7 @@ mod tests {
                 ),
                 false,
             ),
-            _ => (format!(""), false),
+            _ => (String::new(), false),
         };
 
         let result = db
@@ -73,7 +86,7 @@ mod tests {
                  WHERE table_name = '{}' AND column_name = '{}'",
                 table_name, column_name
             ),
-            _ => format!(""),
+            _ => String::new(),
         };
 
         db.query_one(Statement::from_string(db_backend, query))
@@ -104,10 +117,10 @@ mod tests {
             ("social_links", "ARRAY"),
         ]);
 
-        for (column, colunn_type) in columns_and_types.iter() {
+        for (column, column_type) in columns_and_types.iter() {
             assert_eq!(
                 get_column_type(&db, DATABASE_NAME, column).await?,
-                Some(colunn_type.to_string())
+                Some(column_type.to_string())
             )
         }
 

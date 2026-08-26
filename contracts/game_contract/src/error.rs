@@ -94,4 +94,6 @@ pub enum ContractError {
     InsufficientTreasury = 47,
     /// Token address is not in the admin-maintained whitelist (SC-17)
     TokenNotWhitelisted = 48,
+    /// Player has reached the maximum number of active tournament escrows (SC-20)
+    MaxActiveEscrowsExceeded = 49,
 }

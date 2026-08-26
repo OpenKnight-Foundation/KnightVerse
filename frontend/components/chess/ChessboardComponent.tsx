@@ -9,6 +9,37 @@ import React, {
 } from "react";
 import Image from "next/image";
 import { useBoardTheme } from "@/context/ThemeContext";
+import { Chess } from "chess.js";
+
+function parseFen(fen: string): (string | null)[][] {
+  const board = new Chess(fen);
+  return board.board().map((row) =>
+    row.map((cell) => {
+      if (!cell) return null;
+      const color = cell.color === "w" ? "w" : "b";
+      const piece = cell.type.toUpperCase();
+      return `${color}${piece}`;
+    }),
+  );
+}
+
+function formatPieceName(piece: string): string {
+  const pieceMap: Record<string, string> = {
+    wP: "White Pawn",
+    wR: "White Rook",
+    wN: "White Knight",
+    wB: "White Bishop",
+    wQ: "White Queen",
+    wK: "White King",
+    bP: "Black Pawn",
+    bR: "Black Rook",
+    bN: "Black Knight",
+    bB: "Black Bishop",
+    bQ: "Black Queen",
+    bK: "Black King",
+  };
+  return pieceMap[piece] || "Unknown Piece";
+}
 
 import WhiteKing from "./chesspieces/white-king.svg";
 import WhiteQueen from "./chesspieces/white-queen.svg";
@@ -28,29 +59,16 @@ import { PremoveService, PreMove } from "@/services/premoveService";
 interface ChessboardComponentProps {
   position: string;
   onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
-  isMyTurn: boolean;
   orientation?: "white" | "black";
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   position,
   onDrop,
-  isMyTurn,
   orientation = "white",
 }) => {
   const [premoves, setPremoves] = useState<PreMove[]>([]);
   const premoveService = useRef(new PremoveService());
-
-  const handleDrop = (sourceSquare: string, targetSquare: string) => {
-    if (isMyTurn) {
-      return onDrop({ sourceSquare, targetSquare });
-    } else {
-      const piece = "";
-      premoveService.current.addPremove(sourceSquare, targetSquare, piece);
-      setPremoves(premoveService.current.getPremoves());
-      return false;
-    }
-  };
 
   const clearPremoves = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -59,7 +77,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   };
 
   const [mounted, setMounted] = useState(false);
-  const [boardWidth, setBoardWidth] = useState(width || 560);
+  const [boardWidth] = useState(560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
   const [focusedSquare, setFocusedSquare] = useState<string | null>(null);
@@ -79,10 +97,14 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     return boardState;
   }, [boardState, orientation]);
 
-useEffect(() => {
-    const { executedMove, illegal } = premoveService.current.handleOpponentMove(position);
+  useEffect(() => {
+    const { executedMove } =
+      premoveService.current.handleOpponentMove(position);
     if (executedMove) {
-      onDrop({ sourceSquare: executedMove.from, targetSquare: executedMove.to });
+      onDrop({
+        sourceSquare: executedMove.from,
+        targetSquare: executedMove.to,
+      });
     }
     setPremoves(premoveService.current.getPremoves());
   }, [position, onDrop]);
@@ -242,35 +264,32 @@ useEffect(() => {
     [selectedSquare, boardState, displayRows, attemptMove],
   );
 
-  const [highlightedSquares, setHighlightedSquares] = useState<string[]>([]);
-const [arrows, setArrows] = useState<[string, string][]>([]);
+  const [highlightedSquares, setHighlightedSquares] = useState<
+    { square: string; color: string }[]
+  >([]);
+  const [arrows, setArrows] = useState<[string, string][]>([]);
 
-const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
-  e.preventDefault();
-  const square = `${row},${col}`;
-  const color = e.shiftKey ? 'red' : e.altKey ? 'blue' : e.ctrlKey ? 'yellow' : 'green';
-  setHighlightedSquares(prev => 
-    prev.some(s => s.square === square) 
-      ? prev.filter(s => s.square !== square) 
-      : [...prev, { square, color }]
-  );
-};
-
-const handleDragStart = (e: React.DragEvent, row: number, col: number) => {
-  if (e.button === 2) { // Right-click
-    e.dataTransfer.setData('text/plain', `${row},${col}`);
-  }
-};
-
-const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) => {
-  if (e.button === 2) { // Right-click
+  const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault();
-    const data = e.dataTransfer.getData('text/plain');
-    const [sourceRow, sourceCol] = data.split(',').map(Number);
-    setArrows(prev => [...prev, [`${sourceRow},${sourceCol}`, `${targetRow},${targetCol}`]]);
-  }
-};
+    const square = `${row},${col}`;
+    const color = e.shiftKey
+      ? "red"
+      : e.altKey
+        ? "blue"
+        : e.ctrlKey
+          ? "yellow"
+          : "green";
 
+    setHighlightedSquares((prev) =>
+      prev.some((s) => s.square === square)
+        ? prev.filter((s) => s.square !== square)
+        : [...prev, { square, color }],
+    );
+  };
+
+  const handleDragStart = (e: React.DragEvent, row: number, col: number) => {
+    e.dataTransfer.setData("text/plain", `${row},${col}`);
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -373,6 +392,29 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
     [getSquareFromTouch, attemptMove],
   );
 
+  const renderGhostPiece = (piece: string, square: string) => {
+    const pieceImage = getPieceImage(piece);
+    if (!pieceImage) return null;
+
+    const [row, col] = [parseInt(square[1]) - 1, square.charCodeAt(0) - 97];
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: `${row * 12.5}%`,
+          left: `${col * 12.5}%`,
+          width: "12.5%",
+          height: "12.5%",
+          opacity: 0.5,
+          pointerEvents: "none",
+        }}
+      >
+        {pieceImage}
+      </div>
+    );
+  };
+
   if (!mounted) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-800 rounded-md">
@@ -433,44 +475,17 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
           transformOrigin: "center center",
         }}
       >
-        {premoves.map((premove, index) => {
-          const fromSquare = premove.from;
-          const toSquare = premove.to;
-          const color = index === 0 ? "blue" : "purple";
+        {premoves.map(() => {
+          // const fromSquare = premove.from;
+          // const toSquare = premove.to;
+          // const color = index === 0 ? "blue" : "purple";
           // return <PremoveArrow key={index} from={fromSquare} to={toSquare} color={color} />;
         })}
-        const renderGhostPiece = (piece: string, square: string) => {
-    const pieceImage = getPieceImage(piece);
-    if (!pieceImage) return null;
-
-    const [row, col] = [parseInt(square[1]) - 1, square.charCodeAt(0) - 97];
-
-    return (
-      <div
-        style={{
-          position: 'absolute',
-          top: `${row * 12.5}%`,
-          left: `${col * 12.5}%`,
-          width: '12.5%',
-          height: '12.5%',
-          opacity: 0.5,
-          pointerEvents: 'none',
-        }}
-      >
-        {pieceImage}
-      </div>
-    );
-  };
-
-  return (
-    // ... (rest of the component)
-      {premoves.map((premove, index) => {
-        const toSquare = premove.to;
-        const piece = premove.piece;
-        return renderGhostPiece(piece, toSquare);
-      })}
-    // ... (rest of the component)
-  );    })}
+        {premoves.map((premove) => {
+          const toSquare = premove.to;
+          const piece = premove.piece;
+          return renderGhostPiece(piece, toSquare);
+        })}
         {/* Screen reader live region for selection announcements */}
         <div
           className="sr-only"
@@ -496,8 +511,9 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
             const isFocused = focusedSquare === squareKey;
             const isHovered =
               hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
-            const highlightedSquare = highlightedSquares.find(s => s.square === squareKey);
-            const isHighlighted = !!highlightedSquare;
+            const highlightedSquare = highlightedSquares.find(
+              (s) => s.square === squareKey,
+            );
 
             // Compute actual board coordinates for the aria-label
             const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
@@ -532,7 +548,11 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
                   }
                 }}
                 style={{
-                  backgroundColor: isLight ? colors.dark : colors.light,
+                  backgroundColor: highlightedSquare
+                    ? highlightedSquare.color
+                    : isLight
+                      ? colors.lightSquare
+                      : colors.darkSquare,
                   width: "100%",
                   height: "100%",
                   display: "flex",
@@ -541,15 +561,13 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
                   cursor: piece ? "grab" : "default",
                   position: "relative",
                   outline: "none",
-                  boxShadow: isHighlighted
-                    ? `inset 0 0 0 3px ${highlightedSquare.color}`
-                    : isSelected
-                      ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
-                      : isFocused
-                        ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
-                        : isHovered
-                          ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
-                          : "none",
+                  boxShadow: isSelected
+                    ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
+                    : isFocused
+                      ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                      : isHovered
+                        ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
+                        : "none",
                   transition:
                     "background-color 0.2s ease, box-shadow 0.1s ease",
                 }}
@@ -565,25 +583,34 @@ const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) =>
                 onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
                 draggable={!!piece}
                 onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
-                onDragEnd={handleDragEnd}
-                onDrop={(e) => handleDrop(e, rowIndex, colIndex)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const data = e.dataTransfer.getData("text/plain");
+                  if (data) {
+                    const [sourceRow, sourceCol] = data.split(",").map(Number);
+                    if (e.button === 2) {
+                      // Right-click drop
+                      setArrows((prev) => [
+                        ...prev,
+                        [
+                          `${sourceRow},${sourceCol}`,
+                          `${rowIndex},${colIndex}`,
+                        ],
+                      ]);
+                    } else {
+                      // Left-click drop
+                      attemptMove(sourceRow, sourceCol, rowIndex, colIndex);
+                    }
+                  }
+                }}
                 onDragOver={handleDragOver}
               >
-                {piece && (
-                  <div
-                    style={{
-                      transition: "transform 0.2s ease-out",
-                      transform: `scale(${isSelected ? 1.1 : 1})`,
-                    }}
-                  >
-                    {getPieceImage(piece)}
-                  </div>
-                )}
+                {piece && getPieceImage(piece)}
               </div>
             );
           }),
         )}
-        {arrows.map(([from, to], index) => {
+        {arrows.map((/*[from, to], index*/) => {
           // return <PremoveArrow key={index} from={from} to={to} color="yellow" />;
         })}
       </div>

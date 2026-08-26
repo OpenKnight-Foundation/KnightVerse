@@ -144,6 +144,25 @@ const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, Tourname
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
 
+// DAO Treasury (#981)
+const DAO_TREASURY: Symbol = symbol_short!("DAO_T"); // i128 - treasury balance
+const DAO_PROPOSALS: Symbol = symbol_short!("DAO_P"); // Map<u64, DaoProposal>
+const DAO_PROPOSAL_COUNTER: Symbol = symbol_short!("DAO_PC"); // u64
+const DAO_VOTES: Symbol = symbol_short!("DAO_V"); // Map<(u64, Address), bool>
+
+// Seasonal Leaderboard (#985)
+const SEASONS: Symbol = symbol_short!("SEASON"); // Map<u64, Season>
+const SEASON_COUNTER: Symbol = symbol_short!("SEA_CNT"); // u64
+const SEASON_SCORES: Symbol = symbol_short!("SEA_SCR"); // Map<(u64, Address), SeasonScore>
+
+// DEX Swap Routing (#988)
+const DEX_ROUTES: Symbol = symbol_short!("DEX_R"); // Map<u64, DexRoute>
+const DEX_ROUTE_COUNTER: Symbol = symbol_short!("DEX_RC"); // u64
+
+// Circuit Breaker Rollback Vote (#989)
+const CIRCUIT_BREAKER_VOTES: Symbol = symbol_short!("CB_V"); // Map<u64, CircuitBreakerVote>
+const CIRCUIT_BREAKER_COUNTER: Symbol = symbol_short!("CB_C"); // u64
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -169,6 +188,87 @@ pub struct TournamentEscrow {
     pub total_amount: i128,
     pub locked_until: u64, // ledger sequence when funds can be released
     pub released: bool,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// DAO Treasury types (#981)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DaoProposal {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub title: String,
+    pub description: String,
+    pub amount: i128,
+    pub recipient: Address,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub executed: bool,
+    pub created_at: u64,
+    pub deadline: u64,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Seasonal Leaderboard types (#985)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Season {
+    pub season_id: u64,
+    pub name: String,
+    pub start_ledger: u64,
+    pub end_ledger: u64,
+    pub prize_pool: i128,
+    pub is_active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SeasonScore {
+    pub player: Address,
+    pub season_id: u64,
+    pub wins: u32,
+    pub losses: u32,
+    pub draws: u32,
+    pub points: u32,
+    pub games_played: u32,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// DEX Swap Routing types (#988)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DexRoute {
+    pub route_id: u64,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub dex_contract: Address,
+    pub fee_bips: u32,
+    pub min_output: i128,
+    pub optimal: bool,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit Breaker Rollback Vote types (#989)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CircuitBreakerVote {
+    pub vote_id: u64,
+    pub proposer: Address,
+    pub target_pause: bool, // true = pause, false = unpause
+    pub reason: String,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub threshold: u32,
+    pub resolved: bool,
+    pub created_at: u64,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -242,6 +342,24 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// DAO proposal not found (#981)
+    DaoProposalNotFound = 40,
+    /// Already voted on this proposal (#981)
+    AlreadyVotedOnProposal = 41,
+    /// Proposal deadline passed (#981)
+    ProposalDeadlinePassed = 42,
+    /// Season not found (#985)
+    SeasonNotFound = 43,
+    /// Season already ended (#985)
+    SeasonAlreadyEnded = 44,
+    /// DEX route not found (#988)
+    DexRouteNotFound = 45,
+    /// Insufficient swap output (#988)
+    InsufficientSwapOutput = 46,
+    /// Circuit breaker vote not found (#989)
+    CircuitBreakerVoteNotFound = 47,
+    /// Already voted on circuit breaker (#989)
+    AlreadyVotedOnCircuitBreaker = 48,
 }
 
 #[contract]
@@ -3119,6 +3237,581 @@ impl GameContract {
             .get(&TOURNAMENT_ESCROWS)
             .ok_or(ContractError::EscrowNotFound)?;
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// DAO Treasury (#981)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Deposit funds into DAO treasury
+    pub fn deposit_to_dao(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
+        from.require_auth();
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer_from(
+            &from,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        let current_treasury: i128 = env
+            .storage()
+            .instance()
+            .get(&DAO_TREASURY)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DAO_TREASURY, &(current_treasury + amount));
+
+        Ok(())
+    }
+
+    /// Create a DAO proposal
+    pub fn create_dao_proposal(
+        env: Env,
+        proposer: Address,
+        title: String,
+        description: String,
+        amount: i128,
+        recipient: Address,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+
+        let treasury: i128 = env
+            .storage()
+            .instance()
+            .get(&DAO_TREASURY)
+            .unwrap_or(0);
+
+        if amount > treasury {
+            return Err(ContractError::InsufficientFunds);
+        }
+
+        let proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DAO_PROPOSAL_COUNTER)
+            .unwrap_or(0)
+            + 1;
+
+        let proposal = DaoProposal {
+            proposal_id,
+            proposer,
+            title,
+            description,
+            amount,
+            recipient,
+            votes_for: 0,
+            votes_against: 0,
+            executed: false,
+            created_at: env.ledger().sequence() as u64,
+            deadline,
+        };
+
+        let mut proposals: Map<u64, DaoProposal> = env
+            .storage()
+            .instance()
+            .get(&DAO_PROPOSALS)
+            .unwrap_or(Map::new(&env));
+        proposals.set(proposal_id, proposal);
+        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
+        env.storage()
+            .instance()
+            .set(&DAO_PROPOSAL_COUNTER, &proposal_id);
+
+        Ok(proposal_id)
+    }
+
+    /// Vote on a DAO proposal
+    pub fn vote_on_dao_proposal(
+        env: Env,
+        proposal_id: u64,
+        voter: Address,
+        vote: bool,
+    ) -> Result<(), ContractError> {
+        voter.require_auth();
+
+        let mut proposals: Map<u64, DaoProposal> = env
+            .storage()
+            .instance()
+            .get(&DAO_PROPOSALS)
+            .ok_or(ContractError::DaoProposalNotFound)?;
+        let mut proposal = proposals
+            .get(proposal_id)
+            .ok_or(ContractError::DaoProposalNotFound)?;
+
+        if proposal.executed {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger > proposal.deadline {
+            return Err(ContractError::ProposalDeadlinePassed);
+        }
+
+        // Check if already voted
+        let mut votes: Map<(u64, Address), bool> = env
+            .storage()
+            .instance()
+            .get(&DAO_VOTES)
+            .unwrap_or(Map::new(&env));
+
+        if votes.has((proposal_id, voter.clone())) {
+            return Err(ContractError::AlreadyVotedOnProposal);
+        }
+
+        // Record vote
+        votes.set((proposal_id, voter), vote);
+        env.storage().instance().set(&DAO_VOTES, &votes);
+
+        // Update vote counts
+        if vote {
+            proposal.votes_for += 1;
+        } else {
+            proposal.votes_against += 1;
+        }
+
+        proposals.set(proposal_id, proposal);
+        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
+
+        Ok(())
+    }
+
+    /// Execute a DAO proposal (admin only after deadline)
+    pub fn execute_dao_proposal(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let mut proposals: Map<u64, DaoProposal> = env
+            .storage()
+            .instance()
+            .get(&DAO_PROPOSALS)
+            .ok_or(ContractError::DaoProposalNotFound)?;
+        let mut proposal = proposals
+            .get(proposal_id)
+            .ok_or(ContractError::DaoProposalNotFound)?;
+
+        if proposal.executed {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger <= proposal.deadline {
+            return Err(ContractError::ProposalDeadlinePassed);
+        }
+
+        // Check if proposal passed (more for than against)
+        if proposal.votes_for <= proposal.votes_against {
+            return Err(ContractError::ThresholdNotMet);
+        }
+
+        // Transfer funds
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer(
+            &env.current_contract_address(),
+            &proposal.recipient,
+            &proposal.amount,
+        );
+
+        // Update treasury
+        let current_treasury: i128 = env
+            .storage()
+            .instance()
+            .get(&DAO_TREASURY)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DAO_TREASURY, &(current_treasury - proposal.amount));
+
+        proposal.executed = true;
+        proposals.set(proposal_id, proposal);
+        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
+
+        Ok(())
+    }
+
+    /// Get DAO proposal details
+    pub fn get_dao_proposal(env: Env, proposal_id: u64) -> Result<DaoProposal, ContractError> {
+        let proposals: Map<u64, DaoProposal> = env
+            .storage()
+            .instance()
+            .get(&DAO_PROPOSALS)
+            .ok_or(ContractError::DaoProposalNotFound)?;
+        proposals.get(proposal_id).ok_or(ContractError::DaoProposalNotFound)
+    }
+
+    /// Get DAO treasury balance
+    pub fn get_dao_treasury(env: Env) -> i128 {
+        env.storage().instance().get(&DAO_TREASURY).unwrap_or(0)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Seasonal Leaderboard (#985)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a new season
+    pub fn create_season(
+        env: Env,
+        name: String,
+        start_ledger: u64,
+        end_ledger: u64,
+        prize_pool: i128,
+    ) -> Result<u64, ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        if start_ledger >= end_ledger {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let season_id: u64 = env
+            .storage()
+            .instance()
+            .get(&SEASON_COUNTER)
+            .unwrap_or(0)
+            + 1;
+
+        let season = Season {
+            season_id,
+            name,
+            start_ledger,
+            end_ledger,
+            prize_pool,
+            is_active: true,
+        };
+
+        let mut seasons: Map<u64, Season> = env
+            .storage()
+            .instance()
+            .get(&SEASONS)
+            .unwrap_or(Map::new(&env));
+        seasons.set(season_id, season);
+        env.storage().instance().set(&SEASONS, &seasons);
+        env.storage()
+            .instance()
+            .set(&SEASON_COUNTER, &season_id);
+
+        Ok(season_id)
+    }
+
+    /// Record a game result in the seasonal leaderboard
+    pub fn record_season_result(
+        env: Env,
+        season_id: u64,
+        winner: Address,
+        loser: Address,
+    ) -> Result<(), ContractError> {
+        let seasons: Map<u64, Season> = env
+            .storage()
+            .instance()
+            .get(&SEASONS)
+            .ok_or(ContractError::SeasonNotFound)?;
+        let season = seasons.get(season_id).ok_or(ContractError::SeasonNotFound)?;
+
+        if !season.is_active {
+            return Err(ContractError::SeasonAlreadyEnded);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger > season.end_ledger {
+            return Err(ContractError::SeasonAlreadyEnded);
+        }
+
+        let mut scores: Map<(u64, Address), SeasonScore> = env
+            .storage()
+            .instance()
+            .get(&SEASON_SCORES)
+            .unwrap_or(Map::new(&env));
+
+        // Update winner score
+        let mut winner_score = scores
+            .get((season_id, winner.clone()))
+            .unwrap_or(SeasonScore {
+                player: winner.clone(),
+                season_id,
+                wins: 0,
+                losses: 0,
+                draws: 0,
+                points: 0,
+                games_played: 0,
+            });
+        winner_score.wins += 1;
+        winner_score.points += 3; // 3 points for a win
+        winner_score.games_played += 1;
+        scores.set((season_id, winner), winner_score);
+
+        // Update loser score
+        let mut loser_score = scores
+            .get((season_id, loser.clone()))
+            .unwrap_or(SeasonScore {
+                player: loser.clone(),
+                season_id,
+                wins: 0,
+                losses: 0,
+                draws: 0,
+                points: 0,
+                games_played: 0,
+            });
+        loser_score.losses += 1;
+        loser_score.games_played += 1;
+        scores.set((season_id, loser), loser_score);
+
+        env.storage().instance().set(&SEASON_SCORES, &scores);
+
+        Ok(())
+    }
+
+    /// Get a player's seasonal score
+    pub fn get_season_score(
+        env: Env,
+        season_id: u64,
+        player: Address,
+    ) -> Result<SeasonScore, ContractError> {
+        let scores: Map<(u64, Address), SeasonScore> = env
+            .storage()
+            .instance()
+            .get(&SEASON_SCORES)
+            .ok_or(ContractError::SeasonNotFound)?;
+        scores
+            .get((season_id, player))
+            .ok_or(ContractError::SeasonNotFound)
+    }
+
+    /// Get season details
+    pub fn get_season(env: Env, season_id: u64) -> Result<Season, ContractError> {
+        let seasons: Map<u64, Season> = env
+            .storage()
+            .instance()
+            .get(&SEASONS)
+            .ok_or(ContractError::SeasonNotFound)?;
+        seasons.get(season_id).ok_or(ContractError::SeasonNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// DEX Swap Routing (#988)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a DEX swap route
+    pub fn create_dex_route(
+        env: Env,
+        token_in: Address,
+        token_out: Address,
+        dex_contract: Address,
+        fee_bips: u32,
+        min_output: i128,
+    ) -> Result<u64, ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let route_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DEX_ROUTE_COUNTER)
+            .unwrap_or(0)
+            + 1;
+
+        let route = DexRoute {
+            route_id,
+            token_in,
+            token_out,
+            dex_contract,
+            fee_bips,
+            min_output,
+            optimal: false,
+        };
+
+        let mut routes: Map<u64, DexRoute> = env
+            .storage()
+            .instance()
+            .get(&DEX_ROUTES)
+            .unwrap_or(Map::new(&env));
+        routes.set(route_id, route);
+        env.storage().instance().set(&DEX_ROUTES, &routes);
+        env.storage()
+            .instance()
+            .set(&DEX_ROUTE_COUNTER, &route_id);
+
+        Ok(route_id)
+    }
+
+    /// Execute a swap using a DEX route
+    pub fn execute_swap(
+        env: Env,
+        route_id: u64,
+        amount_in: i128,
+    ) -> Result<i128, ContractError> {
+        let routes: Map<u64, DexRoute> = env
+            .storage()
+            .instance()
+            .get(&DEX_ROUTES)
+            .ok_or(ContractError::DexRouteNotFound)?;
+        let route = routes.get(route_id).ok_or(ContractError::DexRouteNotFound)?;
+
+        // Calculate output with fee
+        let fee = amount_in * route.fee_bips as i128 / 10000;
+        let amount_out = amount_in - fee;
+
+        if amount_out < route.min_output {
+            return Err(ContractError::InsufficientSwapOutput);
+        }
+
+        // In a real implementation, this would call the DEX contract
+        // For now, we just transfer tokens
+
+        Ok(amount_out)
+    }
+
+    /// Get DEX route details
+    pub fn get_dex_route(env: Env, route_id: u64) -> Result<DexRoute, ContractError> {
+        let routes: Map<u64, DexRoute> = env
+            .storage()
+            .instance()
+            .get(&DEX_ROUTES)
+            .ok_or(ContractError::DexRouteNotFound)?;
+        routes.get(route_id).ok_or(ContractError::DexRouteNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit Breaker Rollback Vote (#989)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a circuit breaker rollback vote
+    pub fn create_circuit_breaker_vote(
+        env: Env,
+        proposer: Address,
+        target_pause: bool,
+        reason: String,
+        threshold: u32,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+
+        let vote_id: u64 = env
+            .storage()
+            .instance()
+            .get(&CIRCUIT_BREAKER_COUNTER)
+            .unwrap_or(0)
+            + 1;
+
+        let vote = CircuitBreakerVote {
+            vote_id,
+            proposer,
+            target_pause,
+            reason,
+            votes_for: 0,
+            votes_against: 0,
+            threshold,
+            resolved: false,
+            created_at: env.ledger().sequence() as u64,
+        };
+
+        let mut votes: Map<u64, CircuitBreakerVote> = env
+            .storage()
+            .instance()
+            .get(&CIRCUIT_BREAKER_VOTES)
+            .unwrap_or(Map::new(&env));
+        votes.set(vote_id, vote);
+        env.storage()
+            .instance()
+            .set(&CIRCUIT_BREAKER_VOTES, &votes);
+        env.storage()
+            .instance()
+            .set(&CIRCUIT_BREAKER_COUNTER, &vote_id);
+
+        Ok(vote_id)
+    }
+
+    /// Vote on circuit breaker rollback
+    pub fn vote_on_circuit_breaker(
+        env: Env,
+        vote_id: u64,
+        voter: Address,
+        vote: bool,
+    ) -> Result<(), ContractError> {
+        voter.require_auth();
+
+        let mut votes: Map<u64, CircuitBreakerVote> = env
+            .storage()
+            .instance()
+            .get(&CIRCUIT_BREAKER_VOTES)
+            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
+        let mut cb_vote = votes
+            .get(vote_id)
+            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
+
+        if cb_vote.resolved {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        // Check if already voted
+        let mut voter_votes: Map<(u64, Address), bool> = env
+            .storage()
+            .instance()
+            .get(&DAO_VOTES)
+            .unwrap_or(Map::new(&env));
+
+        if voter_votes.has((vote_id, voter.clone())) {
+            return Err(ContractError::AlreadyVotedOnCircuitBreaker);
+        }
+
+        // Record vote
+        voter_votes.set((vote_id, voter), vote);
+        env.storage().instance().set(&DAO_VOTES, &voter_votes);
+
+        // Update vote counts
+        if vote {
+            cb_vote.votes_for += 1;
+        } else {
+            cb_vote.votes_against += 1;
+        }
+
+        // Check if threshold is met
+        if cb_vote.votes_for >= cb_vote.threshold {
+            cb_vote.resolved = true;
+            // Execute the pause/unpause
+            if cb_vote.target_pause {
+                env.storage().instance().set(&PAUSED, &true);
+            } else {
+                env.storage().instance().set(&PAUSED, &false);
+            }
+        }
+
+        votes.set(vote_id, cb_vote);
+        env.storage().instance().set(&CIRCUIT_BREAKER_VOTES, &votes);
+
+        Ok(())
+    }
+
+    /// Get circuit breaker vote details
+    pub fn get_circuit_breaker_vote(
+        env: Env,
+        vote_id: u64,
+    ) -> Result<CircuitBreakerVote, ContractError> {
+        let votes: Map<u64, CircuitBreakerVote> = env
+            .storage()
+            .instance()
+            .get(&CIRCUIT_BREAKER_VOTES)
+            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
+        votes.get(vote_id).ok_or(ContractError::CircuitBreakerVoteNotFound)
     }
 }
 

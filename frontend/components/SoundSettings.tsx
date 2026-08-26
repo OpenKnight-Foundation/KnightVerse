@@ -2,9 +2,11 @@
 
 import React from 'react';
 import { useSound } from '@/context/SoundContext';
+import { useHaptics } from '@/hook/useHaptics';
 
 export default function SoundSettings() {
   const { volume, setVolume, isMuted, setIsMuted, soundPack, setSoundPack } = useSound();
+  const { isSupported, isEnabled, setIsEnabled, triggerHaptic } = useHaptics();
 
   const soundPacks: { id: 'standard' | 'arcade' | 'minimalist'; label: string }[] = [
     { id: 'standard', label: 'Standard' },
@@ -66,6 +68,62 @@ export default function SoundSettings() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Haptic Feedback Section */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-300">Haptic Feedback</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              {isSupported
+                ? 'Vibrate on moves, captures, and checks'
+                : 'Not supported on this device'}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setIsEnabled(!isEnabled);
+              if (!isEnabled) {
+                triggerHaptic('move');
+              }
+            }}
+            disabled={!isSupported}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+              isEnabled && isSupported
+                ? 'bg-teal-600'
+                : 'bg-gray-700'
+            } ${!isSupported ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform duration-200 ${
+                isEnabled && isSupported ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+        {isSupported && isEnabled && (
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => triggerHaptic('move')}
+              className="px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-md text-gray-300 hover:bg-gray-700 transition-colors"
+            >
+              Test Move
+            </button>
+            <button
+              onClick={() => triggerHaptic('capture')}
+              className="px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-md text-gray-300 hover:bg-gray-700 transition-colors"
+            >
+              Test Capture
+            </button>
+            <button
+              onClick={() => triggerHaptic('check')}
+              className="px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-md text-gray-300 hover:bg-gray-700 transition-colors"
+            >
+              Test Check
+            </button>
+          </div>
+        )}
       </div>
       
       <p className="text-sm text-gray-400">

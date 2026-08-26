@@ -402,6 +402,8 @@ impl GameContract {
 
         game.player1.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         if winners.len() != percentages.len() {
             return Err(ContractError::MismatchedLengths);
         }
@@ -780,6 +782,8 @@ impl GameContract {
             return Err(ContractError::NotPlayer);
         }
 
+        Self::require_not_paused(&env)?;
+
         // Verify backend admin signature for a draw to prevent unilateral draws
         let admin_key_bytes: Bytes = env
             .storage()
@@ -873,6 +877,8 @@ impl GameContract {
         if game.player1 != winner && Some(winner.clone()) != game.player2 {
             return Err(ContractError::NotPlayer);
         }
+
+        Self::require_not_paused(&env)?;
 
         // Verify admin signature to confirm the win
         let admin_key_bytes: Bytes = env
@@ -1029,6 +1035,8 @@ impl GameContract {
 
         player.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let winner = if player == game.player1 {
             game.player2
                 .as_ref()
@@ -1171,6 +1179,8 @@ impl GameContract {
         }
 
         game.player1.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         if winners.len() != percentages.len() {
             return Err(ContractError::MismatchedLengths);
@@ -1691,6 +1701,8 @@ impl GameContract {
             return Err(ContractError::InvalidAmount);
         }
 
+        Self::require_not_paused(&env)?;
+
         // 1. Load admin ED25519 public key
         let admin_key_bytes: Bytes = env
             .storage()
@@ -2190,6 +2202,8 @@ impl GameContract {
 
         claimant.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let waiting_player = if game.current_turn == 1 {
             game.player2
                 .as_ref()
@@ -2316,6 +2330,8 @@ impl GameContract {
         }
         arbitrator.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         let mut disputes: Map<u64, Dispute> = env
             .storage()
             .instance()
@@ -2430,6 +2446,8 @@ impl GameContract {
             return Err(ContractError::NotArbitrator);
         }
         arbitrator.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         // Get dispute
         let mut disputes: Map<u64, Dispute> = env

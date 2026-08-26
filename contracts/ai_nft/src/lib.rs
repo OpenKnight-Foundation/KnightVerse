@@ -125,6 +125,8 @@ impl AINFTContract {
         admin.require_auth();
         minter.require_auth();
 
+        Self::require_not_paused(&env)?;
+
         // Increment NFT counter
         let mut nft_counter: u64 = env.storage().instance().get(&NFT_COUNTER).unwrap_or(0);
         nft_counter += 1;
@@ -189,6 +191,8 @@ impl AINFTContract {
 
         let current_owner = owners.get(nft_id).ok_or(ContractError::NFTNotFound)?;
         current_owner.require_auth();
+
+        Self::require_not_paused(&env)?;
 
         // Update owner in NFT_OWNERS
         owners.set(nft_id, to.clone());
@@ -386,5 +390,103 @@ mod tests {
         assert_eq!(retrieved.minter, minter);
         assert_eq!(retrieved.owner, minter);
         assert_eq!(retrieved.personality_traits, personality);
+    }
+
+    // ── Circuit Breaker Tests ─────────────────────────────────────────────────
+
+    fn setup_breaker<'a>(
+        env: &'a Env,
+        client: &AINFTContractClient<'a>,
+        admin: &Address,
+    ) -> emergency_circuit_breaker::PausableContractClient<'a> {
+        use emergency_circuit_breaker::PausableContract;
+        let cb_id = env.register_contract(None, PausableContract);
+        let cb_client = emergency_circuit_breaker::PausableContractClient::new(env, &cb_id);
+        cb_client.initialize(admin);
+        client.initialize_circuit_breaker(admin, &cb_id);
+        cb_client
+    }
+
+    /// mint is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_mint() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+        let personality = String::from_str(&env, "blocked_bot");
+
+        let result = client.try_mint(&minter, &metadata_hash, &personality);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// transfer is blocked when circuit breaker is paused.
+    #[test]
+    fn test_circuit_breaker_paused_blocks_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        // Mint while breaker is not yet paused
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "live_bot"));
+
+        // Now wire up and trip the breaker
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let result = client.try_transfer(&nft_id, &new_owner);
+        assert_eq!(result, Err(Ok(ContractError::CircuitBreakerTripped)));
+    }
+
+    /// After unpausing, mint and transfer work again.
+    #[test]
+    fn test_circuit_breaker_unpause_resumes_mint_and_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let cb_client = setup_breaker(&env, &client, &admin);
+        cb_client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+        // mint blocked while paused
+        assert!(client
+            .try_mint(&minter, &metadata_hash, &String::from_str(&env, "bot"))
+            .is_err());
+
+        cb_client.unpause(&admin);
+
+        // Now mint succeeds
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "bot"));
+        assert_eq!(client.owner_of(&nft_id), minter);
+
+        // And transfer succeeds
+        client.transfer(&nft_id, &new_owner);
+        assert_eq!(client.owner_of(&nft_id), new_owner);
     }
 }

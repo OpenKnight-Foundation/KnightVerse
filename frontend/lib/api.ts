@@ -94,6 +94,12 @@ export const endpoints = {
     create: () => `${API_BASE}/v1/tournaments`,
   },
 
+  /** Profile & Preferences */
+  profile: {
+    preferences: () => `${API_BASE}/v1/profile/preferences`,
+    theme: () => `${API_BASE}/v1/profile/theme`,
+  },
+
   /** Horizon */
   horizon: {
     transaction: (hash: string) =>

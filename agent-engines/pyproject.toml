@@ -1,7 +1,21 @@
 [project]
 name = "agent-engines"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chess engine analysis, ML training, and move validation worker"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "python-chess>=1.999",
+    "numpy>=1.24",
+    "torch>=2.0",
+    "peft>=0.7",
+    "transformers>=4.35",
+    "redis>=5.0",
+    "s3fs>=2024.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]

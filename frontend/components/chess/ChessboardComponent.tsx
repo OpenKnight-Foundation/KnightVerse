@@ -242,33 +242,35 @@ useEffect(() => {
     [selectedSquare, boardState, displayRows, attemptMove],
   );
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent, row: number, col: number) => {
-      e.dataTransfer.setData("text/plain", `${row},${col}`);
-      const draggedElement = e.currentTarget as HTMLElement;
-      if (draggedElement) {
-        draggedElement.style.opacity = "0.6";
-      }
-    },
-    [],
-  );
+  const [highlightedSquares, setHighlightedSquares] = useState<string[]>([]);
+const [arrows, setArrows] = useState<[string, string][]>([]);
 
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    const draggedElement = e.currentTarget as HTMLElement;
-    if (draggedElement) {
-      draggedElement.style.opacity = "1";
-    }
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent, targetRow: number, targetCol: number) => {
-      e.preventDefault();
-      const data = e.dataTransfer.getData("text/plain");
-      const [sourceRow, sourceCol] = data.split(",").map(Number);
-      attemptMove(sourceRow, sourceCol, targetRow, targetCol);
-    },
-    [attemptMove],
+const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
+  e.preventDefault();
+  const square = `${row},${col}`;
+  const color = e.shiftKey ? 'red' : e.altKey ? 'blue' : e.ctrlKey ? 'yellow' : 'green';
+  setHighlightedSquares(prev => 
+    prev.some(s => s.square === square) 
+      ? prev.filter(s => s.square !== square) 
+      : [...prev, { square, color }]
   );
+};
+
+const handleDragStart = (e: React.DragEvent, row: number, col: number) => {
+  if (e.button === 2) { // Right-click
+    e.dataTransfer.setData('text/plain', `${row},${col}`);
+  }
+};
+
+const handleDrop = (e: React.DragEvent, targetRow: number, targetCol: number) => {
+  if (e.button === 2) { // Right-click
+    e.preventDefault();
+    const data = e.dataTransfer.getData('text/plain');
+    const [sourceRow, sourceCol] = data.split(',').map(Number);
+    setArrows(prev => [...prev, [`${sourceRow},${sourceCol}`, `${targetRow},${targetCol}`]]);
+  }
+};
+
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -494,6 +496,8 @@ useEffect(() => {
             const isFocused = focusedSquare === squareKey;
             const isHovered =
               hoveredSquare === squareKey && hoveredSquare !== selectedSquare;
+            const highlightedSquare = highlightedSquares.find(s => s.square === squareKey);
+            const isHighlighted = !!highlightedSquare;
 
             // Compute actual board coordinates for the aria-label
             const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
@@ -537,17 +541,27 @@ useEffect(() => {
                   cursor: piece ? "grab" : "default",
                   position: "relative",
                   outline: "none",
-                  boxShadow: isSelected
-                    ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
-                    : isFocused
-                      ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
-                      : isHovered
-                        ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
-                        : "none",
+                  boxShadow: isHighlighted
+                    ? `inset 0 0 0 3px ${highlightedSquare.color}`
+                    : isSelected
+                      ? "inset 0 0 0 3px rgba(0, 93, 173, 0.75)"
+                      : isFocused
+                        ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                        : isHovered
+                          ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
+                          : "none",
                   transition:
                     "background-color 0.2s ease, box-shadow 0.1s ease",
                 }}
-                onClick={() => handleSquareClick(rowIndex, colIndex)}
+                onClick={(e) => {
+                  if (e.button === 0) {
+                    // Left-click
+                    setHighlightedSquares([]);
+                    setArrows([]);
+                    handleSquareClick(rowIndex, colIndex);
+                  }
+                }}
+                onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
                 onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
                 draggable={!!piece}
                 onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
@@ -569,6 +583,9 @@ useEffect(() => {
             );
           }),
         )}
+        {arrows.map(([from, to], index) => {
+          // return <PremoveArrow key={index} from={from} to={to} color="yellow" />;
+        })}
       </div>
     </div>
   );

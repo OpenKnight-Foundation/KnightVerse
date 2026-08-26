@@ -22,6 +22,8 @@ const NFT_COUNTER: Symbol = symbol_short!("NFT_CNT");
 const NFT_OWNERS: Symbol = symbol_short!("OWNERS");
 const NFT_METADATA: Symbol = symbol_short!("METADATA");
 const MINTER_REGISTRY: Symbol = symbol_short!("MINTER");
+// Dynamic metadata (FE-10)
+const METADATA_VERSION: Symbol = symbol_short!("META_VER");
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED");
 
@@ -244,6 +246,61 @@ impl AINFTContract {
     /// Get total number of NFTs minted
     pub fn total_supply(env: Env) -> u64 {
         env.storage().instance().get(&NFT_COUNTER).unwrap_or(0)
+    }
+
+    // ── Dynamic NFT Metadata (FE-10) ──────────────────────────────────────────
+
+    /// Update the personality traits and metadata hash for an existing NFT.
+    /// Only the current owner or the original minter may call this.
+    pub fn update_metadata(
+        env: Env,
+        nft_id: u64,
+        new_metadata_hash: BytesN<32>,
+        new_personality_traits: String,
+    ) -> Result<u64, ContractError> {
+        Self::check_not_paused(&env);
+
+        let mut nft_metadata: Map<u64, AINFTMetadata> = env
+            .storage()
+            .instance()
+            .get(&NFT_METADATA)
+            .ok_or(ContractError::NFTNotFound)?;
+        let mut nft = nft_metadata.get(nft_id).ok_or(ContractError::NFTNotFound)?;
+
+        let caller = env.invoker();
+        let is_owner = nft.owner == caller;
+        let is_minter = nft.minter == caller;
+        if !is_owner && !is_minter {
+            return Err(ContractError::NotAuthorized);
+        }
+
+        // Bump version
+        let version: u64 = env
+            .storage()
+            .instance()
+            .get(&METADATA_VERSION)
+            .unwrap_or(0);
+        let new_version = version + 1;
+        env.storage().instance().set(&METADATA_VERSION, &new_version);
+
+        // Update NFT metadata
+        nft.metadata_hash = new_metadata_hash.clone();
+        nft.personality_traits = new_personality_traits.clone();
+        nft_metadata.set(nft_id, nft);
+        env.storage().instance().set(&NFT_METADATA, &nft_metadata);
+
+        // Emit metadata updated event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("meta_upd")),
+            (nft_id, caller, new_version, new_metadata_hash),
+        );
+
+        Ok(new_version)
+    }
+
+    /// Get the current metadata version (incremented on each update)
+    pub fn metadata_version(env: Env) -> u64 {
+        env.storage().instance().get(&METADATA_VERSION).unwrap_or(0)
     }
 }
 

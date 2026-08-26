@@ -1,0 +1,67 @@
+# Muhammadjazuli - Chess Improvements & Security
+
+## Issues Addressed
+
+### #995 - FIDE 75-Move & 5-Fold Repetition
+- Added `mandatory_draw.rs` with FIDE-compliant automatic draw detection
+- Tracks 75-move rule (150 half-moves without captures/pawn moves)
+- Detects 5-fold repetition (same position occurring 5 times)
+- Integrates with game state to automatically trigger draws
+
+### #990 - Dynamic AI NFT Metadata
+- Added `update_metadata` function to AI NFT contract
+- Supports versioning of metadata with `METADATA_VERSION` storage key
+- Only owner or original minter can update metadata
+- Emits metadata update events for indexing
+
+### #1009 - Move-Latency Anti-Cheat
+- Created `anti_cheat.rs` with statistical analysis engine
+- Implements Pearson correlation between move timing and engine evaluation
+- Calculates variance, skewness, and kurtosis of move times
+- Flags suspicious patterns (low variance + high engine correlation)
+- Configurable thresholds: `VAR_MIN_THRESHOLD` and `ENGINE_CORRELATION_THRESHOLD`
+
+### #1028 - Player Reporting & Shadow-Ban
+- Created `reporting.rs` with complete reporting system
+- Rate limiting: max 3 reports per user per hour
+- Shadow-ban detection: 10+ reports within 24 hours triggers automatic shadow-ban
+- Shadow-banned players cannot file reports
+- Admin dashboard API with filtering and pagination
+- Prevents duplicate reports for same player/game combination
+
+## Changes Made
+
+### Backend
+- `backend/modules/chess/src/mandatory_draw.rs` (NEW) - FIDE draw detection engine
+- `backend/modules/chess/src/lib.rs` - Added mandatory_draw module exports
+- `backend/modules/service/src/anti_cheat.rs` (NEW) - Statistical anti-cheat analysis
+- `backend/modules/service/src/reporting.rs` (NEW) - Player reporting system
+- `backend/modules/service/src/lib.rs` - Added reporting module
+
+### Contracts
+- `contracts/ai_nft/src/lib.rs` - Added dynamic metadata update with versioning
+
+## Technical Details
+
+### Anti-Cheat Algorithm
+```rust
+// Pearson correlation between move times and engine evaluations
+// Low variance + high correlation = suspicious (bot-like behavior)
+if metrics.variance < VAR_MIN_THRESHOLD && engine_correlation > ENGINE_CORRELATION_THRESHOLD {
+    flagged = true;
+}
+```
+
+### Shadow-Ban Logic
+```rust
+// 10+ distinct reports within 24 hours → automatic shadow-ban
+let recent_reports = reports_received.iter()
+    .filter(|r| now.duration_since(r.timestamp) < SHADOW_BAN_WINDOW)
+    .count();
+if recent_reports >= 10 { shadow_banned = true; }
+```
+
+## Testing
+- Unit tests for all statistical functions
+- Tests for rate limiting and shadow-ban detection
+- Tests for authorization (owner/minter only metadata updates)

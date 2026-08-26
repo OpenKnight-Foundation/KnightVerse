@@ -3,6 +3,7 @@ use actix_web::{
     web::{self, Json, Path, Query},
     HttpMessage, HttpRequest, HttpResponse,
 };
+use crate::metrics;
 use dto::games::{
         CompleteGameRequest, CompleteGameResponse, CreateGameRequest, GameStatus,
         ImportGameRequest, ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
@@ -146,7 +147,12 @@ pub async fn make_move(
 
     let game_id = id.into_inner();
 
-    match GameService::make_move(db.get_ref(), game_id, player_id, payload.0).await {
+    // BE-56: Record move validation latency with minimal overhead (< 0.1ms).
+    let timer = metrics::move_validation_duration().start_timer();
+    let result = GameService::make_move(db.get_ref(), game_id, player_id, payload.0).await;
+    timer.observe_duration();
+
+    match result {
         Ok(game_dto) => HttpResponse::Ok().json(json!({
             "message": "Move made successfully",
             "data": { "game": game_dto }

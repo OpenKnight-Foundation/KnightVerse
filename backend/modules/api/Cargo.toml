@@ -44,6 +44,9 @@ redis = { version = "0.24", features = ["tokio-comp", "json"] }
 deadpool-redis = "0.14"
 tokio = { version = "1", features = ["full"] }
 
+# Prometheus metrics
+prometheus = "0.13"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 actix-rt = "2.9"

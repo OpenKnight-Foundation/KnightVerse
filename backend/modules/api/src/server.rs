@@ -3,6 +3,7 @@
 use crate::ai::{analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, refresh, register};
 use crate::config::AppConfig;
+use crate::metrics;
 use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,
@@ -36,6 +37,17 @@ use crate::openapi::ApiDoc;
 /// Health check endpoint
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "ok"}))
+}
+
+/// Prometheus metrics endpoint.
+///
+/// Exports all registered metrics in Prometheus text exposition format.
+/// In production this endpoint should be protected by basic auth or an
+/// internal network restriction (see issue BE-56).
+async fn metrics_endpoint() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4; charset=utf-8")
+        .body(metrics::render_metrics())
 }
 
 /// Welcome endpoint
@@ -209,6 +221,7 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(puzzle_service.clone()))
             // Register your routes
             .route("/health", web::get().to(health))
+            .route("/metrics", web::get().to(metrics_endpoint))
             .route("/", web::get().to(greet))
             // Puzzle routes
             .configure(configure_puzzle_routes)

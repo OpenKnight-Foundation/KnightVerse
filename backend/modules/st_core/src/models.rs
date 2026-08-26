@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AIMetadata {
     pub name: String,
     pub description: String,
@@ -42,21 +43,4 @@ pub struct StellarAssetInfo {
     pub url_sha256: Option<String>,
     pub fixed_number: u32,
     pub display_decimals: u8,
-}
-
-impl Default for AIMetadata {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            description: String::new(),
-            url: String::new(),
-            issuer: String::new(),
-            code: String::new(),
-            attributes: None,
-            external_url: None,
-            image: None,
-            animation_url: None,
-            youtube_url: None,
-        }
-    }
 }

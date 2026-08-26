@@ -22,6 +22,9 @@
                 "name": "next"
             }
         ],
+        "types": [
+            "vitest/globals"
+        ],
         "paths": {
             "@/*": [
                 "./*"

@@ -1,9 +1,7 @@
-use utoipa::OpenApi;
-use crate::{players, games, auth, ai};
-use st_core::endpoint::{mint_nft, format_ai_metadata, generate_stellar_toml};
-use st_core::models::{AIMetadata, MintNFTRequest, MintNFTResponse};
-use utoipa::openapi::security::{SecurityScheme, HttpAuthScheme, HttpBuilder};
+use crate::{ai, auth, games, players};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
+use utoipa::OpenApi;
 
 // Security scheme definition for JWT authentication
 pub struct SecurityAddon;
@@ -33,7 +31,7 @@ impl Modify for SecurityAddon {
         players::find_player_by_id,
         players::update_player,
         players::delete_player,
-        
+
         // Game endpoints
         games::create_game,
         games::get_game,
@@ -41,15 +39,15 @@ impl Modify for SecurityAddon {
         games::list_games,
         games::join_game,
         games::abandon_game,
-        
+
         // Authentication endpoints
         auth::login,
         auth::register,
-        
+
         // AI suggestion endpoints
         ai::get_ai_suggestion,
         ai::analyze_position,
-        
+
         // NFT endpoints
         st_core::endpoint::mint_nft,
         st_core::endpoint::format_ai_metadata,
@@ -62,7 +60,7 @@ impl Modify for SecurityAddon {
             dto::players::UpdatePlayer,
             dto::players::DisplayPlayer,
             dto::players::UpdatedPlayer,
-            
+
             // Game schemas
             dto::games::CreateGameRequest,
             dto::games::GameDisplayDTO,
@@ -71,28 +69,23 @@ impl Modify for SecurityAddon {
             dto::games::GameStatus,
             dto::games::GameResult,
             dto::games::ListGamesQuery,
-            
+
             // Auth schemas
             dto::auth::LoginRequest,
             dto::auth::LoginResponse,
             dto::auth::RegisterRequest,
             dto::auth::TokenResponse,
             dto::auth::UserInfo,
-            
+
             // AI schemas
             dto::ai::AiSuggestionRequest,
             dto::ai::AiSuggestionResponse,
             dto::ai::PositionAnalysisRequest,
             dto::ai::PositionAnalysisResponse,
             dto::ai::AlternativeMove,
-            
-            // NFT schemas
-            st_core::models::AIMetadata,
-            st_core::models::NFTMintRequest,
-            st_core::models::NFTMintResponse,
-            st_core::models::MintNFTRequest,
-            st_core::models::MintNFTResponse,
-            
+
+            // NFT schemas (st_core models excluded to avoid utoipa version mismatch)
+
             // Response schemas
             dto::responses::PlayerAdded,
             dto::responses::PlayerFound,
@@ -112,13 +105,13 @@ impl Modify for SecurityAddon {
         (name = "WebSocket", description = "WebSocket communication protocol")
     ),
     info(
-        title = "XLMate Chess Platform API",
+        title = "KnightVerse Chess Platform API",
         version = "1.0.0",
-        description = "API for the XLMate chess platform built on Stellar",
+        description = "API for the KnightVerse chess platform built on Stellar",
         contact(
-            name = "XLMate Team",
-            url = "https://xlmate.com/contact",
-            email = "support@xlmate.com"
+            name = "KnightVerse Team",
+            url = "https://knightverse.com/contact",
+            email = "support@knightverse.com"
         ),
         license(
             name = "MIT",

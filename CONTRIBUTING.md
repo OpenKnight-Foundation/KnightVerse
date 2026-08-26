@@ -1,10 +1,10 @@
-# Contributing to XLMate
+# Contributing to KnightVerse
 
-Thank you for your interest in contributing to XLMate! We are building the future of decentralized chess and AI-human collaboration on Stellar.
+Thank you for your interest in contributing to KnightVerse! We are building the future of decentralized chess and AI-human collaboration on Stellar.
 
 ## How to Contribute
 
-1.  **Find an Issue**: Browse our [GitHub Issues](https://github.com/your-username/XLMate/issues).
+1.  **Find an Issue**: Browse our [GitHub Issues](https://github.com/OpenKnight-Foundation/KnightVerse/issues).
 2.  **Claim it**: Comment on the issue you'd like to work on.
 3.  **Fork & Branch**: Fork the repository and create a feature branch (`git checkout -b feature/issue-name`).
 4.  **Develop**: Follow our coding standards (Rust for contracts/backend, TypeScript for frontend).
@@ -17,6 +17,10 @@ Thank you for your interest in contributing to XLMate! We are building the futur
 - **Backend**: Located in `/backend`. Actix-Rust server for real-time game state.
 - **Frontend**: Located in `/frontend`. Next.js web application.
 - **AI Infrastructure**: Located in `/agent-engines`. Focus on engine integration and analysis tools.
+
+## Security
+
+If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md). Do NOT open a public issue for security bugs.
 
 ## Community & Support
 

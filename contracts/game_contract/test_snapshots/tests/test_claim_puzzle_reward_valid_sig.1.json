@@ -17,7 +17,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "bd66e8cfc4547f274513476c2a3d2ec93aa49b8e58d93e0953d519151eb00356"
+                  "bytes": "9d1f5ab123a8b6861c94802441c1e52cf8003028b8a28799e684348d0283080b"
                 },
                 {
                   "i128": {
@@ -80,7 +80,7 @@
                           "symbol": "ADMIN_KEY"
                         },
                         "val": {
-                          "bytes": "bd66e8cfc4547f274513476c2a3d2ec93aa49b8e58d93e0953d519151eb00356"
+                          "bytes": "9d1f5ab123a8b6861c94802441c1e52cf8003028b8a28799e684348d0283080b"
                         }
                       },
                       {
@@ -117,6 +117,17 @@
                         },
                         "val": {
                           "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {
@@ -257,7 +268,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "bytes": "bd66e8cfc4547f274513476c2a3d2ec93aa49b8e58d93e0953d519151eb00356"
+                  "bytes": "9d1f5ab123a8b6861c94802441c1e52cf8003028b8a28799e684348d0283080b"
                 },
                 {
                   "i128": {
@@ -332,7 +343,7 @@
                   "u64": 1
                 },
                 {
-                  "bytes": "7a814f8d260247d6bd7c9f7a1d03c19850835b4481b73e4565909220338dcdbe5d9a1cb16a3cd04c9dfd1023341408825f6aa88181548c23d48a962480a5b60f"
+                  "bytes": "1a9029cfa4bf60d4ea39060f7ddc1d7a8904b9d1841611b05efb61208e79e595f857ee3427d7cec071a5fac05b5474146de76a97c55cb142562fde24f62a3604"
                 }
               ]
             }

@@ -1,11 +1,11 @@
-# XLMate Backend Server - Quick Start Guide
+# KnightVerse Backend Server - Quick Start Guide
 
 ✅ **The Rust Actix-web backend has been successfully compiled!**
 
 ## Binary Location
 The compiled server binary is located at:
 ```
-/home/gabriel/XLMate/backend/target/release/server
+/home/gabriel/KnightVerse/backend/target/release/server
 ```
 
 ## Prerequisites
@@ -34,19 +34,19 @@ sudo service postgresql start
 sudo -u postgres psql
 
 # In PostgreSQL prompt, run:
-CREATE USER xlmate WITH PASSWORD 'your_secure_password';
-CREATE DATABASE xlmate OWNER xlmate;
-GRANT ALL PRIVILEGES ON DATABASE xlmate TO xlmate;
+CREATE USER knightverse WITH PASSWORD 'your_secure_password';
+CREATE DATABASE knightverse OWNER knightverse;
+GRANT ALL PRIVILEGES ON DATABASE knightverse TO knightverse;
 \q
 ```
 
 ### 3. Configure Environment Variables
 
-Edit `/home/gabriel/XLMate/backend/.env` with your database credentials:
+Edit `/home/gabriel/KnightVerse/backend/.env` with your database credentials:
 
 ```env
 SERVER_ADDR=127.0.0.1:8080
-DATABASE_URL=postgresql://xlmate:your_secure_password@localhost:5432/xlmate
+DATABASE_URL=postgresql://knightverse:your_secure_password@localhost:5432/knightverse
 JWT_SECRET_KEY=your_secret_key_change_this_in_production
 JWT_EXPIRATION_SECS=3600
 RUST_LOG=info
@@ -56,19 +56,19 @@ ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
 ### 4. Run Database Migrations (Optional - required if using full auth)
 
 ```bash
-cd /home/gabriel/XLMate/backend/modules/db/migrations
-sea-orm-cli migrate run --database-url "postgresql://xlmate:password@localhost:5432/xlmate"
+cd /home/gabriel/KnightVerse/backend/modules/db/migrations
+sea-orm-cli migrate run --database-url "postgresql://knightverse:password@localhost:5432/knightverse"
 ```
 
 ### 5. Start the Server
 
 ```bash
-/home/gabriel/XLMate/backend/target/release/server
+/home/gabriel/KnightVerse/backend/target/release/server
 ```
 
 Or from the backend directory:
 ```bash
-cd /home/gabriel/XLMate/backend
+cd /home/gabriel/KnightVerse/backend
 ./target/release/server
 ```
 
@@ -148,7 +148,7 @@ The backend compiles successfully with the release build. The authentication end
 **Error: "DATABASE_URL must be set in .env"**
 - Make sure PostgreSQL is running
 - Verify DATABASE_URL is set correctly in `.env` file
-- Test connection: `psql "postgresql://xlmate:password@localhost:5432/xlmate"`
+- Test connection: `psql "postgresql://knightverse:password@localhost:5432/knightverse"`
 
 **Error: "Connection refused"**
 - Ensure PostgreSQL service is running
@@ -163,7 +163,7 @@ The backend compiles successfully with the release build. The authentication end
 To rebuild from source:
 
 ```bash
-cd /home/gabriel/XLMate/backend
+cd /home/gabriel/KnightVerse/backend
 cargo build --release --bin server
 ```
 

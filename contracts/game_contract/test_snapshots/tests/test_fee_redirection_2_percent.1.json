@@ -704,7 +704,7 @@
                                     "val": {
                                       "vec": [
                                         {
-                                          "symbol": "Forfeited"
+                                          "symbol": "Settled"
                                         }
                                       ]
                                     }
@@ -740,6 +740,17 @@
                         },
                         "val": {
                           "u64": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
                         }
                       },
                       {

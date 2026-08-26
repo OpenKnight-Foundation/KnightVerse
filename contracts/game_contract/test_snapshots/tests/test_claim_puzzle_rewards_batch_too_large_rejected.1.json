@@ -1,0 +1,2030 @@
+{
+  "generators": {
+    "address": 24,
+    "nonce": 0
+  },
+  "auth": [
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "initialize_puzzle_rewards",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "bytes": "4756336f9514c6a1fef7984716f39a23d12442d9fcd54e678cdc65e3e8d3ea81"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000000
+                  }
+                },
+                {
+                  "u32": 0
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    []
+  ],
+  "ledger": {
+    "protocol_version": 21,
+    "sequence_number": 0,
+    "timestamp": 0,
+    "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "base_reserve": 0,
+    "min_persistent_entry_ttl": 4096,
+    "min_temp_entry_ttl": 16,
+    "max_entry_ttl": 6312000,
+    "ledger_entries": [
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": "ledger_key_contract_instance",
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": "ledger_key_contract_instance",
+                "durability": "persistent",
+                "val": {
+                  "contract_instance": {
+                    "executable": {
+                      "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "ADMIN_KEY"
+                        },
+                        "val": {
+                          "bytes": "4756336f9514c6a1fef7984716f39a23d12442d9fcd54e678cdc65e3e8d3ea81"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "CT_ADMIN"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "FEE_BIPS"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXPOOL"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 2000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "MAXSTAKE"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 1000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "TREASURY"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 1000000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "TR_ADDR"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 801925984706572462
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_code": {
+            "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_code": {
+                "ext": "v0",
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "code": ""
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ]
+    ]
+  },
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "initialize_puzzle_rewards"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "bytes": "4756336f9514c6a1fef7984716f39a23d12442d9fcd54e678cdc65e3e8d3ea81"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000000
+                  }
+                },
+                {
+                  "u32": 0
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "initialize_puzzle_rewards"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "claim_puzzle_rewards_batch"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "63d4d4de86e8f9675930b0d33bb5c68c2b7beeb667fd1e96d86d766d1128a1aa4b61cf9b291626be9b664ef5d21c18feab6c71d620350bbed25462eb77120d05"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "afe6b55d69bba40dec1c96022c42cd05d7bcb8f750259ed4489c5e9d0403683037857670f8be3cd7a6abd0f8e00203992c79dbfc017dcfc453c6ec6263a63c0b"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 2
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "1024f62a32d021e76daf172e64f15bcb5ba392fe58f97b9506ac77e0809ab32c6f7611bcebf4585e51b09ce367c22f8bfaea2bc3c70d0f93ffc23cd30387b501"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 3
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "d9371bce741b17af2ae89433303da715cfce1f7a5e4956cbde95782473fe424ca642662a4742f33f3a6704d468c445ba926957c1291b3757fccf06757733da07"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 4
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "ee216e6970f46cb1928f9df90bba4cf439fdd57715334c2427e054d6a8c0e0f2761cea2c0f468616dac702fd60856576be18fea7bf4855629ab848239b27dd00"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "f6328dbc968b984a64830b572b53fbfd1a8335afa1ac6268915999bf33d4b39be27dcdc63a0877ceef1ba63e9809b9117a290479c0a731dc94cf353cf65d5602"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 6
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "2d39b8f9ef2429ab25c372b0815ceec2cd00c000f53936130fbf5ebeb9d694c137ad8252dc0f991faf91ec9c7adbf59b3ac3c98507bcc8aad9ed4cbe628ba00e"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "a2ee3bc158c8173f2529fb5af6927cdaa6053df31c7d2d1cf7506682af27930fb5d3815f0a6f9c741381ca88d86bf3adc332a5a9a1f1eda8318c9b5941639c0f"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 8
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "d72484f9afeeaf5db6267181955a221b32f7ac6371f8b032737eee21331140091e187a0feefc114dcbc26d7e506f2e915dd26e903b1e522e266e18ac9d409303"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "d02c486296dedf917f4254302cd156b30e05a8fde8f67551aa3663bd110bf4d25adc32b17e4042fa8b7f57ec30dd04452e9244f459439c3f84457332a5436108"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 10
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "90c53cd9cb01cb5a63b4b7ebf748d16a8e4a01a65fddcdd0ae2981585442bfab4da416cf191d15a927588f1dcc06ea1f07831962803c0d8b00b2b7c486752b01"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 11
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "7d885a412bd57cc6f0bc24358f9aa93bc14d48e20b56fdd6f6c575f5abdfce1a61cdfba0b9bb2113c0aab4a759f3a79b57018cd0164422bdbf63f05c12397c0b"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 12
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "62b0c387ca6f8890c06262baaac671528f566114f47300d4759ce9a5c4659bb452d329cabf74e341000aeddd368b2694749b9a6d2fc5cb1ee0eaf718d85b0c03"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 13
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "71c44ff769d02ee1cc2ddc8dc414e4ea6608142a4395f6a6de1fad7e3701632e9859f5f3c3a8ffcde128894d68834a74f48b1293d7a1683caa7a0314f9a1d501"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 14
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "50fbebdf483b80abcbc5b19056a22fc653dd614157c06d3a8ba707bfd7a257d80710f305fc6165791f1c438d9df9d8785ec7569492e91e3ab06b16314e4e5004"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 15
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "0e87bb125fe2bf421b1941184938a29d5d2f9ee960a51ce9ca695545b8bb68b855cd7eccb08cd1c2cce513ce1841a727d4dc9716cfae3287d4758b988ff1be0e"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 16
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "1a9b002d038975466269e3c3ec8753c00b640c12ee687d5cd8c3de68aa43ff7e861f4896eaa1cbc5c9541b3d959909f38e1482c2030ac0c8e4aef9b105b64508"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 17
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "eb76ab33f89147032038e16adc4ba41b7e5d6773a51144fb060b91f1f212ff30facaedad2a984a3d5a897062d34d7d91213b626df7ff5ce8954e58cb1f61010b"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 18
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "7309f51f6c403c73a52a43c316c66215f7b44266892bdabc2dc0b356147344fd27e81a571ecaf08b0bfa39ae7b1956f7da74ec30df55dc4a7c1e69da0c3bdc03"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 19
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "7b12a33c5a8b7901cea3141f5b11fe8780efaa9d5b90fd38f5c0e21f590615e6186b4d1380920449b300336d3bcf51b99fe2b84e164ae91c0eb5b5424a16020c"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "nonce"
+                      },
+                      "val": {
+                        "u64": 20
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipient"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "signature"
+                      },
+                      "val": {
+                        "bytes": "82510ff705c725cb6e3e510854ff62f92ffaf3db9461245e0ab6304cccb45dc120e0ac2879f42450cb16ff9a8d310cc509493faeaa901bafcb1d79b0358be207"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "claim_puzzle_rewards_batch"
+              }
+            ],
+            "data": {
+              "error": {
+                "contract": 38
+              }
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 38
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 38
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract try_call failed"
+                },
+                {
+                  "symbol": "claim_puzzle_rewards_batch"
+                },
+                {
+                  "vec": [
+                    {
+                      "vec": [
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "63d4d4de86e8f9675930b0d33bb5c68c2b7beeb667fd1e96d86d766d1128a1aa4b61cf9b291626be9b664ef5d21c18feab6c71d620350bbed25462eb77120d05"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 1
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "afe6b55d69bba40dec1c96022c42cd05d7bcb8f750259ed4489c5e9d0403683037857670f8be3cd7a6abd0f8e00203992c79dbfc017dcfc453c6ec6263a63c0b"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 2
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "1024f62a32d021e76daf172e64f15bcb5ba392fe58f97b9506ac77e0809ab32c6f7611bcebf4585e51b09ce367c22f8bfaea2bc3c70d0f93ffc23cd30387b501"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 3
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "d9371bce741b17af2ae89433303da715cfce1f7a5e4956cbde95782473fe424ca642662a4742f33f3a6704d468c445ba926957c1291b3757fccf06757733da07"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 4
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "ee216e6970f46cb1928f9df90bba4cf439fdd57715334c2427e054d6a8c0e0f2761cea2c0f468616dac702fd60856576be18fea7bf4855629ab848239b27dd00"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 5
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "f6328dbc968b984a64830b572b53fbfd1a8335afa1ac6268915999bf33d4b39be27dcdc63a0877ceef1ba63e9809b9117a290479c0a731dc94cf353cf65d5602"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 6
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "2d39b8f9ef2429ab25c372b0815ceec2cd00c000f53936130fbf5ebeb9d694c137ad8252dc0f991faf91ec9c7adbf59b3ac3c98507bcc8aad9ed4cbe628ba00e"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 7
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "a2ee3bc158c8173f2529fb5af6927cdaa6053df31c7d2d1cf7506682af27930fb5d3815f0a6f9c741381ca88d86bf3adc332a5a9a1f1eda8318c9b5941639c0f"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 8
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "d72484f9afeeaf5db6267181955a221b32f7ac6371f8b032737eee21331140091e187a0feefc114dcbc26d7e506f2e915dd26e903b1e522e266e18ac9d409303"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 9
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "d02c486296dedf917f4254302cd156b30e05a8fde8f67551aa3663bd110bf4d25adc32b17e4042fa8b7f57ec30dd04452e9244f459439c3f84457332a5436108"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 10
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "90c53cd9cb01cb5a63b4b7ebf748d16a8e4a01a65fddcdd0ae2981585442bfab4da416cf191d15a927588f1dcc06ea1f07831962803c0d8b00b2b7c486752b01"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 11
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "7d885a412bd57cc6f0bc24358f9aa93bc14d48e20b56fdd6f6c575f5abdfce1a61cdfba0b9bb2113c0aab4a759f3a79b57018cd0164422bdbf63f05c12397c0b"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 12
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "62b0c387ca6f8890c06262baaac671528f566114f47300d4759ce9a5c4659bb452d329cabf74e341000aeddd368b2694749b9a6d2fc5cb1ee0eaf718d85b0c03"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 13
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "71c44ff769d02ee1cc2ddc8dc414e4ea6608142a4395f6a6de1fad7e3701632e9859f5f3c3a8ffcde128894d68834a74f48b1293d7a1683caa7a0314f9a1d501"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 14
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "50fbebdf483b80abcbc5b19056a22fc653dd614157c06d3a8ba707bfd7a257d80710f305fc6165791f1c438d9df9d8785ec7569492e91e3ab06b16314e4e5004"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 15
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "0e87bb125fe2bf421b1941184938a29d5d2f9ee960a51ce9ca695545b8bb68b855cd7eccb08cd1c2cce513ce1841a727d4dc9716cfae3287d4758b988ff1be0e"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 16
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "1a9b002d038975466269e3c3ec8753c00b640c12ee687d5cd8c3de68aa43ff7e861f4896eaa1cbc5c9541b3d959909f38e1482c2030ac0c8e4aef9b105b64508"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 17
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "eb76ab33f89147032038e16adc4ba41b7e5d6773a51144fb060b91f1f212ff30facaedad2a984a3d5a897062d34d7d91213b626df7ff5ce8954e58cb1f61010b"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 18
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "7309f51f6c403c73a52a43c316c66215f7b44266892bdabc2dc0b356147344fd27e81a571ecaf08b0bfa39ae7b1956f7da74ec30df55dc4a7c1e69da0c3bdc03"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 19
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "7b12a33c5a8b7901cea3141f5b11fe8780efaa9d5b90fd38f5c0e21f590615e6186b4d1380920449b300336d3bcf51b99fe2b84e164ae91c0eb5b5424a16020c"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "nonce"
+                              },
+                              "val": {
+                                "u64": 20
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recipient"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reward_amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signature"
+                              },
+                              "val": {
+                                "bytes": "82510ff705c725cb6e3e510854ff62f92ffaf3db9461245e0ab6304cccb45dc120e0ac2879f42450cb16ff9a8d310cc509493faeaa901bafcb1d79b0358be207"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
+}

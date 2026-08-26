@@ -1,9 +1,9 @@
+use chrono::{DateTime, Utc};
+use jsonwebtoken::{encode, EncodingKey, Header};
+use security::jwt::JwtService;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use jsonwebtoken::{encode, Header, EncodingKey};
-use security::jwt::JwtService;
 
 /// Error types for puzzle validation
 #[derive(Error, Debug)]
@@ -95,7 +95,7 @@ impl PuzzleValidationService {
     pub fn new(jwt_secret: String) -> Self {
         let jwt_service = JwtService::new(jwt_secret, 3600);
         let puzzles = Self::create_default_puzzles();
-        
+
         Self {
             jwt_service,
             puzzles,
@@ -107,39 +107,38 @@ impl PuzzleValidationService {
         vec![
             Puzzle {
                 id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
-                fen: "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4".to_string(),
+                fen: "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"
+                    .to_string(),
                 title: "Fork Attack".to_string(),
                 difficulty: PuzzleDifficulty::Easy,
                 description: "Find the knight fork that wins material".to_string(),
-                solution: vec![
-                    ChessMove {
-                        from: "f3".to_string(),
-                        to: "g5".to_string(),
-                        promotion: None,
-                    }
-                ],
+                solution: vec![ChessMove {
+                    from: "f3".to_string(),
+                    to: "g5".to_string(),
+                    promotion: None,
+                }],
                 hint: Some("Look for a knight move that attacks two pieces".to_string()),
                 created_at: Utc::now(),
             },
             Puzzle {
                 id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap(),
-                fen: "rnbqkb1r/pppp1ppp/5n2/2B1p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4".to_string(),
+                fen: "rnbqkb1r/pppp1ppp/5n2/2B1p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"
+                    .to_string(),
                 title: "Pin and Win".to_string(),
                 difficulty: PuzzleDifficulty::Medium,
                 description: "Use a pin to create a winning advantage".to_string(),
-                solution: vec![
-                    ChessMove {
-                        from: "c4".to_string(),
-                        to: "f7".to_string(),
-                        promotion: None,
-                    }
-                ],
+                solution: vec![ChessMove {
+                    from: "c4".to_string(),
+                    to: "f7".to_string(),
+                    promotion: None,
+                }],
                 hint: Some("The bishop can pin the knight to the king".to_string()),
                 created_at: Utc::now(),
             },
             Puzzle {
                 id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap(),
-                fen: "r1bqk2r/pppp1ppp/2n2n2/2B1p3/4P3/3N1N2/PPPP1PPP/R1BQK2R w KQkq - 0 6".to_string(),
+                fen: "r1bqk2r/pppp1ppp/2n2n2/2B1p3/4P3/3N1N2/PPPP1PPP/R1BQK2R w KQkq - 0 6"
+                    .to_string(),
                 title: "Discovered Attack".to_string(),
                 difficulty: PuzzleDifficulty::Hard,
                 description: "Execute a discovered attack for checkmate".to_string(),
@@ -153,24 +152,23 @@ impl PuzzleValidationService {
                         from: "c4".to_string(),
                         to: "f7".to_string(),
                         promotion: None,
-                    }
+                    },
                 ],
                 hint: Some("Move the knight first to reveal the bishop's attack".to_string()),
                 created_at: Utc::now(),
             },
             Puzzle {
                 id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440004").unwrap(),
-                fen: "rnbqkbnr/pp1ppppp/2p5/3p4/3PP3/2N5/PP1PPPPP/R1BQKBNR w KQkq - 0 3".to_string(),
+                fen: "rnbqkbnr/pp1ppppp/2p5/3p4/3PP3/2N5/PP1PPPPP/R1BQKBNR w KQkq - 0 3"
+                    .to_string(),
                 title: "Center Control".to_string(),
                 difficulty: PuzzleDifficulty::Easy,
                 description: "Control the center with your knight".to_string(),
-                solution: vec![
-                    ChessMove {
-                        from: "c3".to_string(),
-                        to: "d5".to_string(),
-                        promotion: None,
-                    }
-                ],
+                solution: vec![ChessMove {
+                    from: "c3".to_string(),
+                    to: "d5".to_string(),
+                    promotion: None,
+                }],
                 hint: Some("Knights are excellent in the center".to_string()),
                 created_at: Utc::now(),
             },
@@ -180,13 +178,11 @@ impl PuzzleValidationService {
                 title: "Double Attack".to_string(),
                 difficulty: PuzzleDifficulty::Medium,
                 description: "Create a double attack with your bishop".to_string(),
-                solution: vec![
-                    ChessMove {
-                        from: "c4".to_string(),
-                        to: "e6".to_string(),
-                        promotion: None,
-                    }
-                ],
+                solution: vec![ChessMove {
+                    from: "c4".to_string(),
+                    to: "e6".to_string(),
+                    promotion: None,
+                }],
                 hint: Some("Look for squares that attack multiple pieces".to_string()),
                 created_at: Utc::now(),
             },
@@ -215,12 +211,12 @@ impl PuzzleValidationService {
         let puzzle = self.get_puzzle_by_id(&submission.puzzle_id)?;
 
         // Validate the solution
-        let is_correct = self.validate_solution_moves(&puzzle, &submission.moves)?;
+        let is_correct = self.validate_solution_moves(puzzle, &submission.moves)?;
 
         if is_correct {
             // Generate reward token
-            let reward_token = self.generate_reward_token(&puzzle, &submission)?;
-            
+            let reward_token = self.generate_reward_token(puzzle, &submission)?;
+
             Ok(PuzzleValidationResult {
                 success: true,
                 correct: true,
@@ -263,9 +259,7 @@ impl PuzzleValidationService {
 
     /// Check if two moves are equivalent (simple comparison)
     fn moves_equivalent_simple(&self, move1: &ChessMove, move2: &ChessMove) -> bool {
-        move1.from == move2.from && 
-        move1.to == move2.to && 
-        move1.promotion == move2.promotion
+        move1.from == move2.from && move1.to == move2.to && move1.promotion == move2.promotion
     }
 
     /// Generate reward token for completed puzzle
@@ -290,7 +284,8 @@ impl PuzzleValidationService {
             &Header::default(),
             &token_claims,
             &EncodingKey::from_secret(self.get_jwt_secret().as_ref()),
-        ).map_err(|_| PuzzleValidationError::TokenGenerationFailed)?;
+        )
+        .map_err(|_| PuzzleValidationError::TokenGenerationFailed)?;
 
         Ok(token)
     }
@@ -301,15 +296,21 @@ impl PuzzleValidationService {
     }
 
     /// Verify reward token
-    pub fn verify_reward_token(&self, token: &str) -> Result<PuzzleRewardToken, PuzzleValidationError> {
+    pub fn verify_reward_token(
+        &self,
+        token: &str,
+    ) -> Result<PuzzleRewardToken, PuzzleValidationError> {
         let token_data = jsonwebtoken::decode::<serde_json::Value>(
             token,
             &jsonwebtoken::DecodingKey::from_secret(self.get_jwt_secret().as_ref()),
             &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
-        ).map_err(|_| PuzzleValidationError::InvalidFormat("Invalid token".to_string()))?;
+        )
+        .map_err(|_| PuzzleValidationError::InvalidFormat("Invalid token".to_string()))?;
 
-        let reward_token: PuzzleRewardToken = serde_json::from_value(token_data.claims)
-            .map_err(|_| PuzzleValidationError::InvalidFormat("Invalid token format".to_string()))?;
+        let reward_token: PuzzleRewardToken =
+            serde_json::from_value(token_data.claims).map_err(|_| {
+                PuzzleValidationError::InvalidFormat("Invalid token format".to_string())
+            })?;
 
         Ok(reward_token)
     }
@@ -341,16 +342,14 @@ mod tests {
     fn test_validate_correct_solution() {
         let service = create_test_service();
         let puzzle_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
-        
+
         let submission = PuzzleSubmission {
             puzzle_id,
-            moves: vec![
-                ChessMove {
-                    from: "f3".to_string(),
-                    to: "g5".to_string(),
-                    promotion: None,
-                }
-            ],
+            moves: vec![ChessMove {
+                from: "f3".to_string(),
+                to: "g5".to_string(),
+                promotion: None,
+            }],
             user_id: 1,
             username: "testuser".to_string(),
         };
@@ -365,16 +364,14 @@ mod tests {
     fn test_validate_incorrect_solution() {
         let service = create_test_service();
         let puzzle_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
-        
+
         let submission = PuzzleSubmission {
             puzzle_id,
-            moves: vec![
-                ChessMove {
-                    from: "f3".to_string(),
-                    to: "f4".to_string(),
-                    promotion: None,
-                }
-            ],
+            moves: vec![ChessMove {
+                from: "f3".to_string(),
+                to: "f4".to_string(),
+                promotion: None,
+            }],
             user_id: 1,
             username: "testuser".to_string(),
         };

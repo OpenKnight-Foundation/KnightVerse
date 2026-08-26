@@ -1,6 +1,6 @@
-# XLMate API Documentation Guide
+# KnightVerse API Documentation Guide
 
-This guide explains how to maintain and update the OpenAPI/Swagger documentation for the XLMate chess platform.
+This guide explains how to maintain and update the OpenAPI/Swagger documentation for the KnightVerse chess platform.
 
 ## Overview
 

@@ -28,7 +28,7 @@
 //         <div className="space-y-6">
 //           <div className="text-center">
 //             <h2 className="text-2xl font-bold text-white">
-//               Welcome to XLMate
+//               Welcome to KnightVerse
 //             </h2>
 //             <p className="text-gray-400 mt-2">
 //               Connect your wallet to get started

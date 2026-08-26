@@ -23,11 +23,13 @@ mod tests {
                 ),
                 false,
             ),
-            _ => (format!(""), false)
+            _ => (format!(""), false),
         };
-    
-        let result = db.query_one(Statement::from_string(db_backend, query)).await?;
-        
+
+        let result = db
+            .query_one(Statement::from_string(db_backend, query))
+            .await?;
+
         if is_count {
             Ok(result
                 .map(|row| row.try_get_by_index::<i64>(0))
@@ -41,24 +43,28 @@ mod tests {
                 .unwrap_or(false))
         }
     }
-    
+
     #[async_std::test]
     async fn test_table_exists() -> Result<(), DbErr> {
+        if std::env::var("DATABASE_URL").is_err() {
+            return Ok(());
+        }
+
         let db = get_db().await;
-        
+
         assert!(
             table_exists(&db, DATABASE_NAME).await?,
-            "Table '{}' should exist", 
+            "Table '{}' should exist",
             DATABASE_NAME
         );
-        
+
         Ok(())
     }
 
     async fn get_column_type(
-        db: &DbConn, 
-        table_name: &str, 
-        column_name: &str
+        db: &DbConn,
+        table_name: &str,
+        column_name: &str,
     ) -> Result<Option<String>, DbErr> {
         let db_backend = db.get_database_backend();
         let query = match db_backend {
@@ -67,35 +73,38 @@ mod tests {
                  WHERE table_name = '{}' AND column_name = '{}'",
                 table_name, column_name
             ),
-            _ => format!("")
+            _ => format!(""),
         };
-    
+
         db.query_one(Statement::from_string(db_backend, query))
             .await?
             .map(|row| row.try_get_by_index::<String>(0))
             .transpose()
     }
 
-
     #[async_std::test]
     async fn accurate_column_types() -> Result<(), DbErr> {
+        if std::env::var("DATABASE_URL").is_err() {
+            return Ok(());
+        }
+
         let db = get_db().await;
 
         let columns_and_types = HashMap::from([
-            ("id","uuid"),
-            ("username","character varying"),    
-            ("email","character varying"),
-            ("password_hash","bytea"),
-            ("biography","text"),
-            ("country","character varying"),
-            ("flair","character varying"),
-            ("real_name","character varying"),
-            ("location","character varying"),
-            ("fide_rating","integer"),
-            ("social_links","ARRAY")
+            ("id", "uuid"),
+            ("username", "character varying"),
+            ("email", "character varying"),
+            ("password_hash", "bytea"),
+            ("biography", "text"),
+            ("country", "character varying"),
+            ("flair", "character varying"),
+            ("real_name", "character varying"),
+            ("location", "character varying"),
+            ("fide_rating", "integer"),
+            ("social_links", "ARRAY"),
         ]);
 
-        for (column, colunn_type) in columns_and_types.iter(){
+        for (column, colunn_type) in columns_and_types.iter() {
             assert_eq!(
                 get_column_type(&db, DATABASE_NAME, column).await?,
                 Some(colunn_type.to_string())

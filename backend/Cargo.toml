@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "src",
     "modules/api",
     "modules/db",
     "modules/db/entity",

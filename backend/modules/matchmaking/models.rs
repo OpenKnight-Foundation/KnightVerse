@@ -1,9 +1,7 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MatchType {
@@ -22,21 +20,49 @@ impl MatchType {
     }
 }
 
+/// Time control selected by the player (maps to frontend variant IDs).
+/// Serialized as a simple string, e.g. "10+0", "5+0", "3+0", "1+0".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeControl(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl TimeControl {
+    /// Return the initial time in seconds for this time control.
+    pub fn initial_seconds(&self) -> u64 {
+        match self.0.as_str() {
+            "bullet" => 60,
+            "blitz" => 180,
+            "rapid" => 480,
+            _ => 600,
+        }
+    }
+
+    pub fn increment_seconds(&self) -> u64 {
+        0
+    }
+}
+
+impl Default for TimeControl {
+    fn default() -> Self {
+        TimeControl("standard".to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Player {
     pub wallet_address: String,
     pub elo: u32,
-    pub join_time: DateTime<Utc>, 
+    pub join_time: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MatchRequest {
     pub id: Uuid,
     pub player: Player,
     pub match_type: MatchType,
-    pub invite_address: Option<String>, // For private matches__
-    pub max_elo_diff: Option<u32>,      // For rated matches__
+    pub invite_address: Option<String>,
+    pub max_elo_diff: Option<u32>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 impl MatchRequest {
@@ -49,14 +75,15 @@ impl MatchRequest {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     pub id: Uuid,
     pub player1: Player,
     pub player2: Player,
     pub match_type: MatchType,
-    pub created_at: DateTime<Utc>, 
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub time_control: TimeControl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,4 +99,82 @@ pub struct MatchmakingResponse {
     pub status: String,
     pub match_id: Option<Uuid>,
     pub request_id: Uuid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match_type_redis_key() {
+        assert_eq!(MatchType::Rated.redis_key(), "matchmaking:queue:rated");
+        assert_eq!(MatchType::Casual.redis_key(), "matchmaking:queue:casual");
+        assert_eq!(MatchType::Private.redis_key(), "matchmaking:invites");
+    }
+
+    #[test]
+    fn test_match_request_round_trip() {
+        let join_time = Utc::now();
+        let player = Player {
+            wallet_address: "GABC1234567890ABCDEF".to_string(),
+            elo: 1500,
+            join_time,
+        };
+        let req = MatchRequest {
+            id: Uuid::new_v4(),
+            player,
+            match_type: MatchType::Rated,
+            invite_address: None,
+            max_elo_diff: Some(100),
+            time_control: TimeControl::default(),
+        };
+
+        let json = req.to_redis_value().expect("Should serialize");
+        let deserialized = MatchRequest::from_redis_value(&json).expect("Should deserialize");
+
+        // Full structural equality — verifies every field survives the round-trip
+        assert_eq!(req, deserialized);
+    }
+
+    #[test]
+    fn test_match_request_with_invite_address_round_trip() {
+        let req = MatchRequest {
+            id: Uuid::new_v4(),
+            player: Player {
+                wallet_address: "GXYZ987".to_string(),
+                elo: 1200,
+                join_time: Utc::now(),
+            },
+            match_type: MatchType::Private,
+            invite_address: Some("GINVITEE123".to_string()),
+            max_elo_diff: None,
+            time_control: TimeControl::default(),
+        };
+
+        let json = req.to_redis_value().expect("Should serialize");
+        let deserialized = MatchRequest::from_redis_value(&json).expect("Should deserialize");
+
+        assert_eq!(req, deserialized);
+    }
+
+    #[test]
+    fn test_casual_match_request_round_trip() {
+        let req = MatchRequest {
+            id: Uuid::new_v4(),
+            player: Player {
+                wallet_address: "GCASUAL999".to_string(),
+                elo: 800,
+                join_time: Utc::now(),
+            },
+            match_type: MatchType::Casual,
+            invite_address: None,
+            max_elo_diff: None,
+            time_control: TimeControl::default(),
+        };
+
+        let json = req.to_redis_value().expect("Should serialize");
+        let deserialized = MatchRequest::from_redis_value(&json).expect("Should deserialize");
+
+        assert_eq!(req, deserialized);
+    }
 }

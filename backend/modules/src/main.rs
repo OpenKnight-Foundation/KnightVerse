@@ -6,9 +6,20 @@ use std::env;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
-    env_logger::init();
 
-    println!("Starting XLMate Backend Server...");
+    // Initialize structured logger
+    {
+        use tracing_subscriber::EnvFilter;
+        let env_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+        #[cfg(debug_assertions)]
+        let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter).pretty();
+        #[cfg(not(debug_assertions))]
+        let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter).json();
+        subscriber.init();
+    }
+
+    eprintln!("Starting KnightVerse Backend Server...");
 
     // Initialize Redis connection pool
     let redis_url = env::var("REDIS_URL")
@@ -22,14 +33,14 @@ async fn main() -> std::io::Result<()> {
 
     // Test Redis connection on startup
     match matchmaking::redis::test_redis_connection(&redis_pool).await {
-        Ok(_) => println!("✅ Redis connection successful"),
+        Ok(_) => eprintln!("✅ Redis connection successful"),
         Err(e) => {
             eprintln!("⚠️  Warning: Redis connection failed: {}", e);
             eprintln!("Matchmaking service will not be available");
         }
     }
 
-    println!("Server starting on http://127.0.0.1:8080");
+    eprintln!("Server starting on http://127.0.0.1:8080");
 
     HttpServer::new(move || {
         App::new()

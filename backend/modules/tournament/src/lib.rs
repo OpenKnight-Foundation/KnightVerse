@@ -1,8 +1,13 @@
-pub mod swiss;
-pub mod pairing;
 pub mod arena;
+pub mod bracket;
+pub mod pairing;
+pub mod swiss;
 
+pub use bracket::{
+    BracketError, BracketFormat, BracketMatch, BracketService, MatchStatus, TournamentBracket,
+    TournamentParticipant, TournamentStatus,
+};
 pub use swiss::{
-    Player, Color, Pairing, TournamentState, PairingResult, SwissConfig, GameResult,
-    SwissPairer, PairingError
+    Color, GameResult, Pairing, PairingError, PairingResult, Player, SwissConfig, SwissPairer,
+    TournamentState,
 };

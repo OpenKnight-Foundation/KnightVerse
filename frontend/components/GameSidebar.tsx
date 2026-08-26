@@ -3,6 +3,7 @@
 import type React from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useState, useEffect } from "react"
@@ -10,6 +11,7 @@ import { WalletConnectModal } from "./WalletConnectModal"
 import { useAppContext } from "@/context/walletContext"
 import {
   ChessIcon,
+  DashboardIcon,
   WatchIcon,
   NewsIcon,
   UserIcon,
@@ -35,6 +37,7 @@ export function GameSidebar({
   const [collapsed, setLocalCollapsed] = useState(propCollapsed);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const { address, status } = useAppContext();
+  const pathname = usePathname();
 
   useEffect(() => {
     setCollapsed(collapsed);
@@ -91,8 +94,8 @@ export function GameSidebar({
           >
             <div className="w-16 h-16 relative transform hover:scale-105 transition-transform duration-300">
               <Image
-                src="/images/XLMateLogo.png"
-                alt="XLMate"
+                src="/images/KnightVerseLogo.png"
+                alt="KnightVerse"
                 fill
                 className="object-contain drop-shadow-lg"
               />
@@ -106,37 +109,49 @@ export function GameSidebar({
             label="Play"
             href="/"
             collapsed={collapsed && !isHovered}
-            active
+            active={pathname === "/"}
+          />
+          <SidebarItem
+            icon={<DashboardIcon />}
+            label="Dashboard"
+            href="/dashboard"
+            collapsed={collapsed && !isHovered}
+            active={pathname === "/dashboard"}
           />
           <SidebarItem
             icon={<WatchIcon />}
             label="Watch"
             href="/watch"
             collapsed={collapsed && !isHovered}
+            active={pathname === "/watch"}
           />
           <SidebarItem
             icon={<NewsIcon />}
             label="News"
             href="/news"
             collapsed={collapsed && !isHovered}
+            active={pathname === "/news"}
           />
           <SidebarItem
             icon={<UserIcon />}
             label="Profile"
             href="/profile"
             collapsed={collapsed && !isHovered}
+            active={pathname === "/profile"}
           />
           <SidebarItem
             icon={<SettingsIcon />}
             label="Settings"
             href="/settings"
             collapsed={collapsed && !isHovered}
+            active={pathname === "/settings"}
           />
           <SidebarItem
             icon={<SupportIcon />}
             label="Support"
             href="/support"
             collapsed={collapsed && !isHovered}
+            active={pathname === "/support"}
           />
         </nav>
 
@@ -261,26 +276,28 @@ interface MobileSidebarProps {
 function MobileSidebar({ className = "" }: MobileSidebarProps) {
   const { address, status } = useAppContext();
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  const pathname = usePathname();
 
   return (
     <div className={`flex flex-col h-full bg-gray-900 ${className}`} role="navigation" aria-label="Main Navigation">
       <div className="p-4 flex items-center space-x-2">
         <div className="w-16 h-16 relative">
           <Image
-            src="/images/XLMateLogo.png"
-            alt="XLMate"
+            src="/images/KnightVerseLogo.png"
+            alt="KnightVerse"
             fill
             className="object-contain"
           />
         </div>
       </div>
       <nav className="flex-1">
-        <MobileSidebarItem icon={<ChessIcon />} label="Play" href="/" active />
-        <MobileSidebarItem icon={<WatchIcon />} label="Watch" href="/watch" />
-        <MobileSidebarItem icon={<NewsIcon />} label="News" href="/news" />
-        <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" />
-        <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" />
-        <MobileSidebarItem icon={<SupportIcon />} label="Support" href="/support" />
+        <MobileSidebarItem icon={<ChessIcon />} label="Play" href="/" active={pathname === "/"} />
+        <MobileSidebarItem icon={<DashboardIcon />} label="Dashboard" href="/dashboard" active={pathname === "/dashboard"} />
+        <MobileSidebarItem icon={<WatchIcon />} label="Watch" href="/watch" active={pathname === "/watch"} />
+        <MobileSidebarItem icon={<NewsIcon />} label="News" href="/news" active={pathname === "/news"} />
+        <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname === "/profile"} />
+        <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" active={pathname === "/settings"} />
+        <MobileSidebarItem icon={<SupportIcon />} label="Support" href="/support" active={pathname === "/support"} />
       </nav>
       <div className="p-4 space-y-2">
         {status === "connected" && address ? (

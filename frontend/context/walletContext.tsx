@@ -119,12 +119,10 @@
 
 "use client";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { Server, TransactionBuilder, Networks, Operation, Asset } from "stellar-sdk";
+import { Server, TransactionBuilder, Operation, Asset } from "stellar-sdk";
 import { Transaction } from "stellar-sdk";
 
-const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
-const SOROBAN_RPC = process.env.NEXT_PUBLIC_SOROBAN_RPC || "https://soroban-testnet.stellar.org:443";
-const NETWORK_PASSPHRASE = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE || Networks.TESTNET;
+import { HORIZON_URL, SOROBAN_RPC, NETWORK_PASSPHRASE } from "@/lib/api";
 
 type AppContextType = {
   address?: string;
@@ -133,37 +131,53 @@ type AppContextType = {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
   sendXLM: (destination: string, amount: string | number) => Promise<any>;
-  invokeSorobanContract: (contractId: string, functionName: string, args?: any[]) => Promise<any>;
+  invokeSorobanContract: (
+    contractId: string,
+    functionName: string,
+    args?: any[],
+  ) => Promise<any>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | undefined>(undefined);
-  const [status, setStatus] = useState<AppContextType["status"]>("disconnected");
+  const [status, setStatus] =
+    useState<AppContextType["status"]>("disconnected");
   const server = new Server(HORIZON_URL);
 
   useEffect(() => {
     // Auto-detect previously connected Freighter account
     const stored = localStorage.getItem("freighter_address");
-    if (stored) setAddress(stored);
+    if (stored) {
+      setAddress(stored);
+      setStatus("connected");
+    }
   }, []);
 
   const isFreighterAvailable = (): boolean => {
     // freighter v2 exposes `window.freighterApi`, older versions add `window.freighter`
-    return typeof window !== "undefined" && (!!(window as any).freighterApi || !!(window as any).freighter);
+    return (
+      typeof window !== "undefined" &&
+      (!!(window as any).freighterApi || !!(window as any).freighter)
+    );
   };
 
   const connectWallet = async () => {
     setStatus("connecting");
     try {
-      if (!isFreighterAvailable()) throw new Error("Freighter not found. Please install Freighter.");
+      if (!isFreighterAvailable())
+        throw new Error("Freighter not found. Please install Freighter.");
 
       // Prefer the freighter-api package if available on window
-      const freighter = (window as any).freighterApi || (window as any).freighter;
+      const freighter =
+        (window as any).freighterApi || (window as any).freighter;
       // try to get public key
-      const publicKey = await (freighter.getPublicKey ? freighter.getPublicKey() : freighter.getPublicKey());
-      if (!publicKey) throw new Error("Unable to read public key from Freighter");
+      const publicKey = await (freighter.getPublicKey
+        ? freighter.getPublicKey()
+        : freighter.getPublicKey());
+      if (!publicKey)
+        throw new Error("Unable to read public key from Freighter");
       setAddress(publicKey);
       localStorage.setItem("freighter_address", publicKey);
       setStatus("connected");
@@ -191,11 +205,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (freighter.signTransaction) {
         const res = await freighter.signTransaction(txXDR, NETWORK_PASSPHRASE);
         // some versions return { signed_envelope_xdr }
-        if (res && typeof res === "object" && res.signed_envelope_xdr) return res.signed_envelope_xdr;
+        if (res && typeof res === "object" && res.signed_envelope_xdr)
+          return res.signed_envelope_xdr;
         if (typeof res === "string") return res;
       }
       if (freighter.sign) {
-        const res = await freighter.sign({ transaction: txXDR, network: NETWORK_PASSPHRASE });
+        const res = await freighter.sign({
+          transaction: txXDR,
+          network: NETWORK_PASSPHRASE,
+        });
         if (res && res.signed_envelope_xdr) return res.signed_envelope_xdr;
       }
       // last resort: try freighterApi.signTransaction named export
@@ -207,20 +225,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.error("Freighter signing failed:", e);
       throw e;
     }
-    throw new Error("Freighter signing interface not supported in this environment");
+    throw new Error(
+      "Freighter signing interface not supported in this environment",
+    );
   }
 
   const sendXLM = async (destination: string, amount: string | number) => {
     if (!address) throw new Error("No wallet connected");
     const acct = await server.loadAccount(address);
     const fee = await server.fetchBaseFee();
-    const tx = new TransactionBuilder(acct, { fee: fee.toString(), networkPassphrase: NETWORK_PASSPHRASE })
+    const tx = new TransactionBuilder(acct, {
+      fee: fee.toString(),
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
       .addOperation(
         Operation.payment({
           destination,
           asset: Asset.native(),
           amount: String(amount),
-        })
+        }),
       )
       .setTimeout(30)
       .build();
@@ -230,14 +253,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // submit signed XDR
     try {
-      const txObj = TransactionBuilder.fromXDR(signedEnvelopeXDR, NETWORK_PASSPHRASE);
+      const txObj = TransactionBuilder.fromXDR(
+        signedEnvelopeXDR,
+        NETWORK_PASSPHRASE,
+      );
       const res = await server.submitTransaction(txObj);
       return res;
     } catch (err) {
       // some horizon clients expect a TransactionEnvelope object; try submitting as-is
       try {
         // fallback: try submitting as-is (deprecated)
-        const res = await server.submitTransaction(signedEnvelopeXDR as unknown as Transaction);
+        const res = await server.submitTransaction(
+          signedEnvelopeXDR as unknown as Transaction,
+        );
         return res;
       } catch (e) {
         console.error("submitTransaction failed", e);
@@ -246,7 +274,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const invokeSorobanContract = async (contractId: string, functionName: string, args: any[] = []) => {
+  const invokeSorobanContract = async (
+    contractId: string,
+    functionName: string,
+    args: any[] = [],
+  ) => {
     if (!address) throw new Error("No wallet connected");
     // Best-effort Soroban invocation using `soroban-client` if present. This is a helper that
     // will build a transaction targeting the Soroban network and request Freighter to sign it.
@@ -260,7 +292,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // TODO: Implement full hostfunction builder for specific contract/ABI
       // Example: await rpc.getContractData(contractId);
       // TODO: Implement full hostfunction builder for specific contract/ABI
-      throw new Error("invokeSorobanContract: implement contract-specific invocation (ABI required)");
+      throw new Error(
+        "invokeSorobanContract: implement contract-specific invocation (ABI required)",
+      );
     } catch (err) {
       console.error("invokeSorobanContract", err);
       throw err;

@@ -1,4 +1,4 @@
-# XLMate Backend - Authentication Setup Guide
+# KnightVerse Backend - Authentication Setup Guide
 
 This document describes the clean backend implementation with user registration and authentication endpoints.
 
@@ -103,7 +103,7 @@ vim .env
 
 **Required Environment Variables:**
 ```env
-DATABASE_URL=postgres://username:password@localhost:5432/xlmate_db
+DATABASE_URL=postgres://username:password@localhost:5432/knightverse_db
 SERVER_ADDR=127.0.0.1:8080
 JWT_SECRET_KEY=your_secret_key_here
 JWT_EXPIRATION_SECS=3600
@@ -114,7 +114,7 @@ RUST_LOG=info
 
 ```bash
 # Create PostgreSQL database
-createdb xlmate_db
+createdb knightverse_db
 
 # Run migrations (from backend/modules directory)
 cd modules/db/migrations
@@ -136,7 +136,7 @@ cargo run
 
 # Or run in release mode
 cargo build --release
-./target/release/xlmate-backend
+./target/release/knightverse-backend
 ```
 
 The server will start at `http://127.0.0.1:8080`
@@ -291,7 +291,7 @@ kill -9 <PID>
 ### Database connection issues
 ```bash
 # Test connection
-psql postgresql://user:pass@localhost:5432/xlmate_db
+psql postgresql://user:pass@localhost:5432/knightverse_db
 
 # Check environment variables
 echo $DATABASE_URL
@@ -309,4 +309,4 @@ rustc --version
 
 ## License
 
-This project is part of XLMate - see LICENSE file in root directory.
+This project is part of KnightVerse - see LICENSE file in root directory.

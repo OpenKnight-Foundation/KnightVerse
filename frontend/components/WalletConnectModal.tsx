@@ -44,7 +44,7 @@ export function WalletConnectModal({
       addToast({
         severity: "success",
         title: "Wallet Connected",
-        detail: "Your Freighter wallet is now connected to XLMate.",
+        detail: "Your Freighter wallet is now connected to KnightVerse.",
       });
     } catch (err) {
       addToast({

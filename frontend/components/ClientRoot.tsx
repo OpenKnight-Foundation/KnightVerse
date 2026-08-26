@@ -35,8 +35,8 @@ export default function ClientRoot({
           <div className="ml-4 flex items-center">
             <div className="h-16 w-16 relative">
               <Image
-                src="/images/XLMateLogo.png"
-                alt="XLMate"
+                src="/images/KnightVerseLogo.png"
+                alt="KnightVerse"
                 width={64}
                 height={64}
                 className="object-contain"

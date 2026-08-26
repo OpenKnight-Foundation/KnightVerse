@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
+import type { ChessVariant } from "@/lib/chessVariants";
+
+import { API_BASE, WS_BASE, endpoints } from "@/lib/api";
+
+
 export type MatchmakingStatus =
   | "idle"
   | "searching"
@@ -18,19 +23,21 @@ interface UseMatchmakingReturn {
   gameId: string | null;
   playerColor: "white" | "black" | null;
   error: string | null;
-  joinMatchmaking: (aiPersonality?: string) => void;
+  joinMatchmaking: (
+    matchType?: "Rated" | "Casual",
+    timeControl?: ChessVariant,
+  ) => Promise<void>;
   cancelMatchmaking: () => void;
   sendMove: (from: string, to: string, promotion?: string) => void;
   lastOpponentMove: { from: string; to: string; promotion?: string } | null;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
-
 export function useMatchmaking(): UseMatchmakingReturn {
   const [status, setStatus] = useState<MatchmakingStatus>("idle");
   const [gameId, setGameId] = useState<string | null>(null);
-  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(null);
+  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [lastOpponentMove, setLastOpponentMove] = useState<{
     from: string;
@@ -41,6 +48,16 @@ export function useMatchmaking(): UseMatchmakingReturn {
   const matchmakingWsRef = useRef<WebSocket | null>(null);
   const gameWsRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+
+  // Track current status in a ref so WebSocket callbacks always read the latest
+  // value without capturing a stale closure — avoids adding `status` to every
+  // useCallback dependency array (which would cause infinite re-render loops).
+  const statusRef = useRef<MatchmakingStatus>("idle");
+
+  const setStatusSynced = useCallback((next: MatchmakingStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
 
   const cleanup = useCallback(() => {
     if (matchmakingWsRef.current) {
@@ -53,73 +70,22 @@ export function useMatchmaking(): UseMatchmakingReturn {
     }
   }, []);
 
-  const openGameSocket = useCallback((gId: string) => {
-    const ws = new WebSocket(`${WS_BASE}/v1/games/${gId}/ws`);
-    gameWsRef.current = ws;
+  const openGameSocket = useCallback(
+    (gId: string) => {
+      const ws = new WebSocket(endpoints.games.ws(gId));
+      gameWsRef.current = ws;
 
-    ws.onopen = () => setStatus("connected");
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "move") {
-          setLastOpponentMove({
-            from: data.from,
-            to: data.to,
-            promotion: data.promotion,
-          });
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    ws.onerror = () => {
-      setError("Game connection error.");
-      setStatus("error");
-    };
-
-    ws.onclose = () => {
-      if (status === "connected") setStatus("idle");
-    };
-  }, [status]);
-
-  const joinMatchmaking = useCallback(async (aiPersonality?: string) => {
-    setStatus("searching");
-    setError(null);
-
-    try {
-      // POST to join matchmaking queue, receive a session token
-      const res = await fetch(`${API_BASE}/v1/matchmaking/join`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ai_personality: aiPersonality ?? "aggressive" }),
-        credentials: "include",
-      });
-
-      if (!res.ok) throw new Error(`Matchmaking failed: ${res.status}`);
-
-      const { sessionId } = await res.json();
-      sessionIdRef.current = sessionId;
-
-      // Open WebSocket to listen for match_found event
-      const ws = new WebSocket(
-        `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`
-      );
-      matchmakingWsRef.current = ws;
+      ws.onopen = () => setStatusSynced("connected");
 
       ws.onmessage = (event) => {
         try {
-          const data: { type: string } & Partial<MatchFoundPayload> =
-            JSON.parse(event.data);
-
-          if (data.type === "match_found" && data.gameId && data.color) {
-            setGameId(data.gameId);
-            setPlayerColor(data.color);
-            setStatus("match_found");
-            ws.close();
-            matchmakingWsRef.current = null;
-            openGameSocket(data.gameId);
+          const data = JSON.parse(event.data);
+          if (data.type === "move") {
+            setLastOpponentMove({
+              from: data.from,
+              to: data.to,
+              promotion: data.promotion,
+            });
           }
         } catch {
           // ignore malformed messages
@@ -127,48 +93,120 @@ export function useMatchmaking(): UseMatchmakingReturn {
       };
 
       ws.onerror = () => {
-        setError("Matchmaking connection error.");
-        setStatus("error");
+        setError("Game connection error.");
+        setStatusSynced("error");
       };
 
       ws.onclose = () => {
-        if (status === "searching") {
-          // closed without match — either cancelled or error
-        }
+        // Use statusRef to avoid stale closure — reads the value at close time.
+        if (statusRef.current === "connected") setStatusSynced("idle");
       };
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-      setStatus("error");
-    }
-  }, [openGameSocket, status]);
+    },
+    [setStatusSynced],
+  );
 
-  const cancelMatchmaking = useCallback(async () => {
+  const joinMatchmaking = useCallback(
+    async (
+      matchType: "Rated" | "Casual" = "Casual",
+      timeControl: ChessVariant = "standard",
+    ) => {
+      setStatusSynced("searching");
+      setError(null);
+
+      try {
+        // wallet_address and elo are resolved server-side from the authenticated session.
+        // The server reads the JWT cookie (credentials: "include") to identify the player.
+        const res = await fetch(endpoints.matchmaking.join(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            match_type: matchType,
+            time_control: timeControl,
+          }),
+          credentials: "include",
+        });
+
+        if (!res.ok) throw new Error(`Matchmaking failed: ${res.status}`);
+
+        const json = await res.json();
+        const sessionId = json.request_id || json.sessionId;
+        sessionIdRef.current = sessionId;
+
+        const ws = new WebSocket(
+
+          `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`,
+
+          endpoints.matchmaking.ws(sessionId)
+
+        );
+        matchmakingWsRef.current = ws;
+
+        ws.onmessage = (event) => {
+          try {
+            const data: { type: string } & Partial<MatchFoundPayload> =
+              JSON.parse(event.data);
+
+            if (data.type === "match_found" && data.gameId && data.color) {
+              setGameId(data.gameId);
+              setPlayerColor(data.color);
+              setStatusSynced("match_found");
+              ws.close();
+              matchmakingWsRef.current = null;
+              openGameSocket(data.gameId);
+            }
+          } catch {
+            // ignore malformed messages
+          }
+        };
+
+        ws.onerror = () => {
+          setError("Matchmaking connection error.");
+          setStatusSynced("error");
+        };
+
+        ws.onclose = () => {
+          // Use statusRef.current — not the closed-over `status` state variable —
+          // so we always check the actual current status, not a stale snapshot.
+          // FE-13: reset to idle so the UI doesn't hang in "searching" forever.
+          if (statusRef.current === "searching") {
+            setStatusSynced("idle");
+            setError("Matchmaking ended without finding a match.");
+          }
+        };
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+        setStatusSynced("error");
+      }
+    },
+    [openGameSocket, setStatusSynced],
+  );
+
+  const cancelMatchmaking = useCallback(() => {
     cleanup();
     if (sessionIdRef.current) {
-      // Best-effort cancel; ignore errors
-      fetch(`${API_BASE}/v1/matchmaking/leave`, {
+      fetch(endpoints.matchmaking.cancel(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionIdRef.current }),
+        body: JSON.stringify({ request_id: sessionIdRef.current }),
         credentials: "include",
       }).catch(() => {});
       sessionIdRef.current = null;
     }
-    setStatus("idle");
+    setStatusSynced("idle");
     setGameId(null);
     setPlayerColor(null);
     setError(null);
-  }, [cleanup]);
+  }, [cleanup, setStatusSynced]);
 
   const sendMove = useCallback(
     (from: string, to: string, promotion = "q") => {
       if (gameWsRef.current?.readyState === WebSocket.OPEN && gameId) {
         gameWsRef.current.send(
-          JSON.stringify({ type: "move", gameId, from, to, promotion })
+          JSON.stringify({ type: "move", gameId, from, to, promotion }),
         );
       }
     },
-    [gameId]
+    [gameId],
   );
 
   // Cleanup on unmount

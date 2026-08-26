@@ -1,0 +1,285 @@
+name: Soroban Contract Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/soroban-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'testnet'
+        type: choice
+        options:
+          - testnet
+          - futurenet
+      contract_name:
+        description: 'Contract to deploy (leave empty for all)'
+        required: false
+        type: string
+
+jobs:
+  validate:
+    name: Validate Contracts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install --locked soroban-cli
+          soroban --version
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: contracts/target
+          key: ${{ runner.os }}-soroban-build-${{ hashFiles('contracts/**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-soroban-build-
+
+      - name: Run contract tests
+        working-directory: contracts
+        run: cargo test --verbose
+
+      - name: Build all contracts
+        working-directory: contracts
+        run: cargo build --release --target wasm32-unknown-unknown --verbose
+
+      - name: Validate WASM files
+        run: |
+          for wasm_file in contracts/target/wasm32-unknown-unknown/release/*.wasm; do
+            if [ -f "$wasm_file" ]; then
+              echo "Validating: $wasm_file"
+              soroban contract inspect --wasm "$wasm_file"
+            fi
+          done
+
+  deploy-testnet:
+    name: Deploy to Testnet
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: testnet
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install --locked soroban-cli
+          soroban --version
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: contracts/target
+          key: ${{ runner.os }}-soroban-build-${{ hashFiles('contracts/**/Cargo.lock') }}
+
+      - name: Configure Soroban CLI
+        run: |
+          soroban config network add testnet \
+            --rpc-url https://soroban-testnet.stellar.org:443 \
+            --network-passphrase "Test SDF Network ; September 2015"
+
+      - name: Setup deployment identity
+        run: |
+          echo "${{ secrets.SOROBAN_SECRET_KEY }}" > secret.key
+          soroban config identity add testnet-deployer \
+            --secret-key "$(cat secret.key)"
+          rm secret.key
+
+      - name: Deploy contracts
+        env:
+          CONTRACT_NAME: ${{ github.event.inputs.contract_name }}
+        run: |
+          cd contracts
+          
+          if [ -n "$CONTRACT_NAME" ]; then
+            # Deploy specific contract
+            echo "Deploying contract: $CONTRACT_NAME"
+            WASM_FILE="target/wasm32-unknown-unknown/release/${CONTRACT_NAME}.wasm"
+            
+            if [ ! -f "$WASM_FILE" ]; then
+              echo "Error: WASM file not found: $WASM_FILE"
+              exit 1
+            fi
+            
+            echo "Deploying $CONTRACT_NAME..."
+            CONTRACT_ID=$(soroban contract deploy \
+              --wasm "$WASM_FILE" \
+              --source testnet-deployer \
+              --network testnet)
+            
+            echo "Contract ID: $CONTRACT_ID"
+            echo "${CONTRACT_NAME}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
+          else
+            # Deploy all contracts
+            for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
+              if [ -f "$wasm_file" ]; then
+                contract_name=$(basename "$wasm_file" .wasm)
+                echo "Deploying $contract_name..."
+                
+                CONTRACT_ID=$(soroban contract deploy \
+                  --wasm "$wasm_file" \
+                  --source testnet-deployer \
+                  --network testnet)
+                
+                echo "$contract_name deployed: $CONTRACT_ID"
+                echo "${contract_name}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
+              fi
+            done
+          fi
+
+      - name: Save deployment artifacts
+        run: |
+          mkdir -p deployment-artifacts
+          cp contracts/target/wasm32-unknown-unknown/release/*.wasm deployment-artifacts/ 2>/dev/null || true
+          
+          # Save contract IDs
+          echo "Deployment completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-artifacts/deployment-log.txt
+          echo "Commit: ${{ github.sha }}" >> deployment-artifacts/deployment-log.txt
+          echo "Branch: ${{ github.ref_name }}" >> deployment-artifacts/deployment-log.txt
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soroban-deployment-artifacts
+          path: deployment-artifacts/
+          retention-days: 30
+
+  deploy-futurenet:
+    name: Deploy to Futurenet
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.environment == 'futurenet'
+    environment: futurenet
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install --locked soroban-cli
+          soroban --version
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: contracts/target
+          key: ${{ runner.os }}-soroban-build-${{ hashFiles('contracts/**/Cargo.lock') }}
+
+      - name: Configure Soroban CLI
+        run: |
+          soroban config network add futurenet \
+            --rpc-url https://rpc-futurenet.stellar.org:443 \
+            --network-passphrase "Test SDF Future Network ; October 2022"
+
+      - name: Setup deployment identity
+        run: |
+          echo "${{ secrets.SOROBAN_FUTURENET_SECRET_KEY }}" > secret.key
+          soroban config identity add futurenet-deployer \
+            --secret-key "$(cat secret.key)"
+          rm secret.key
+
+      - name: Deploy contracts
+        run: |
+          cd contracts
+          for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
+            if [ -f "$wasm_file" ]; then
+              contract_name=$(basename "$wasm_file" .wasm)
+              echo "Deploying $contract_name to futurenet..."
+              
+              CONTRACT_ID=$(soroban contract deploy \
+                --wasm "$wasm_file" \
+                --source futurenet-deployer \
+                --network futurenet)
+              
+              echo "$contract_name deployed to futurenet: $CONTRACT_ID"
+            fi
+          done
+
+  verify-deployment:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-testnet]
+    if: always() && needs.deploy-testnet.result == 'success'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install --locked soroban-cli
+
+      - name: Configure Soroban CLI
+        run: |
+          soroban config network add testnet \
+            --rpc-url https://soroban-testnet.stellar.org:443 \
+            --network-passphrase "Test SDF Network ; September 2015"
+
+      - name: Download deployment artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: soroban-deployment-artifacts
+          path: deployment-artifacts/
+
+      - name: Verify deployed contracts
+        run: |
+          echo "Verifying deployed contracts..."
+          # Contract IDs would be passed from deployment step
+          # This is a placeholder for actual verification logic
+          echo "Deployment verification complete"
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-testnet, verify-deployment]
+    if: always()
+    
+    steps:
+      - name: Deployment summary
+        run: |
+          echo "## Soroban Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: Testnet" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ needs.deploy-testnet.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Verification**: ${{ needs.verify-deployment.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY

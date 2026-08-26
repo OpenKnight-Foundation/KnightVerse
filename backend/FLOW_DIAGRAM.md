@@ -1,4 +1,4 @@
-# XLMate Backend - Registration & Authentication Flow
+# KnightVerse Backend - Registration & Authentication Flow
 
 ## System Architecture Diagram
 
@@ -400,4 +400,4 @@ Route Handler Processes Request
 
 ---
 
-This flow ensures **secure, efficient, and user-friendly** authentication for XLMate! 🔐
+This flow ensures **secure, efficient, and user-friendly** authentication for KnightVerse! 🔐

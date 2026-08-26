@@ -5,8 +5,9 @@ edition = "2021"
 
 [dependencies]
 dotenv = "0.15.0"
-env_logger = "0.11.8"
-log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
 actix-web = "4"
 actix = "0.13"
 actix-web-actors = "4"
@@ -36,11 +37,17 @@ indexmap = "=2.2.6"
 db_entity = { path = "../db/entity" }
 actix-governor = "0.5"
 st_core = { path = "../st_core", features = ["api"] }
+migration = { path = "../db/migrations" }
 
 # For Redis Pub/Sub in WebSocket
 redis = { version = "0.24", features = ["tokio-comp", "json"] }
+deadpool-redis = "0.14"
+tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 actix-rt = "2.9"
+awc = "3"
+futures-util = "0.3"
+actix-test = "0.1"
 

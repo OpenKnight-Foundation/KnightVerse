@@ -1,8 +1,11 @@
-use sea_orm::{DatabaseConnection, DatabaseTransaction, TransactionTrait, EntityTrait, ActiveModelTrait, Set};
-use uuid::Uuid;
-use db_entity::{player, game};
+use db_entity::{game, player};
 use error::error::ApiError;
 use matchmaking::elo::calculate_new_ratings;
+use sea_orm::{
+    ActiveModelTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait, Set,
+    TransactionTrait,
+};
+use uuid::Uuid;
 
 /// Service for handling Elo rating calculations and updates after game completion
 pub struct RatingService;
@@ -38,22 +41,22 @@ impl Default for RatingConfig {
 
 impl RatingService {
     /// Updates player ratings after a game completion using a database transaction
-    /// 
+    ///
     /// # Arguments
     /// * `db` - Database connection
     /// * `game_id` - UUID of the completed game
     /// * `config` - Rating configuration (K-factor, min/max ratings)
-    /// 
+    ///
     /// # Returns
     /// * `Ok((white_new_rating, black_new_rating))` - New ratings for both players
     /// * `Err(ApiError)` - If game not found, players not found, or database error
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// let config = RatingConfig::default();
     /// let (white_rating, black_rating) = RatingService::update_ratings_after_game(
-    ///     &db, 
-    ///     game_id, 
+    ///     &db,
+    ///     game_id,
     ///     &config
     /// ).await?;
     /// ```
@@ -63,16 +66,21 @@ impl RatingService {
         config: &RatingConfig,
     ) -> Result<(i32, i32), ApiError> {
         // Start a database transaction to ensure atomicity
-        let txn = db.begin().await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to start transaction: {}", e)))?;
+        let txn = db.begin().await.map_err(|e| {
+            ApiError::DatabaseError(DbErr::Custom(format!("Failed to start transaction: {}", e)))
+        })?;
 
         let result = Self::update_ratings_in_transaction(&txn, game_id, config).await;
 
         match result {
             Ok(ratings) => {
                 // Commit the transaction if everything succeeded
-                txn.commit().await
-                    .map_err(|e| ApiError::DatabaseError(format!("Failed to commit transaction: {}", e)))?;
+                txn.commit().await.map_err(|e| {
+                    ApiError::DatabaseError(DbErr::Custom(format!(
+                        "Failed to commit transaction: {}",
+                        e
+                    )))
+                })?;
                 Ok(ratings)
             }
             Err(e) => {
@@ -93,15 +101,18 @@ impl RatingService {
         let game_model = game::Entity::find_by_id(game_id)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch game: {}", e)))?
+            .map_err(|e| {
+                ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch game: {}", e)))
+            })?
             .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
 
         // 2. Check if game is completed
-        let game_result = game_model.result
+        let game_result = game_model
+            .result
             .ok_or_else(|| ApiError::BadRequest("Game is not completed yet".to_string()))?;
 
         // 3. Determine game outcome
-        let (white_outcome, black_outcome) = match game_result {
+        let (white_outcome, _black_outcome) = match game_result {
             db_entity::game::ResultSide::WhiteWins => (GameOutcome::Win, GameOutcome::Loss),
             db_entity::game::ResultSide::BlackWins => (GameOutcome::Loss, GameOutcome::Win),
             db_entity::game::ResultSide::Draw => (GameOutcome::Draw, GameOutcome::Draw),
@@ -110,7 +121,9 @@ impl RatingService {
             }
             db_entity::game::ResultSide::Abandoned => {
                 // For abandoned games, we don't update ratings
-                return Err(ApiError::BadRequest("Ratings not updated for abandoned games".to_string()));
+                return Err(ApiError::BadRequest(
+                    "Ratings not updated for abandoned games".to_string(),
+                ));
             }
         };
 
@@ -118,13 +131,23 @@ impl RatingService {
         let white_player = player::Entity::find_by_id(game_model.white_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch white player: {}", e)))?
+            .map_err(|e| {
+                ApiError::DatabaseError(DbErr::Custom(format!(
+                    "Failed to fetch white player: {}",
+                    e
+                )))
+            })?
             .ok_or_else(|| ApiError::NotFound("White player not found".to_string()))?;
 
         let black_player = player::Entity::find_by_id(game_model.black_player)
             .one(txn)
             .await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch black player: {}", e)))?
+            .map_err(|e| {
+                ApiError::DatabaseError(DbErr::Custom(format!(
+                    "Failed to fetch black player: {}",
+                    e
+                )))
+            })?
             .ok_or_else(|| ApiError::NotFound("Black player not found".to_string()))?;
 
         // 5. Calculate new ratings based on game outcome
@@ -149,11 +172,19 @@ impl RatingService {
         };
 
         // Execute both updates in the same transaction
-        white_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to update white player rating: {}", e)))?;
+        white_active_model.update(txn).await.map_err(|e| {
+            ApiError::DatabaseError(DbErr::Custom(format!(
+                "Failed to update white player rating: {}",
+                e
+            )))
+        })?;
 
-        black_active_model.update(txn).await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to update black player rating: {}", e)))?;
+        black_active_model.update(txn).await.map_err(|e| {
+            ApiError::DatabaseError(DbErr::Custom(format!(
+                "Failed to update black player rating: {}",
+                e
+            )))
+        })?;
 
         Ok((new_white_rating, new_black_rating))
     }
@@ -172,7 +203,11 @@ impl RatingService {
             }
             GameOutcome::Loss => {
                 // White loses, black wins
-                let (new_black, new_white) = calculate_new_ratings(black_rating as u32, white_rating as u32, config.k_factor);
+                let (new_black, new_white) = calculate_new_ratings(
+                    black_rating as u32,
+                    white_rating as u32,
+                    config.k_factor,
+                );
                 (new_white, new_black)
             }
             GameOutcome::Draw => {
@@ -216,7 +251,9 @@ impl RatingService {
         let player = player::Entity::find_by_id(player_id)
             .one(db)
             .await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch player: {}", e)))?
+            .map_err(|e| {
+                ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch player: {}", e)))
+            })?
             .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
 
         Ok(player.elo_rating)
@@ -237,8 +274,12 @@ impl RatingService {
             ..Default::default()
         };
 
-        active_model.update(db).await
-            .map_err(|e| ApiError::DatabaseError(format!("Failed to update player rating: {}", e)))?;
+        active_model.update(db).await.map_err(|e| {
+            ApiError::DatabaseError(DbErr::Custom(format!(
+                "Failed to update player rating: {}",
+                e
+            )))
+        })?;
 
         Ok(())
     }
@@ -251,10 +292,9 @@ mod tests {
     #[test]
     fn test_calculate_rating_changes_white_wins() {
         let config = RatingConfig::default();
-        let (new_white, new_black) = RatingService::calculate_rating_changes(
-            1500, 1500, GameOutcome::Win, &config
-        );
-        
+        let (new_white, new_black) =
+            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config);
+
         // Equal ratings, white wins: white gains ~16, black loses ~16
         assert!(new_white > 1500);
         assert!(new_black < 1500);
@@ -264,10 +304,9 @@ mod tests {
     #[test]
     fn test_calculate_rating_changes_draw() {
         let config = RatingConfig::default();
-        let (new_white, new_black) = RatingService::calculate_rating_changes(
-            1600, 1400, GameOutcome::Draw, &config
-        );
-        
+        let (new_white, new_black) =
+            RatingService::calculate_rating_changes(1600, 1400, GameOutcome::Draw, &config);
+
         // Higher rated player loses points in draw, lower rated gains
         assert!(new_white < 1600);
         assert!(new_black > 1400);
@@ -280,11 +319,10 @@ mod tests {
             min_rating: 100,
             max_rating: 2000,
         };
-        
-        let (new_white, new_black) = RatingService::calculate_rating_changes(
-            50, 2500, GameOutcome::Win, &config
-        );
-        
+
+        let (new_white, new_black) =
+            RatingService::calculate_rating_changes(50, 2500, GameOutcome::Win, &config);
+
         // Ratings should be clamped to bounds
         assert!(new_white >= config.min_rating);
         assert!(new_white <= config.max_rating);
@@ -295,14 +333,13 @@ mod tests {
     #[test]
     fn test_upset_victory_large_rating_change() {
         let config = RatingConfig::default();
-        let (new_white, new_black) = RatingService::calculate_rating_changes(
-            1200, 1800, GameOutcome::Win, &config
-        );
-        
+        let (new_white, new_black) =
+            RatingService::calculate_rating_changes(1200, 1800, GameOutcome::Win, &config);
+
         // Lower rated player beating higher rated should gain significant points
         let white_gain = new_white - 1200;
         let black_loss = 1800 - new_black;
-        
+
         assert!(white_gain > 20); // Significant gain for upset
         assert!(black_loss > 20); // Significant loss for upset
         assert_eq!(white_gain, black_loss); // Zero-sum

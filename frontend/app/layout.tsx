@@ -6,10 +6,13 @@ import { MatchmakingProvider } from "@/context/matchmakingContext";
 import { ToastProvider } from "@/components/ui/toast";
 import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
+import { BoardThemeProvider } from "@/context/ThemeContext";
+import { SoundProvider } from "@/context/SoundContext";
+import { AuthProvider } from "@/context/authContext";
 
 export const metadata: Metadata = {
-  title: "XLMate",
-  description: "XLMate — Chess on Stellar",
+  title: "KnightVerse",
+  description: "KnightVerse — Chess on Stellar",
 };
 
 export default function RootLayout({
@@ -27,15 +30,21 @@ export default function RootLayout({
           Skip to main content
         </a>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          <AppProvider>
-            <MatchmakingProvider>
-              <ToastProvider>
-                <TransactionProvider>
-                  <ClientRoot>{children}</ClientRoot>
-                </TransactionProvider>
-              </ToastProvider>
-            </MatchmakingProvider>
-          </AppProvider>
+          <AuthProvider>
+            <AppProvider>
+              <MatchmakingProvider>
+                <ToastProvider>
+                  <TransactionProvider>
+                    <BoardThemeProvider>
+                      <SoundProvider>
+                        <ClientRoot>{children}</ClientRoot>
+                      </SoundProvider>
+                    </BoardThemeProvider>
+                  </TransactionProvider>
+                </ToastProvider>
+              </MatchmakingProvider>
+            </AppProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

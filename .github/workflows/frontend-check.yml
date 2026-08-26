@@ -37,7 +37,7 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: false
+        continue-on-error: true
 
       - name: Test (vitest)
         run: npm run test

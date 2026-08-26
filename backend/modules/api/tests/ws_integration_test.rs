@@ -46,7 +46,9 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
     let game_id = "integration-game-1".to_string();
     let token = make_access_token(42, "magnus");
 
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let url = srv
+        .url(&format!("/v1/ws/game/{}", game_id))
+        .replace("http://", "ws://");
 
     let (_resp, mut connection) = awc::Client::new()
         .ws(url)
@@ -117,7 +119,9 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
 #[actix_web::test]
 async fn rejects_connection_with_no_authorization_header() {
     let (srv, _lobby) = start_ws_test_server();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), "game-no-auth").replace("http://", "ws://");
+    let url = srv
+        .url("/v1/ws/game/game-no-auth")
+        .replace("http://", "ws://");
 
     let result = awc::Client::new().ws(url).connect().await;
 
@@ -127,7 +131,9 @@ async fn rejects_connection_with_no_authorization_header() {
 #[actix_web::test]
 async fn rejects_connection_with_an_invalid_token() {
     let (srv, _lobby) = start_ws_test_server();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), "game-bad-auth").replace("http://", "ws://");
+    let url = srv
+        .url("/v1/ws/game/game-bad-auth")
+        .replace("http://", "ws://");
 
     let result = awc::Client::new()
         .ws(url)
@@ -142,9 +148,10 @@ async fn rejects_connection_with_an_invalid_token() {
 async fn two_clients_in_the_same_game_both_receive_broadcasts() {
     let (srv, lobby) = start_ws_test_server();
     let game_id = "integration-game-2".to_string();
-    let base = srv.url("");
 
-    let url_a = format!("{base}/v1/ws/game/{game_id}").replace("http://", "ws://");
+    let url_a = srv
+        .url(&format!("/v1/ws/game/{}", game_id))
+        .replace("http://", "ws://");
     let url_b = url_a.clone();
 
     let (_r1, mut client_a) = awc::Client::new()
@@ -181,7 +188,9 @@ async fn two_clients_in_the_same_game_both_receive_broadcasts() {
 async fn client_ping_is_answered_with_pong() {
     let (srv, _lobby) = start_ws_test_server();
     let game_id = "integration-game-ping".to_string();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let url = srv
+        .url(&format!("/v1/ws/game/{}", game_id))
+        .replace("http://", "ws://");
     let token = make_access_token(7, "heartbeat_test");
 
     let (_resp, mut connection) = awc::Client::new()
@@ -200,21 +209,13 @@ async fn client_ping_is_answered_with_pong() {
     }
 }
 
-/// Documents a real, current gap found while writing these tests (not
-/// asserted as a bug fix — flagged here so it isn't silently relied upon):
-/// `WsSession`'s `StreamHandler` for `ws::Message::Text` parses an incoming
-/// client message into a `WsMessage` but its match arm body is empty — a
-/// client sending a `Move` over the socket produces no broadcast, no
-/// validation, and no response today. All moves in this test suite are
-/// therefore simulated via the `Broadcast` actor message directly (as real
-/// move-processing logic elsewhere in the app presumably does), not by
-/// sending a `Move` WsMessage from the client. See PR description for the
-/// recommended follow-up.
 #[actix_web::test]
-async fn client_sent_move_message_currently_produces_no_response() {
+async fn client_sent_move_message_is_broadcast_to_game() {
     let (srv, _lobby) = start_ws_test_server();
-    let game_id = "integration-game-noop".to_string();
-    let url = format!("{}/v1/ws/game/{}", srv.url(""), game_id).replace("http://", "ws://");
+    let game_id = "integration-game-move".to_string();
+    let url = srv
+        .url(&format!("/v1/ws/game/{}", game_id))
+        .replace("http://", "ws://");
     let token = make_access_token(9, "client_move_sender");
 
     let (_resp, mut connection) = awc::Client::new()
@@ -226,15 +227,32 @@ async fn client_sent_move_message_currently_produces_no_response() {
 
     let client_move = serde_json::json!({
         "type": "Move",
-        "payload": { "from": "e2", "to": "e4", "san": "e4", "fen": "..." }
+        "payload": {
+            "from": "e2",
+            "to": "e4",
+            "san": "e4",
+            "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        }
     });
-    connection.send(awc::ws::Message::Text(client_move.to_string().into())).await.unwrap();
+    connection
+        .send(awc::ws::Message::Text(client_move.to_string().into()))
+        .await
+        .unwrap();
 
-    // Race the (lack of a) response against a short timeout — if this ever
-    // starts failing because a response *does* arrive, that's good news:
-    // it means the no-op gap above has been fixed, and this test (along
-    // with its doc comment) should be updated to assert the new behavior
-    // instead of removed outright.
-    let outcome = tokio::time::timeout(std::time::Duration::from_millis(300), connection.next()).await;
-    assert!(outcome.is_err(), "expected no response to a client-sent Move (current behavior is a no-op)");
+    let mut text_received = None;
+    while let Some(Ok(item)) = connection.next().await {
+        match item {
+            awc::ws::Frame::Text(bytes) => {
+                text_received = Some(String::from_utf8(bytes.to_vec()).unwrap());
+                break;
+            }
+            awc::ws::Frame::Ping(bytes) => {
+                let _ = connection.send(awc::ws::Message::Pong(bytes)).await;
+            }
+            _ => {}
+        }
+    }
+
+    let text = text_received.expect("expected a text frame");
+    assert!(text.contains("\"Move\""));
 }

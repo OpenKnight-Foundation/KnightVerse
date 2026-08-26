@@ -2,6 +2,7 @@ pub mod ai;
 pub mod auth;
 pub mod config;
 pub mod games;
+pub mod idempotency;
 pub mod openapi;
 pub mod players;
 pub mod rate_limiter;
@@ -14,4 +15,6 @@ extern crate challenge;
 
 // Re-export server module for external use
 pub use auth::{login, logout, refresh, register};
+pub use idempotency::IdempotencyMiddleware;
 pub use server::main;
+

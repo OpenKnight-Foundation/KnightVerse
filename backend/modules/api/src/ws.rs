@@ -10,6 +10,10 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+use sea_orm::{DatabaseConnection, EntityTrait};
+use db_entity::game;
+use sea_orm::{DatabaseConnection, EntityTrait};
+use db_entity::game;
 
 // For Redis Pub/Sub
 // Redis pub/sub integration removed for test stability in CI environment

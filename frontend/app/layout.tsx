@@ -8,6 +8,7 @@ import { TransactionProvider } from "@/context/transactionContext";
 import { ThemeProvider } from "next-themes";
 import { BoardThemeProvider } from "@/context/ThemeContext";
 import { SoundProvider } from "@/context/SoundContext";
+import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 import { AuthProvider } from "@/context/authContext";
 
 export const metadata: Metadata = {

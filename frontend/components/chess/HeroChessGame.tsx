@@ -426,6 +426,7 @@ export default function HeroChessGame({
                   <ChessboardComponent
                     position={currentDisplayPosition}
                     onDrop={handleMove}
+                    isMyTurn={isMyTurn}
                     aria-label="Chess board. You play as White. Click or drag pieces to move."
                   />
                 </ErrorBoundary>

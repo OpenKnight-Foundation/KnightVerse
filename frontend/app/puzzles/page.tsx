@@ -8,6 +8,7 @@ import { useAppContext } from "@/context/walletContext";
 import { useToast } from "@/components/ui/toast";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useTrackedTransaction } from "@/hook/useTrackedTransaction";
+import PuzzleRushView from "@/components/PuzzleRushView";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -82,6 +83,7 @@ export default function PuzzlesPage() {
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [showHint, setShowHint] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
+  const [showRush, setShowRush] = useState(false);
 
   const { address, status: walletStatus } = useAppContext();
   const { addToast } = useToast();
@@ -193,6 +195,8 @@ export default function PuzzlesPage() {
   }, [walletStatus, address, addToast, executeClaim]);
 
   const completionRate = Math.round((completedPuzzles.size / MOCK_PUZZLES.length) * 100);
+
+  if (showRush) return <PuzzleRushView onExit={() => setShowRush(false)} />;
 
   // Chess game instance for the selected puzzle
   const [puzzleGame] = useState(() => new Chess());
@@ -414,6 +418,7 @@ export default function PuzzlesPage() {
           <p className="text-xl text-gray-300 mb-6">
             Solve chess puzzles and earn micro XLM rewards!
           </p>
+          <button onClick={() => setShowRush(true)} className="px-5 py-3 bg-orange-300 text-sm font-bold text-slate-950 hover:bg-orange-200">Start Puzzle Rush</button>
           
           {/* Stats */}
           <div className="flex justify-center gap-6 mb-8">

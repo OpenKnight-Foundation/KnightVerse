@@ -15,6 +15,7 @@ import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
 import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
+import AICompanionHUD from "@/components/chess/AICompanionHUD";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -368,6 +369,13 @@ export default function PlayGameEngine() {
             </div>
 
             <div className="w-full min-w-[320px]">
+              <AICompanionHUD
+                evaluation={null}
+                isVictory={gameStatus === "checkmate" && game.turn() === "w"}
+                isTactical={game.isCheck()}
+                commentary={game.isCheck() ? "Stay alert, the king is under pressure." : moveHistory.length ? "I am tracking the position and looking for the next idea." : "Let's find a strong opening move."}
+                className="mb-3"
+              />
               <ErrorBoundary componentName="Chessboard">
                 <ChessboardComponent
                   position={position}

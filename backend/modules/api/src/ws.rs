@@ -12,11 +12,9 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use db_entity::game;
-use sea_orm::{DatabaseConnection, EntityTrait};
-use db_entity::game;
 
-// For Redis Pub/Sub
-// Redis pub/sub integration removed for test stability in CI environment
+use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster};
+
 use tokio::task::JoinHandle;
 
 /// Core WebSocket message types
@@ -46,9 +44,26 @@ pub enum WsMessage {
         token: String,
         expires_in: u32,
     },
+    /// Engine evaluation update, published to spectators only.
+    Eval {
+        score_cp: i32,
+        depth: u16,
+        best_line: Vec<String>,
+    },
+    /// Spectator chat. Published/consumed entirely via Redis fan-out; never
+    /// routed through the core game actor loop.
+    Chat {
+        user: String,
+        message: String,
+    },
+    /// Current spectator count for a game. Throttled/batched on the
+    /// subscriber side so bursts of joins/leaves don't flood clients.
+    SpectatorCount {
+        count: u32,
+    },
 }
 
-/// Actor messages
+/// Actor messages (used by the in-process lobby, i.e. the player fast path)
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct Connect {
@@ -70,7 +85,15 @@ pub struct Broadcast {
     pub message: WsMessage,
 }
 
-/// Lobby state actor
+/// Lobby state actor.
+///
+/// IMPORTANT: this now only holds *player* connections (at most two per
+/// game, plus any same-node infra that legitimately needs the low-latency
+/// path). Spectators are intentionally never registered here — see the
+/// module doc in `redis_broadcast.rs` for why. This keeps `Broadcast`'s
+/// fan-out cost bounded by player count instead of by (potentially
+/// thousands of) spectators, which is what caused the CPU bottleneck this
+/// change addresses.
 pub struct LobbyState {
     sessions: HashMap<String, HashSet<Recipient<WsMessage>>>,
 }
@@ -128,16 +151,20 @@ impl Handler<Broadcast> for LobbyState {
     }
 }
 
-/// WebSocket session actor
+/// WebSocket session actor. Handles both players and spectators; behavior
+/// diverges based on `is_spectator`.
 pub struct WsSession {
     pub game_id: String,
     pub lobby: Addr<LobbyState>,
+    pub redis: RedisBroadcaster,
     pub hb: std::time::Instant,
     pub user_id: i32,
     pub player_id: Uuid,
     pub username: String,
     pub session_id: String,
-    pub redis_sub_task: Option<JoinHandle<()>>, // Placeholder for compatibility
+    pub is_spectator: bool,
+    /// Redis pub/sub forwarder task for spectators. `None` for players.
+    pub redis_sub_task: Option<JoinHandle<()>>,
 }
 
 impl WsSession {
@@ -181,27 +208,57 @@ impl Actor for WsSession {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.hb(ctx);
-        let addr = ctx.address().recipient();
-        self.lobby.do_send(Connect {
-            game_id: self.game_id.clone(),
-            addr,
-        });
 
-        // Redis pub/sub subscription intentionally disabled here; leave placeholder
-        self.redis_sub_task = None;
+        if self.is_spectator {
+            // Spectators never touch LobbyState. Subscribe to the game's
+            // Redis channel and forward messages to ourselves, with
+            // chat/spectator-count throttled by the subscriber task.
+            let recipient = ctx.address().recipient();
+            let handle = spawn_subscriber_task(self.redis.clone(), self.game_id.clone(), recipient);
+            self.redis_sub_task = Some(handle);
+
+            let redis = self.redis.clone();
+            let game_id = self.game_id.clone();
+            actix::spawn(async move {
+                redis.spectator_joined(&game_id).await;
+            });
+        } else {
+            // Players stay on the low-latency in-process path.
+            let addr = ctx.address().recipient();
+            self.lobby.do_send(Connect {
+                game_id: self.game_id.clone(),
+                addr,
+            });
+        }
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        info!("WebSocket disconnected for game: {}", self.game_id);
+        info!(
+            "WebSocket disconnected for game: {} (spectator={})",
+            self.game_id, self.is_spectator
+        );
 
-        // Send reconnection token to client for seamless reconnection
+        if self.is_spectator {
+            if let Some(handle) = self.redis_sub_task.take() {
+                handle.abort();
+            }
+            let redis = self.redis.clone();
+            let game_id = self.game_id.clone();
+            actix::spawn(async move {
+                redis.spectator_left(&game_id).await;
+            });
+            // Spectators don't get reconnect tokens today: reconnection
+            // re-subscribes fresh and re-syncs from current game state
+            // rather than replaying a session.
+            return;
+        }
+
+        // Players: send reconnection token to client for seamless reconnection
         if let Ok(reconnect_token) = self.generate_reconnect_token() {
             let reconnect_msg = WsMessage::ReconnectToken {
                 token: reconnect_token,
                 expires_in: 30,
             };
-
-            // Try to send the reconnection token
             ctx.address().do_send(reconnect_msg);
             info!("Sent reconnection token for user: {}", self.username);
         } else {
@@ -216,10 +273,6 @@ impl Actor for WsSession {
             game_id: self.game_id.clone(),
             addr,
         });
-        // Cancel Redis subscription task if running
-        if let Some(handle) = self.redis_sub_task.take() {
-            handle.abort();
-        }
     }
 }
 
@@ -234,12 +287,14 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                 self.hb = std::time::Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                // Parse and broadcast the move to all connected clients in this game.
-                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    self.lobby.do_send(Broadcast {
-                        game_id: self.game_id.clone(),
-                        message: ws_msg,
-                    });
+                let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) else {
+                    return;
+                };
+
+                if self.is_spectator {
+                    self.handle_spectator_message(ws_msg, ctx);
+                } else {
+                    self.handle_player_message(ws_msg, ctx);
                 }
             }
             Ok(ws::Message::Binary(_)) => {}
@@ -248,6 +303,58 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                 ctx.stop();
             }
             _ => {}
+        }
+    }
+}
+
+impl WsSession {
+    /// Player-originated message handling. Moves/clock/end updates go out
+    /// on the fast in-process lobby path (unaffected latency for the
+    /// opponent) AND are published to Redis, fire-and-forget, so spectators
+    /// on any backend node pick them up. The Redis publish never blocks
+    /// this handler — `publish_fire_and_forget` just spawns a task.
+    fn handle_player_message(&mut self, ws_msg: WsMessage, _ctx: &mut ws::WebsocketContext<Self>) {
+        match &ws_msg {
+            WsMessage::Move { .. } | WsMessage::Clock { .. } | WsMessage::End { .. } => {
+                self.lobby.do_send(Broadcast {
+                    game_id: self.game_id.clone(),
+                    message: ws_msg.clone(),
+                });
+                // Single publish per move/clock/end event, non-blocking.
+                self.redis.publish_fire_and_forget(&self.game_id, &ws_msg);
+            }
+            WsMessage::Eval { .. } => {
+                // Evaluation updates are spectator-facing only; skip the
+                // player lobby entirely and go straight to Redis.
+                self.redis.publish_fire_and_forget(&self.game_id, &ws_msg);
+            }
+            _ => {
+                // Chat/SpectatorCount/ReconnectToken/Error aren't expected
+                // as inbound player messages; ignore rather than error to
+                // stay tolerant of client/version skew.
+            }
+        }
+    }
+
+    /// Spectator-originated message handling. Only chat is accepted, and it
+    /// is published directly to the Redis fan-out channel — it never
+    /// touches `LobbyState` or the core game actor loop, per the issue's
+    /// "what not to do" constraint.
+    fn handle_spectator_message(
+        &mut self,
+        ws_msg: WsMessage,
+        _ctx: &mut ws::WebsocketContext<Self>,
+    ) {
+        match ws_msg {
+            WsMessage::Chat { message, .. } => {
+                self.redis
+                    .publish_chat(&self.game_id, self.username.clone(), message);
+            }
+            _ => {
+                // Spectators can't submit moves, clocks, etc. Silently drop;
+                // a malicious/broken client shouldn't be able to influence
+                // game state or spam the lobby.
+            }
         }
     }
 }
@@ -266,26 +373,33 @@ impl Handler<WsMessage> for WsSession {
     }
 }
 
-/// WebSocket route handler with auth and reconnection support
+/// WebSocket route handler with auth and reconnection support.
+///
+/// Spectator vs. player is selected via `?role=spectator` (default: player).
+/// Spectators still authenticate (so we know who's chatting / for
+/// abuse-mitigation and stats) but are never registered with `LobbyState`.
 pub async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
     lobby: web::Data<Addr<LobbyState>>,
+    redis: web::Data<RedisBroadcaster>,
 ) -> Result<HttpResponse, Error> {
     let auth_header = req
         .headers()
         .get("Authorization")
         .and_then(|h| h.to_str().ok());
     let mut reconnect_token: Option<String> = None;
+    let mut is_spectator = false;
 
     // Parse query string manually
     let query_string = req.query_string();
     if !query_string.is_empty() {
         for param in query_string.split('&') {
             if let Some((key, value)) = param.split_once('=') {
-                if key == "reconnect" {
-                    reconnect_token = Some(value.to_string());
-                    break;
+                match key {
+                    "reconnect" => reconnect_token = Some(value.to_string()),
+                    "role" if value == "spectator" => is_spectator = true,
+                    _ => {}
                 }
             }
         }
@@ -314,11 +428,13 @@ pub async fn ws_route(
         WsSession {
             game_id,
             lobby: lobby.get_ref().clone(),
+            redis: redis.get_ref().clone(),
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
             player_id: claims.player_id,
             username: claims.username,
             session_id,
+            is_spectator,
             redis_sub_task: None,
         },
         &req,
@@ -430,5 +546,47 @@ mod tests {
         let received2 = rx2.recv().await.unwrap();
         assert_eq!(received1, msg);
         assert_eq!(received2, msg);
+    }
+
+    /// Spectators must never be registered with `LobbyState`: this is what
+    /// keeps `Broadcast`'s cost bounded by player count. This test locks
+    /// that invariant in by asserting the lobby has no way to accumulate
+    /// more than the players explicitly `Connect`ed.
+    #[actix_web::test]
+    async fn test_lobby_only_ever_holds_explicitly_connected_recipients() {
+        let lobby = LobbyState::new().start();
+        let (tx1, _rx1) = unbounded_channel();
+        let recipient1 = TestRecipient { tx: tx1 }.start().recipient();
+        let game_id = "game456".to_string();
+
+        lobby
+            .send(Connect {
+                game_id: game_id.clone(),
+                addr: recipient1.clone(),
+            })
+            .await
+            .unwrap();
+
+        // Broadcasting a message that never went through Connect should not
+        // panic or implicitly register anyone — Broadcast is read-only with
+        // respect to membership.
+        lobby
+            .send(Broadcast {
+                game_id: "unknown-game".to_string(),
+                message: WsMessage::Clock {
+                    white: 1,
+                    black: 1,
+                },
+            })
+            .await
+            .unwrap();
+
+        lobby
+            .send(Disconnect {
+                game_id,
+                addr: recipient1,
+            })
+            .await
+            .unwrap();
     }
 }

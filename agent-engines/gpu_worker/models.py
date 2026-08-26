@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class AnalysisRequest(BaseModel):
-    """Request payload for a single chess position analysis."""
+    "Request payload for a single chess position analysis."
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     fen: str
@@ -25,28 +25,10 @@ class AnalysisRequest(BaseModel):
     device_hash: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-
-class FullGameAnalysisRequest(BaseModel):
-    """Request payload for a full game analysis."""
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    fens: list[str]
-    depth: Optional[int] = Field(default=None, ge=1)
-    time_limit_ms: Optional[int] = Field(default=None, ge=1)
-    priority: int = 0
-
-
-class FullGameAnalysisResult(BaseModel):
-    """Result of a full game analysis."""
-
-    request_id: str
-    results: list[AnalysisResult]
-
-
     @field_validator("fen")
     @classmethod
     def validate_fen(cls, value: str) -> str:
-        """Validate FEN strings using python-chess."""
+        "Validate FEN strings using python-chess."
 
         normalized = value.strip()
         try:
@@ -58,7 +40,7 @@ class FullGameAnalysisResult(BaseModel):
     @field_validator("actor_id", "session_id", "ip_hash", "device_hash")
     @classmethod
     def normalize_optional_identifier(cls, value: Optional[str]) -> Optional[str]:
-        """Normalize optional telemetry identifiers."""
+        "Normalize optional telemetry identifiers."
 
         if value is None:
             return None
@@ -66,8 +48,25 @@ class FullGameAnalysisResult(BaseModel):
         return normalized or None
 
 
+class FullGameAnalysisRequest(BaseModel):
+    "Request payload for a full game analysis."
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    fens: list[str]
+    depth: Optional[int] = Field(default=None, ge=1)
+    time_limit_ms: Optional[int] = Field(default=None, ge=1)
+    priority: int = 0
+
+
+class FullGameAnalysisResult(BaseModel):
+    "Result of a full game analysis."
+
+    request_id: str
+    results: list[AnalysisResult]
+
+
 class AnalysisResult(BaseModel):
-    """Normalized analysis result returned by the worker pool."""
+    "Normalized analysis result returned by the worker pool."
 
     request_id: str
     best_move: str
@@ -81,7 +80,7 @@ class AnalysisResult(BaseModel):
 
 
 class WorkerStatus(str, Enum):
-    """Runtime status of a worker instance."""
+    "Runtime status of a worker instance."
 
     IDLE = "idle"
     BUSY = "busy"
@@ -90,7 +89,7 @@ class WorkerStatus(str, Enum):
 
 
 class WorkerInfo(BaseModel):
-    """Snapshot of worker health and utilization."""
+    "Snapshot of worker health and utilization."
 
     worker_id: str
     status: WorkerStatus
@@ -102,7 +101,7 @@ class WorkerInfo(BaseModel):
 
 
 class NodeInfo(BaseModel):
-    """Information about an orchestrator node in the decentralized cluster."""
+    "Information about an orchestrator node in the decentralized cluster."
 
     node_id: str
     address: str
@@ -112,7 +111,7 @@ class NodeInfo(BaseModel):
 
 
 class PersonalityTraits(BaseModel):
-    """Quantitative traits defining an agent's playing and interaction style."""
+    "Quantitative traits defining an agent's playing and interaction style."
 
     aggressiveness: float = Field(default=0.5, ge=0.0, le=1.0)
     positional_style: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -121,7 +120,7 @@ class PersonalityTraits(BaseModel):
 
 
 class TrainingStatus(str, Enum):
-    """Status of a personality training job."""
+    "Status of a personality training job."
 
     QUEUED = "queued"
     PROVISIONING = "provisioning"
@@ -132,7 +131,7 @@ class TrainingStatus(str, Enum):
 
 
 class TrainingJob(BaseModel):
-    """Metadata and status for an agent personality training session."""
+    "Metadata and status for an agent personality training session."
 
     job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: str
@@ -145,14 +144,14 @@ class TrainingJob(BaseModel):
 
 
 class Player(BaseModel):
-    """A player in a game."""
+    "A player in a game."
 
     id: str
     rated: bool = True
 
 
 class Move(BaseModel):
-    """A single move in a game."""
+    "A single move in a game."
 
     player: Player
     move: str
@@ -160,10 +159,65 @@ class Move(BaseModel):
 
 
 class Game(BaseModel):
-    """A rated game between two players."""
+    "A rated game between two players."
 
     id: str
     white_player: Player
     black_player: Player
     moves: list[Move]
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class CommentaryTone(str, Enum):
+    "Supported commentary tonalities."
+
+    EXCITED_HYPE = "excited/hype"
+    DRY_SARCASTIC = "dry/sarcastic"
+    ACADEMIC_GRANDMASTER = "academic_grandmaster"
+    CASUAM_BEGINNER = "casual_beginner"
+
+
+class CommentaryEventType(str, Enum):
+    "Tactical event categories that trigger commentary."
+
+    BRILLIANT_MOVE = "brilliant_move"
+    TRADE = "trade"
+    MISSED_OPPORTUNITY = "missed_opportunity"
+    CLOCK_PANIC = "clock_panic"
+    COUNTER_ATTECK = "counter_attack"
+    ROUTINE = "routine"
+
+
+class CommentaryRequest(BaseModel):
+    "Request payload for generating a real-time commentary line."
+
+    game_id: str
+    player_white_id: str
+    player_black_id: str
+    move_number: int
+    move: str
+    fen: str
+    time_remaining_seconds: Optional[int] = None
+    tone: CommentaryTone = CommentaryTone.CASUAL_BEGINNER
+    event_types: Optional[list[CommentaryEventType]] = None
+
+
+class CommentaryEvent(BaseModel):
+    "A detected tactical event used to produce commentary."
+
+    event_type: CommentaryEventType
+    player_id: str
+    move: str
+    move_number: int
+    description: str
+    fen: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class CommentaryStreamChunk(BaseModel):
+    "A single token chunk from a streamed commentary message."
+
+    commentary_id: str
+    sequence: int
+    token: str
+    is_final: bool = False

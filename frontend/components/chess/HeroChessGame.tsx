@@ -242,33 +242,17 @@ export default function HeroChessGame({
     return true;
   })();
 
-  const handleMove = useCallback(
-    ({
-      sourceSquare,
-      targetSquare,
-    }: {
-      sourceSquare: string;
-      targetSquare: string;
-    }) => {
-      if (!isMyTurn || game.isGameOver()) return false;
-      if (viewIndex !== null) {
-        setViewIndex(null);
-        return false;
-      }
-
+  const makeMove = useCallback(
+    (move: { from: string; to: string; promotion?: string }) => {
       try {
-        const move = game.move({
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: "q",
-        });
-        if (move === null) return false;
+        const moveResult = game.move(move);
+        if (moveResult === null) return false;
 
         setBotAnalysis(null);
         setHeroMoveCount((c) => c + 1);
         requestAnimationFrame(() => setPosition(game.fen()));
         if (gameMode === "online") {
-          sendMove(sourceSquare, targetSquare, "q");
+          sendMove(move.from, move.to, move.promotion);
         }
 
         setPosition(game.fen());
@@ -278,7 +262,49 @@ export default function HeroChessGame({
         return false;
       }
     },
-    [isMyTurn, game, gameMode, sendMove, viewIndex],
+    [game, gameMode, sendMove],
+  );
+
+  const handleMove = useCallback(
+    ({
+      sourceSquare,
+      targetSquare,
+    }: {
+      sourceSquare: string;
+      targetSquare: string;
+    }) => {
+      if (!isMyTurn || game.isGameOver()) return false;
+
+      const history = game.history({ verbose: true });
+      const currentMoveIndex = viewIndex ?? history.length - 1;
+
+      if (viewIndex !== null && viewIndex < history.length - 1) {
+        const parentMove = history[currentMoveIndex];
+        if (!parentMove.variations) {
+          parentMove.variations = [];
+        }
+
+        const tempGame = new Chess(parentMove.after);
+        const move = tempGame.move({
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+        });
+
+        if (move) {
+          if (!parentMove.variations.some((v: any) => v[0].san === move.san)) {
+            parentMove.variations.push([move]);
+          }
+          game.load(tempGame.fen());
+          setPosition(game.fen());
+          setViewIndex(null);
+        }
+      } else {
+        makeMove({ from: sourceSquare, to: targetSquare, promotion: "q" });
+      }
+      return true;
+    },
+    [game, isMyTurn, viewIndex, makeMove],
   );
 
   const handleHeroPlayAgain = useCallback(() => {
@@ -459,8 +485,8 @@ export default function HeroChessGame({
           </div>
 
           <div className="w-full max-w-[280px] order-3 flex justify-center mt-4 lg:mt-0">
-            <MoveHistory
-              history={game.history()}
+            <MoveTree
+              history={game.history({ verbose: true })}
               onMoveClick={handleMoveClick}
               currentMoveIndex={viewIndex ?? game.history().length - 1}
             />

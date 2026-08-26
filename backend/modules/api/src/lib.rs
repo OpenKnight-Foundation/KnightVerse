@@ -2,6 +2,7 @@ pub mod ai;
 pub mod auth;
 pub mod config;
 pub mod games;
+pub mod metrics;
 pub mod openapi;
 pub mod players;
 pub mod rate_limiter;

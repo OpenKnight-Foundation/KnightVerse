@@ -5,6 +5,7 @@ pub mod request_id;
 use crate::ai::{analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, refresh, register};
 use crate::config::AppConfig;
+use crate::metrics;
 use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,

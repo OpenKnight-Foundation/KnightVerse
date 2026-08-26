@@ -15,4 +15,6 @@ extern crate challenge;
 
 // Re-export server module for external use
 pub use auth::{login, logout, refresh, register};
+pub use idempotency::IdempotencyMiddleware;
 pub use server::main;
+

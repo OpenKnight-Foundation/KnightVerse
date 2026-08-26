@@ -223,7 +223,10 @@ async fn client_sent_move_is_parsed_and_broadcast_back() {
         "type": "Move",
         "payload": { "from": "e2", "to": "e4", "san": "e4", "fen": fen }
     });
-    connection.send(awc::ws::Message::Text(client_move.to_string().into())).await.unwrap();
+    connection
+        .send(awc::ws::Message::Text(client_move.to_string().into()))
+        .await
+        .unwrap();
 
     // The move is parsed and broadcast back to the sender within a short window.
     let item = tokio::time::timeout(std::time::Duration::from_secs(2), connection.next())

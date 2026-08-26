@@ -18,6 +18,7 @@ pub enum GameState {
     Created,
     InProgress,
     Completed,
+    Escrowed,
     Settled,
     Drawn,
     Forfeited,
@@ -3104,7 +3105,7 @@ impl GameContract {
         Ok(())
     }
 
-    /// Create a time-locked escrow for a completed tournament game.
+/// Create a time-locked escrow for a completed tournament game.
     ///
     /// Calculates the total prize pool from the game's wager amount and locks it
     /// until `current_ledger + timelock_duration`. The escrow must then be
@@ -3132,10 +3133,14 @@ impl GameContract {
             .get(&GAMES)
             .ok_or(ContractError::GameNotFound)?;
 
-        let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
 
-        if game.state != GameState::Completed {
-            return Err(ContractError::GameNotInProgress);
+        // SC-02: Reject if already escrowed, settled, or not in Completed state
+        match game.state {
+            GameState::Completed => {} // OK to proceed
+            GameState::Escrowed => return Err(ContractError::GameAlreadyCompleted),
+            GameState::Settled => return Err(ContractError::AlreadySettled),
+            _ => return Err(ContractError::GameNotInProgress),
         }
 
         // Prevent a player from creating a tournament escrow against themselves (#933)
@@ -3188,7 +3193,7 @@ impl GameContract {
             released: false,
         };
 
-        escrows.set(escrow_id, escrow);
+escrows.set(escrow_id, escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
 
         // Increment player's active escrow count

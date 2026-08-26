@@ -1,8 +1,13 @@
 pub mod bitboard;
+pub mod mandatory_draw;
 pub mod pgn;
 pub mod rating;
 pub mod time_control;
 
+pub use mandatory_draw::{
+    check_mandatory_draw_conditions, update_position_tracker, MandatoryDrawResult,
+    PositionTracker,
+};
 pub use pgn::{
     parse_pgn, validate_game, GameResult as PgnGameResult, ParsedGame, PgnError, PgnHeaders,
     ValidatedGame,

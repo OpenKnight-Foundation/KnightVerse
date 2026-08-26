@@ -7,6 +7,7 @@ from typing import Optional, List
 
 import chess
 from pydantic import BaseModel, Field, field_validator
+from gpu_worker.tablebase_prober import WdlResult
 
 
 class AnalysisRequest(BaseModel):
@@ -78,6 +79,10 @@ class AnalysisResult(BaseModel):
     time_ms: Optional[int] = None
     gpu_utilization: Optional[float] = None
     is_book_move: bool = False
+    is_tablebase_move: bool = False
+    wdl_result: Optional["WdlResult"] = None  # type: ignore[name-defined]
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class WorkerStatus(str, Enum):

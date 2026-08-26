@@ -11,6 +11,7 @@ from gpu_worker.config import WorkerConfig
 from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
 from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo, WorkerStatus
 from gpu_worker.resource_monitor import ResourceMonitor
+from gpu_worker.tablebase_prober import TablebaseProber, WdlResult
 from gpu_worker.uci_bridge import AsyncUciBridge
 from gpu_worker.opening_book import OpeningBook
 
@@ -34,6 +35,12 @@ class GPUAnalysisWorker:
         self._bridge = self._bridge_factory(config)
         self._monitor = resource_monitor or ResourceMonitor()
         self._opening_book = opening_book
+        # Syzygy tablebase prover for 7-piece-and-fewer endgames.
+        self._tablebase_prober = TablebaseProber(
+            local_path=getattr(config, "syzygy_tablebase_path", None),
+            remote_url=getattr(config, "syzygy_remote_url", None),
+            config=config,
+        )
         # ELO-based difficulty scaling middleware; defaults to enabled.
         self._elo_middleware = elo_middleware or EloScalingMiddleware()
         self._status = WorkerStatus.IDLE
@@ -110,6 +117,33 @@ class GPUAnalysisWorker:
 
             async with self._analysis_lock:
                 self._status = WorkerStatus.BUSY
+
+                # -------------------------------------------------------
+                # Check tablebase for positions with 7 or fewer pieces.
+                # If a tablebase hit is found, return WDL/DTZ metrics
+                # immediately, bypassing the engine search.
+                # -------------------------------------------------------
+                board = chess.Board(request.fen)
+                if self._tablebase_prober and self._tablebase_prober._check_piece_count(board):
+                    tb_result = await self._tablebase_prober.probe(board)
+                    if tb_result is not None:
+                        gpu_stats = self._monitor.get_gpu_stats()
+                        result = AnalysisResult(
+                            request_id=request.id,
+                            best_move=chess.Move.null().uci(),
+                            evaluation=tb_result.wdl,
+                            depth=0,
+                            principal_variation=[],
+                            nodes_searched=0,
+                            time_ms=int((time.monotonic() - started_at) * 1000),
+                            gpu_utilization=_gpu_utilization_for_device(
+                                gpu_stats, self.config.gpu.device_id
+                            ),
+                            is_tablebase_move=True,
+                            wdl_result=tb_result,
+                        )
+                        self._analyses_completed += 1
+                        return result
 
                 # -------------------------------------------------------
                 # Apply ELO-based difficulty scaling.

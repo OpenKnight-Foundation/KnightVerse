@@ -7,12 +7,13 @@ use tracing::{error, warn};
 use uuid::Uuid;
 use validator::Validate;
 
+use db::DbPool;
 use db_entity::player;
 use dto::auth::{
     AuthResponse, ErrorResponse, LoginRequest, LogoutResponse, RefreshResponse,
     RefreshTokenRequest, RegisterRequest,
 };
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use security::{JwtService, TokenService, TokenServiceError};
 use service::helper::password;
 
@@ -29,10 +30,9 @@ use service::helper::password;
 )]
 #[post("/register")]
 pub async fn register(
-    _db: web::Data<DatabaseConnection>,
+    _pool: web::Data<DbPool>,
     payload: web::Json<RegisterRequest>,
 ) -> HttpResponse {
-    // Validate input
     if let Err(errors) = payload.validate() {
         return HttpResponse::BadRequest().json(ErrorResponse {
             message: format!("Validation failed: {:?}", errors),
@@ -40,7 +40,7 @@ pub async fn register(
         });
     }
 
-    // For now, return a mock response
+    // Mock response — registration is not yet fully implemented
     HttpResponse::Created().json(AuthResponse {
         access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
         refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
@@ -52,7 +52,7 @@ pub async fn register(
     })
 }
 
-/// Login with credentials
+/// Login with credentials — player lookup goes to replica; token write goes to primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/login",
@@ -66,11 +66,10 @@ pub async fn register(
 )]
 #[post("/login")]
 pub async fn login(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     payload: web::Json<LoginRequest>,
     jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
-    // Validate input
     if let Err(errors) = payload.validate() {
         return HttpResponse::BadRequest().json(ErrorResponse {
             message: format!("Validation failed: {:?}", errors),
@@ -80,10 +79,10 @@ pub async fn login(
 
     let username = payload.username.clone();
 
-    // Look up the player and verify password
+    // READ: look up player on replica
     let player = match player::Entity::find()
         .filter(player::Column::Username.eq(&username))
-        .one(db.get_ref())
+        .one(pool.replica())
         .await
     {
         Ok(Some(p)) => p,
@@ -106,7 +105,6 @@ pub async fn login(
     let player_id = player.id;
     let user_id = (player_id.as_u128() & 0x7F_FF_FF_FF) as i32;
 
-    // Generate access token
     let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
         Ok(t) => t,
         Err(_) => {
@@ -117,15 +115,15 @@ pub async fn login(
         }
     };
 
-    // Generate refresh token
     let family_id = Uuid::new_v4();
     let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
         .unwrap_or_else(|_| "7".to_string())
         .parse::<i64>()
         .unwrap_or(7);
 
+    // WRITE: create refresh token on primary
     let refresh_token =
-        match TokenService::generate_refresh_token(db.get_ref(), user_id, family_id, refresh_ttl)
+        match TokenService::generate_refresh_token(pool.primary(), user_id, family_id, refresh_ttl)
             .await
         {
             Ok(t) => t,
@@ -138,7 +136,6 @@ pub async fn login(
             }
         };
 
-    // Build response with cookie
     let mut response = HttpResponse::Ok().json(AuthResponse {
         access_token,
         refresh_token: refresh_token.clone(),
@@ -149,10 +146,9 @@ pub async fn login(
         username,
     });
 
-    // Set HTTP-only secure cookie
     let cookie = Cookie::build("refresh_token", refresh_token)
         .http_only(true)
-        .secure(false) // Set to true in production HTTPS
+        .secure(false)
         .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(Duration::seconds(refresh_ttl as i64 * 86400))
         .finish();
@@ -161,7 +157,7 @@ pub async fn login(
     response
 }
 
-/// Refresh tokens - rotate refresh token and get new access token
+/// Refresh tokens — token verification reads from replica; new token write to primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/refresh",
@@ -174,12 +170,11 @@ pub async fn login(
 )]
 #[post("/refresh")]
 pub async fn refresh(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     req: HttpRequest,
     payload: Option<web::Json<RefreshTokenRequest>>,
     jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
-    // Extract refresh token from cookie or request body
     let refresh_token = if let Some(cookie) = req.cookie("refresh_token") {
         cookie.value().to_string()
     } else if let Some(body) = payload {
@@ -191,7 +186,6 @@ pub async fn refresh(
         });
     };
 
-    // Extract user from access token in Authorization header
     let auth_header = match req.headers().get("Authorization") {
         Some(h) => match h.to_str() {
             Ok(s) => s.to_string(),
@@ -210,7 +204,6 @@ pub async fn refresh(
         }
     };
 
-    // Extract Bearer token
     let token = match auth_header.strip_prefix("Bearer ") {
         Some(t) => t,
         None => {
@@ -221,7 +214,6 @@ pub async fn refresh(
         }
     };
 
-    // Validate access token and get user info
     let claims = match jwt_service.validate_token(token) {
         Ok(c) => c,
         Err(_) => {
@@ -232,9 +224,9 @@ pub async fn refresh(
         }
     };
 
-    // Verify refresh token and mark as used
+    // WRITE: mark refresh token as used (must go to primary for atomicity)
     let family_id = match TokenService::verify_and_mark_used(
-        db.get_ref(),
+        pool.primary(),
         &refresh_token,
         claims.user_id,
     )
@@ -262,7 +254,6 @@ pub async fn refresh(
         }
     };
 
-    // Generate new access token
     let new_access_token =
         match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
             Ok(t) => t,
@@ -274,14 +265,14 @@ pub async fn refresh(
             }
         };
 
-    // Generate new refresh token in same family
     let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
         .unwrap_or_else(|_| "7".to_string())
         .parse::<i64>()
         .unwrap_or(7);
 
+    // WRITE: generate new refresh token on primary
     let new_refresh_token = match TokenService::generate_refresh_token(
-        db.get_ref(),
+        pool.primary(),
         claims.user_id,
         family_id,
         refresh_ttl,
@@ -298,7 +289,6 @@ pub async fn refresh(
         }
     };
 
-    // Build response with new cookie
     let mut response = HttpResponse::Ok().json(RefreshResponse {
         access_token: new_access_token,
         refresh_token: new_refresh_token.clone(),
@@ -306,10 +296,9 @@ pub async fn refresh(
         expires_in: 3600,
     });
 
-    // Set new HTTP-only cookie
     let cookie = Cookie::build("refresh_token", new_refresh_token)
         .http_only(true)
-        .secure(false) // Set to true in production HTTPS
+        .secure(false)
         .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(Duration::seconds(refresh_ttl as i64 * 86400))
         .finish();
@@ -318,7 +307,7 @@ pub async fn refresh(
     response
 }
 
-/// Logout - revoke all tokens
+/// Logout — revoke all tokens on primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/logout",
@@ -330,11 +319,10 @@ pub async fn refresh(
 )]
 #[post("/logout")]
 pub async fn logout(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     req: HttpRequest,
     jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
-    // Extract user from access token
     let auth_header = match req.headers().get("Authorization") {
         Some(h) => match h.to_str() {
             Ok(s) => s.to_string(),
@@ -363,7 +351,6 @@ pub async fn logout(
         }
     };
 
-    // Validate the token and extract the actual user ID
     let claims = match jwt_service.validate_token(token) {
         Ok(c) => c,
         Err(_) => {
@@ -376,8 +363,8 @@ pub async fn logout(
 
     let user_id = claims.user_id;
 
-    // Revoke all tokens for this player
-    if let Err(e) = TokenService::revoke_player_tokens(db.get_ref(), user_id).await {
+    // WRITE: revoke tokens on primary
+    if let Err(e) = TokenService::revoke_player_tokens(pool.primary(), user_id).await {
         error!("Failed to revoke tokens: {}", e);
         return HttpResponse::InternalServerError().json(ErrorResponse {
             message: "Failed to logout".to_string(),
@@ -385,7 +372,6 @@ pub async fn logout(
         });
     }
 
-    // Clear the refresh token cookie
     let mut response = HttpResponse::Ok().json(LogoutResponse {
         message: "Logged out successfully".to_string(),
     });

@@ -32,6 +32,7 @@ const RECONNECT_TIMEOUT = 3000; // 3 seconds timeout for reconnection
 /**
  * Custom hook for managing WebSocket connection to the chess game server.
  * Handles connection, reconnection with exponential backoff, move queuing, and network state detection.
+ * Now supports horizontal load balancing and regional node discovery.
  * 
  * @param gameId - The unique identifier for the chess game, or null if no game is active
  * @returns Object containing WebSocket status, game state, and control functions
@@ -44,6 +45,8 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     setStatusState(s);
   }, []);
   const [lastOpponentMove, setLastOpponentMove] = useState<ChessMove | null>(null);
+  
+  const { getOptimalNode } = useWebSocketScaling();
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -58,7 +61,6 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
   /**
    * Clears all pending reconnection timeouts and timers.
-   * Used to prevent multiple reconnection attempts from running simultaneously.
    */
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -73,10 +75,6 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
   /**
    * Calculates the delay for the next reconnection attempt using exponential backoff with jitter.
-   * Jitter helps prevent thundering herd problem when multiple clients reconnect simultaneously.
-   * 
-   * @param attempt - The current reconnection attempt number (0-indexed)
-   * @returns The delay in milliseconds before the next reconnection attempt
    */
   const calculateReconnectDelay = useCallback((attempt: number): number => {
     const baseDelay = INITIAL_RECONNECT_DELAY * Math.pow(2, attempt);
@@ -86,25 +84,27 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   }, []);
 
   /**
-   * Creates a new WebSocket connection to the game server.
-   * Sets up event handlers for connection lifecycle, message handling, and error recovery.
+   * Creates a new WebSocket connection to the optimal game server node.
    * 
    * @param attemptReconnect - Whether this connection attempt is a reconnection
-   * @returns The created WebSocket instance, or null if connection fails
    */
-  const createWebSocket = useCallback((attemptReconnect = false): WebSocket | null => {
+  const createWebSocket = useCallback(async (attemptReconnect = false) => {
     if (!gameId) return null;
 
     try {
-      const ws = new WebSocket(`${WS_BASE}/v1/games/${gameId}/ws`);
+      // Step 1: Discover the optimal horizontal node (Regional Load Balancing)
+      const node = await getOptimalNode(gameId);
+      const wsUrl = `${node.url}/v1/games/${gameId}/ws`;
+
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       if (attemptReconnect) {
         setStatus("reconnecting");
-        console.log(`[WebSocket] Attempting reconnection for game ${gameId}`);
+        console.log(`[WebSocket] Scaling: Attempting reconnection to ${node.id} (${node.region})`);
       } else {
         setStatus("connecting");
-        console.log(`[WebSocket] Connecting to game ${gameId}`);
+        console.log(`[WebSocket] Scaling: Connecting to ${node.id} for game ${gameId}`);
       }
 
       ws.onopen = () => {
@@ -319,13 +319,21 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
   // Initialize WebSocket when gameId changes
   useEffect(() => {
+    let active = true;
     if (gameId) {
-      const ws = createWebSocket();
+      createWebSocket().then(ws => {
+        if (!active && ws) {
+          ws.close();
+        }
+      });
+
       return () => {
+        active = false;
         isManualDisconnectRef.current = true;
         clearReconnectTimeout();
-        if (ws) {
-          ws.close();
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
         }
       };
     } else {

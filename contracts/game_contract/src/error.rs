@@ -92,4 +92,6 @@ pub enum ContractError {
     InvalidConfig = 46,
     /// Treasury has insufficient funds to cover the payout
     InsufficientTreasury = 47,
+    /// Token address is not in the admin-maintained whitelist (SC-17)
+    TokenNotWhitelisted = 48,
 }

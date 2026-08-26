@@ -7,7 +7,10 @@ import { FaUser } from "react-icons/fa";
 import { RiAliensFill } from "react-icons/ri";
 import { useChessSocket } from "@/hook/useChessSocket";
 import { useMatchmaking } from "@/hook/useMatchmaking";
-import { useStockfishWASM, AnalysisResult } from "@/components/chess/StockfishWASM";
+import {
+  useStockfishWASM,
+  AnalysisResult,
+} from "@/components/chess/StockfishWASM";
 import { useRouter } from "next/navigation";
 import { useMatchmakingContext } from "@/context/matchmakingContext";
 import { getChessVariantById } from "@/lib/chessVariants";
@@ -90,7 +93,11 @@ export default function HeroChessGame({
     reconnect: reconnectSocket,
   } = useChessSocket(gameId);
 
-  const { analyzePosition, isReady: stockfishReady, isAnalyzing } = useStockfishWASM({
+  const {
+    analyzePosition,
+    isReady: stockfishReady,
+    isAnalyzing,
+  } = useStockfishWASM({
     jsBridgePath: "/assets/stockfish.js",
     defaultTimeLimit: 250,
   });
@@ -100,14 +107,19 @@ export default function HeroChessGame({
     const tempGame = new Chess();
     const history = game.history();
     for (let i = 0; i <= viewIndex; i++) {
-      try { tempGame.move(history[i]); } catch {}
+      try {
+        tempGame.move(history[i]);
+      } catch {}
     }
     return tempGame.fen();
   }, [position, viewIndex, game]);
 
-  const handleMoveClick = useCallback((index: number) => {
-    setViewIndex(index === game.history().length - 1 ? null : index);
-  }, [game]);
+  const handleMoveClick = useCallback(
+    (index: number) => {
+      setViewIndex(index === game.history().length - 1 ? null : index);
+    },
+    [game],
+  );
 
   const sendMove = useCallback(
     (from: string, to: string, promotion?: string) => {
@@ -172,7 +184,9 @@ export default function HeroChessGame({
           const from = result.bestMove.substring(0, 2);
           const to = result.bestMove.substring(2, 4);
           const promotion =
-            result.bestMove.length > 4 ? result.bestMove.substring(4, 5) : undefined;
+            result.bestMove.length > 4
+              ? result.bestMove.substring(4, 5)
+              : undefined;
           game.move({ from, to, promotion });
           setPosition(game.fen());
           setViewIndex(null);
@@ -188,7 +202,15 @@ export default function HeroChessGame({
       active = false;
       clearTimeout(timer);
     };
-  }, [position, gameMode, analyzePosition, aiPersonality, game, stockfishReady, isAnalyzing]);
+  }, [
+    position,
+    gameMode,
+    analyzePosition,
+    aiPersonality,
+    game,
+    stockfishReady,
+    isAnalyzing,
+  ]);
 
   useEffect(() => {
     if (!game.isGameOver()) return;
@@ -248,7 +270,7 @@ export default function HeroChessGame({
         if (gameMode === "online") {
           sendMove(sourceSquare, targetSquare, "q");
         }
-        
+
         setPosition(game.fen());
         setViewIndex(null);
         return true;
@@ -394,7 +416,11 @@ export default function HeroChessGame({
             </div>
 
             <div className="w-full min-w-[320px] flex flex-row items-stretch justify-center gap-2 md:gap-4">
-              <EvaluationBar evaluation={botAnalysis?.evaluation ?? null} />
+              <EvaluationBar
+                evaluation={botAnalysis?.evaluation ?? null}
+                mate={botAnalysis?.mate ?? null}
+                isFlipped={false}
+              />
               <div className="w-full">
                 <ErrorBoundary componentName="Chessboard">
                   <ChessboardComponent
@@ -432,10 +458,10 @@ export default function HeroChessGame({
           </div>
 
           <div className="w-full max-w-[280px] order-3 flex justify-center mt-4 lg:mt-0">
-            <MoveHistory 
-              history={game.history()} 
-              onMoveClick={handleMoveClick} 
-              currentMoveIndex={viewIndex ?? game.history().length - 1} 
+            <MoveHistory
+              history={game.history()}
+              onMoveClick={handleMoveClick}
+              currentMoveIndex={viewIndex ?? game.history().length - 1}
             />
           </div>
 
@@ -490,9 +516,7 @@ export default function HeroChessGame({
             </div>
             <div>
               <h2 className="text-base font-bold text-white">
-                {gameMode === "online"
-                  ? onlineStatusLabel()
-                  : "Playing vs Bot"}
+                {gameMode === "online" ? onlineStatusLabel() : "Playing vs Bot"}
               </h2>
               <p className="text-xs text-cyan-100/70">
                 {selectedVariant.label} / {selectedVariant.averageGameTime}

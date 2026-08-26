@@ -1,29 +1,62 @@
 "use client";
-
 import React from "react";
+import { motion } from "framer-motion";
 
 interface EvaluationBarProps {
-  evaluation: number | null; // Pawn advantage, positive for white, negative for black
+  evaluation: number | null;
+  mate: number | null;
+  isFlipped: boolean;
 }
 
-export function EvaluationBar({ evaluation }: EvaluationBarProps) {
+export function EvaluationBar({
+  evaluation,
+  mate,
+  isFlipped,
+}: EvaluationBarProps) {
   const score = evaluation ?? 0;
-  
-  // We'll map the score so that -10 pawns = 100% black height, +10 pawns = 0% black height
-  const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
-  const blackPercentage = clamp(50 - (score / 10) * 50, 0, 100);
-  const displayScore = score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
+
+  const winningProbability = 1 / (1 + Math.pow(10, -score / 400));
+  let whitePercentage = winningProbability * 100;
+
+  if (mate !== null) {
+    whitePercentage = score > 0 ? 100 : 0;
+  }
+
+  const displayScore = mate ? `#M${Math.abs(mate)}` : (score / 100).toFixed(2);
+
+  const barHeight = mate ? 100 : whitePercentage;
+
+  const spring = {
+    type: "spring",
+    stiffness: 50,
+    damping: 15,
+  };
 
   return (
-    <div className="w-8 h-full min-h-[320px] max-h-[560px] bg-white rounded-md overflow-hidden flex flex-col border-2 border-gray-700 shadow-lg relative shrink-0">
-      <div 
-        className="w-full bg-gray-900 transition-all duration-700 ease-out"
-        style={{ height: `${blackPercentage}%` }}
+    <div
+      className={`w-10 h-full min-h-[400px] max-h-[640px] bg-gray-800 rounded-lg overflow-hidden flex shadow-lg relative ${
+        isFlipped ? "flex-col-reverse" : "flex-col"
+      }`}
+    >
+      <motion.div
+        className="w-full bg-white"
+        initial={{ height: "50%" }}
+        animate={{ height: `${barHeight}%` }}
+        transition={spring}
       />
-      
-      {/* Score Text inside the bar */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-60 hover:opacity-100 transition-opacity">
-        <span className={`text-xs font-bold px-1 py-0.5 rounded bg-black/40 backdrop-blur-sm ${blackPercentage < 50 ? 'text-gray-900 bg-white/40' : 'text-white'}`}>
+      <motion.div
+        className="w-full bg-gray-900"
+        initial={{ height: "50%" }}
+        animate={{ height: `${100 - barHeight}%` }}
+        transition={spring}
+      />
+
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <span
+          className={`text-sm font-bold px-2 py-1 rounded ${
+            whitePercentage > 50 ? "text-black" : "text-white"
+          }`}
+        >
           {displayScore}
         </span>
       </div>

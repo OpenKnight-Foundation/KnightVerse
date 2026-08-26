@@ -201,15 +201,18 @@ pub async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::DefaultHeaders::new().add(("Strict-Transport-Security", "max-age=31536000; includeSubDomains")))
             // Global middleware
             .wrap(cors)
+            .wrap(create_metricsMiddleware(metrics_collector.clone()))
             // App data
             .app_data(web::Data::from(db.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(lobby.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            .app_data(web::Data::new(metrics_collector.clone()))
             // Register your routes
             .route("/health", web::get().to(health))
             .route("/", web::get().to(greet))
+            .route("/metrics", web::get().to(metrics_endpoint))
             // Puzzle routes
             .configure(configure_puzzle_routes)
             // Player routes

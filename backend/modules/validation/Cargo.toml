@@ -1,0 +1,24 @@
+[package]
+name = "validation"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "validation"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+actix-web = "4"
+actix-ws = "0.5"
+log = "0.4"
+env_logger = "0.11"
+chess = { path = "../chess" }
+redis = { version = "0.24", features = ["tokio-comp", "json"] }
+futures-util = "0.3"
+async-trait = "0.1"
+thiserror = "1.0"

@@ -41,6 +41,8 @@ pub async fn register(
     }
 
     // For now, return a mock response
+    increment_auth_events("register", true);
+    
     HttpResponse::Created().json(AuthResponse {
         access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
         refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
@@ -110,6 +112,7 @@ pub async fn login(
     let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
         Ok(t) => t,
         Err(_) => {
+            increment_auth_events("login", false);
             return HttpResponse::InternalServerError().json(ErrorResponse {
                 message: "Failed to generate access token".to_string(),
                 code: "TOKEN_ERROR".to_string(),
@@ -158,6 +161,10 @@ pub async fn login(
         .finish();
 
     response.add_cookie(&cookie).ok();
+    
+    // Track successful login
+    increment_auth_events("login", true);
+    
     response
 }
 

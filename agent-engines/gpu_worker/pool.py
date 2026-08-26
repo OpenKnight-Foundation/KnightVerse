@@ -1,3 +1,11 @@
+"""
+Multi-Engine Consensus Evaluator — Stockfish + LCZero + Berserk ensemble.
+
+Runs chess positions through multiple engines concurrently, aggregates
+evaluation scores and candidate moves, and computes a consensus agreement
+score.  Survives individual engine crashes without failing the whole request.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,16 +20,37 @@ from multiprocessing import Process, Queue, Event
 import prometheus_client
 from prometheus_client import Counter, Gauge
 
-from gpu_worker.anomaly import BotFarmAnomalyDetector
-from gpu_worker.anomaly_logger import log_anomaly_report
-from gpu_worker.config import WorkerConfig
-from gpu_worker.models import AnalysisRequest, AnalysisResult, WorkerInfo
-from gpu_worker.worker import GPUAnalysisWorker
-from gpu_worker.opening_book import OpeningBook
-from gpu_worker.maia_worker import MaiaWorker
-from gpu_worker.maia_config import MaiaConfig
+import chess
+import chess.engine
 
-logger = logging.getLogger("KnightVerse.WorkerPool")
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ENGINES: dict[str, dict] = {
+    "stockfish": {
+        "engine_path": os.environ.get(
+            "STOCKFISH_PATH", "stockfish"
+        ),
+        "threads": int(os.environ.get("STOCKFISH_THREADS", "2")),
+        "hash_mb": int(os.environ.get("STOCKFISH_HASH_MB", "256")),
+    },
+    "lc0": {
+        "engine_path": os.environ.get("LC0_PATH", "lc0"),
+        "weights": os.environ.get("LC0_WEIGHTS", ""),
+    },
+    "berserk": {
+        "engine_path": os.environ.get("BERSERK_PATH", "stockfish"),
+        "threads": int(os.environ.get("BERSERK_THREADS", "2")),
+        "hash_mb": int(os.environ.get("BERSERK_HASH_MB", "256")),
+    },
+}
+
+DEFAULT_DEPTH = 18
+DEFAULT_TIMEOUT_S = 10.0
+ENGINE_CONNECT_TIMEOUT_S = 5.0
 
 # Prometheus Metrics for AI Worker Pool
 WORKER_COUNT = Gauge('ai_worker_pool_size', 'Number of active AI workers in the pool')
@@ -224,8 +253,8 @@ class AutoscalingWorkerPool:
             logger.error(f"Failed to remove worker at index {worker_index}: {e}")
             return False
 
-    async def submit(self, request: AnalysisRequest, opening_book: OpeningBook | None = None) -> AnalysisResult:
-        """Dispatch an analysis request to the least-loaded worker."""
+        elapsed = (time.perf_counter() - t0) * 1000
+        return self._build_consensus(fen, clean, elapsed)
 
         if not self._started:
             raise RuntimeError("worker pool has not been started")
@@ -263,27 +292,20 @@ class AutoscalingWorkerPool:
                     self._reservations[worker_index] -= 1
                     self._condition.notify_all()
 
-    async def submit_batch(self, requests: list[AnalysisRequest]) -> list[AnalysisResult]:
-        """Dispatch a batch of analysis requests to the workers."""
-
-        if not self._started:
-            raise RuntimeError("worker pool has not been started")
-
-        tasks = [self.submit(request) for request in requests]
-        return await asyncio.gather(*tasks)
-
-    async def wait_for_pending_tasks(self, timeout: float | None = None) -> None:
-        """Wait for all pending tasks to complete before shutting down."""
-        async with self._condition:
-            # Wait until all pending tasks are completed
-            await asyncio.wait_for(
-                self._condition.wait_for(
-                    lambda: all(r == 0 for r in self._reservations) and 
-                            all(r == 0 for r in self._maia_reservations)
-                ),
-                timeout=timeout
+    async def _analyse_with_engine(
+        self,
+        name: str,
+        cfg: dict,
+        board: chess.Board,
+        depth: int,
+        timeout: float,
+    ) -> EngineAnalysis:
+        """Connect to *name* engine, analyse, and return result."""
+        async with self._semaphore:
+            return await asyncio.wait_for(
+                self._run_engine(name, cfg, board, depth),
+                timeout=timeout + ENGINE_CONNECT_TIMEOUT_S,
             )
-            logger.info("All pending analysis tasks completed")
 
     async def shutdown_all(self, wait_for_pending: bool = True, timeout: float | None = 30) -> None:
         """Gracefully shut down all workers.
@@ -374,8 +396,12 @@ class AutoscalingWorkerPool:
                 idle_workers.append(i)
         return idle_workers
 
-    async def _acquire_worker(self) -> GPUAnalysisWorker:
-        """Wait until a worker has capacity and return the least-loaded one."""
+            # Parse score
+            score = analysis.get("score")
+            if score is not None:
+                score_obj = score.white() if board.turn == chess.WHITE else score.score()
+                if score_obj is not None:
+                    result.score_cp = score_obj.score(mate_score=10000)
 
         async with self._condition:
             while True:
@@ -400,8 +426,24 @@ class AutoscalingWorkerPool:
                     return worker
                 await self._condition.wait()
 
-    async def _acquire_maia_worker(self, elo: int) -> MaiaWorker:
-        """Wait until a Maia worker with the specified ELO has capacity and return it."""
+        except (FileNotFoundError, OSError) as exc:
+            result.error = f"Engine process not found: {exc}"
+            logger.warning("Engine %s not available: %s", name, exc)
+        except chess.engine.EngineTerminatedError as exc:
+            result.error = f"Engine terminated: {exc}"
+            logger.warning("Engine %s terminated: %s", name, exc)
+        except chess.engine.EngineError as exc:
+            result.error = f"Engine error: {exc}"
+            logger.warning("Engine %s error: %s", name, exc)
+        except Exception as exc:
+            result.error = f"Unexpected error: {exc}"
+            logger.exception("Engine %s unexpected failure", name)
+        finally:
+            if engine_proc is not None:
+                try:
+                    engine_proc.quit()
+                except Exception:
+                    pass
 
         async with self._condition:
             while True:

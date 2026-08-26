@@ -144,6 +144,22 @@ const TOURNAMENT_ESCROWS: Symbol = symbol_short!("TL_ESC"); // Map<u64, Tourname
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED"); // bool - whether contract is paused
 
+// Multi-sig dispute resolution (#977)
+const DISPUTE_VOTES: Symbol = symbol_short!("D_VOTE"); // Map<u64, Map<Address, DisputeVote>>
+const DISPUTE_MULTISIG: Symbol = symbol_short!("D_MS"); // Map<u64, MultiSigDispute>
+
+// Dynamic fee split (#978)
+const FEE_SPLIT_CONFIG: Symbol = symbol_short!("FS_CFG"); // FeeSplitConfig
+const FEE_SPLITS: Symbol = symbol_short!("FSPLIT"); // Map<u64, FeeSplit> (per-game splits)
+
+// Spectator tipping (#979)
+const SPECTATOR_TIPS: Symbol = symbol_short!("SP_TIP"); // Map<u64, Vec<SpectatorTip>>
+const TIP_RECIPIENTS: Symbol = symbol_short!("TP_REC"); // Map<Address, i128>
+
+// Anti-cheat security deposit (#980)
+const CHEAT_DEPOSITS: Symbol = symbol_short!("CH_DEP"); // Map<Address, CheatDeposit>
+const DEPOSIT_CONFIG: Symbol = symbol_short!("DEP_CFG"); // DepositConfig
+
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -169,6 +185,96 @@ pub struct TournamentEscrow {
     pub total_amount: i128,
     pub locked_until: u64, // ledger sequence when funds can be released
     pub released: bool,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Multi-sig dispute types (#977)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DisputeVote {
+    ForResolution,
+    AgainstResolution,
+    Abstain,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MultiSigDispute {
+    pub dispute_id: u64,
+    pub game_id: u64,
+    pub proposer: Address,
+    pub proposal: Bytes,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub votes_abstain: u32,
+    pub threshold: u32,
+    pub resolved: bool,
+    pub proposed_at: u64,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Dynamic fee split types (#978)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FeeSplitConfig {
+    pub platform_fee_bips: u32,    // Platform's base fee in basis points
+    pub creator_share_bips: u32,   // Game creator's share
+    pub winner_share_bips: u32,    // Winner's share
+    pub treasury_share_bips: u32,  // Treasury's share
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FeeSplit {
+    pub game_id: u64,
+    pub platform_amount: i128,
+    pub creator_amount: i128,
+    pub winner_amount: i128,
+    pub treasury_amount: i128,
+    pub total_fee: i128,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Spectator tipping types (#979)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SpectatorTip {
+    pub tip_id: u64,
+    pub game_id: u64,
+    pub spectator: Address,
+    pub recipient: Address, // Player being tipped
+    pub amount: i128,
+    pub timestamp: u64,
+    pub message: Option<String>,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Anti-cheat security deposit types (#980)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CheatDeposit {
+    pub player: Address,
+    pub deposit_amount: i128,
+    pub deposited_at: u64,
+    pub is_seized: bool,
+    pub seizure_reason: Option<Bytes>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DepositConfig {
+    pub min_deposit: i128,
+    pub max_deposit: i128,
+    pub seizure_threshold: u32, // Number of cheat reports to trigger seizure
+    pub refund_period: u64,     // Ledger sequences before deposit can be refunded
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -242,6 +348,26 @@ pub enum ContractError {
     BatchTooLarge = 38,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 39,
+    /// Dispute not found (#977)
+    DisputeNotFound = 40,
+    /// Already voted on this dispute (#977)
+    AlreadyVoted = 41,
+    /// Dispute threshold not met (#977)
+    ThresholdNotMet = 42,
+    /// Invalid fee split configuration (#978)
+    InvalidFeeSplit = 43,
+    /// Spectator tipping not enabled (#979)
+    TippingNotEnabled = 44,
+    /// Cannot tip yourself (#979)
+    CannotTipSelf = 45,
+    /// Deposit below minimum (#980)
+    DepositTooLow = 46,
+    /// Deposit above maximum (#980)
+    DepositTooHigh = 47,
+    /// No deposit found (#980)
+    NoDeposit = 48,
+    /// Deposit still locked (#980)
+    DepositLocked = 49,
 }
 
 #[contract]
@@ -3119,6 +3245,458 @@ impl GameContract {
             .get(&TOURNAMENT_ESCROWS)
             .ok_or(ContractError::EscrowNotFound)?;
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Multi-sig Dispute Resolution (#977)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Create a multi-sig dispute proposal
+    pub fn create_multisig_dispute(
+        env: Env,
+        game_id: u64,
+        proposer: Address,
+        proposal: Bytes,
+        threshold: u32,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+
+        let dispute_id = env
+            .storage()
+            .instance()
+            .get(&DISPUTE_COUNTER)
+            .unwrap_or(0u64)
+            + 1;
+
+        let dispute = MultiSigDispute {
+            dispute_id,
+            game_id,
+            proposer,
+            proposal,
+            votes_for: 0,
+            votes_against: 0,
+            votes_abstain: 0,
+            threshold,
+            resolved: false,
+            proposed_at: env.ledger().sequence() as u64,
+        };
+
+        let mut disputes: Map<u64, MultiSigDispute> = env
+            .storage()
+            .instance()
+            .get(&DISPUTE_MULTISIG)
+            .unwrap_or(Map::new(&env));
+        disputes.set(dispute_id, dispute);
+        env.storage().instance().set(&DISPUTE_MULTISIG, &disputes);
+        env.storage()
+            .instance()
+            .set(&DISPUTE_COUNTER, &dispute_id);
+
+        Ok(dispute_id)
+    }
+
+    /// Vote on a multi-sig dispute
+    pub fn vote_on_dispute(
+        env: Env,
+        dispute_id: u64,
+        voter: Address,
+        vote: DisputeVote,
+    ) -> Result<(), ContractError> {
+        voter.require_auth();
+
+        let mut disputes: Map<u64, MultiSigDispute> = env
+            .storage()
+            .instance()
+            .get(&DISPUTE_MULTISIG)
+            .ok_or(ContractError::DisputeNotFound)?;
+        let mut dispute = disputes
+            .get(dispute_id)
+            .ok_or(ContractError::DisputeNotFound)?;
+
+        if dispute.resolved {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        // Check if already voted
+        let mut votes: Map<Address, DisputeVote> = env
+            .storage()
+            .instance()
+            .get(&DISPUTE_VOTES)
+            .unwrap_or(Map::new(&env));
+
+        if votes.has(voter.clone()) {
+            return Err(ContractError::AlreadyVoted);
+        }
+
+        // Record vote
+        votes.set(voter, vote.clone());
+        env.storage().instance().set(&DISPUTE_VOTES, &votes);
+
+        // Update vote counts
+        match vote {
+            DisputeVote::ForResolution => dispute.votes_for += 1,
+            DisputeVote::AgainstResolution => dispute.votes_against += 1,
+            DisputeVote::Abstain => dispute.votes_abstain += 1,
+        }
+
+        // Check if threshold is met
+        if dispute.votes_for >= dispute.threshold {
+            dispute.resolved = true;
+        }
+
+        disputes.set(dispute_id, dispute);
+        env.storage().instance().set(&DISPUTE_MULTISIG, &disputes);
+
+        Ok(())
+    }
+
+    /// Get multi-sig dispute status
+    pub fn get_multisig_dispute(
+        env: Env,
+        dispute_id: u64,
+    ) -> Result<MultiSigDispute, ContractError> {
+        let disputes: Map<u64, MultiSigDispute> = env
+            .storage()
+            .instance()
+            .get(&DISPUTE_MULTISIG)
+            .ok_or(ContractError::DisputeNotFound)?;
+        disputes.get(dispute_id).ok_or(ContractError::DisputeNotFound)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Dynamic Fee Split (#978)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Initialize dynamic fee split configuration
+    pub fn initialize_fee_split(
+        env: Env,
+        platform_fee_bips: u32,
+        creator_share_bips: u32,
+        winner_share_bips: u32,
+        treasury_share_bips: u32,
+    ) {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        // Validate total is 10000 basis points
+        let total = platform_fee_bips + creator_share_bips + winner_share_bips + treasury_share_bips;
+        assert!(total == 10000, "Fee split must total 10000 basis points");
+
+        let config = FeeSplitConfig {
+            platform_fee_bips,
+            creator_share_bips,
+            winner_share_bips,
+            treasury_share_bips,
+        };
+        env.storage().instance().set(&FEE_SPLIT_CONFIG, &config);
+    }
+
+    /// Calculate fee split for a game
+    pub fn calculate_fee_split(
+        env: Env,
+        game_id: u64,
+        total_prize: i128,
+    ) -> Result<FeeSplit, ContractError> {
+        let config: FeeSplitConfig = env
+            .storage()
+            .instance()
+            .get(&FEE_SPLIT_CONFIG)
+            .ok_or(ContractError::InvalidFeeSplit)?;
+
+        let platform_amount = total_prize * config.platform_fee_bips as i128 / 10000;
+        let creator_amount = total_prize * config.creator_share_bips as i128 / 10000;
+        let winner_amount = total_prize * config.winner_share_bips as i128 / 10000;
+        let treasury_amount = total_prize - platform_amount - creator_amount - winner_amount;
+
+        let split = FeeSplit {
+            game_id,
+            platform_amount,
+            creator_amount,
+            winner_amount,
+            treasury_amount,
+            total_fee: total_prize,
+        };
+
+        // Store split for this game
+        let mut splits: Map<u64, FeeSplit> = env
+            .storage()
+            .instance()
+            .get(&FEE_SPLITS)
+            .unwrap_or(Map::new(&env));
+        splits.set(game_id, split.clone());
+        env.storage().instance().set(&FEE_SPLITS, &splits);
+
+        Ok(split)
+    }
+
+    /// Get fee split for a game
+    pub fn get_fee_split(env: Env, game_id: u64) -> Result<FeeSplit, ContractError> {
+        let splits: Map<u64, FeeSplit> = env
+            .storage()
+            .instance()
+            .get(&FEE_SPLITS)
+            .ok_or(ContractError::InvalidFeeSplit)?;
+        splits.get(game_id).ok_or(ContractError::InvalidFeeSplit)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Spectator Tipping (#979)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Allow a spectator to tip a player
+    pub fn tip_player(
+        env: Env,
+        game_id: u64,
+        spectator: Address,
+        recipient: Address,
+        amount: i128,
+        message: Option<String>,
+    ) -> Result<u64, ContractError> {
+        spectator.require_auth();
+
+        if spectator == recipient {
+            return Err(ContractError::CannotTipSelf);
+        }
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // Transfer tokens from spectator to recipient
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer(&spectator, &recipient, &amount);
+
+        // Generate tip ID
+        let tip_id = env
+            .storage()
+            .instance()
+            .get(&SPECTATOR_TIPS)
+            .unwrap_or(Map::new(&env))
+            .len() as u64
+            + 1;
+
+        let tip = SpectatorTip {
+            tip_id,
+            game_id,
+            spectator: spectator.clone(),
+            recipient: recipient.clone(),
+            amount,
+            timestamp: env.ledger().sequence() as u64,
+            message,
+        };
+
+        // Store tip
+        let mut tips: Map<u64, Vec<SpectatorTip>> = env
+            .storage()
+            .instance()
+            .get(&SPECTATOR_TIPS)
+            .unwrap_or(Map::new(&env));
+
+        let mut game_tips = tips.get(game_id).unwrap_or(Vec::new(&env));
+        game_tips.push_back(tip);
+        tips.set(game_id, game_tips);
+        env.storage().instance().set(&SPECTATOR_TIPS, &tips);
+
+        // Update recipient's total tips
+        let mut recipient_tips: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&TIP_RECIPIENTS)
+            .unwrap_or(Map::new(&env));
+        let current_tips = recipient_tips.get(recipient.clone()).unwrap_or(0);
+        recipient_tips.set(recipient, current_tips + amount);
+        env.storage().instance().set(&TIP_RECIPIENTS, &recipient_tips);
+
+        Ok(tip_id)
+    }
+
+    /// Get total tips received by a player
+    pub fn get_player_tips(env: Env, player: Address) -> i128 {
+        let tips: Map<Address, i128> = env
+            .storage()
+            .instance()
+            .get(&TIP_RECIPIENTS)
+            .unwrap_or(Map::new(&env));
+        tips.get(player).unwrap_or(0)
+    }
+
+    /// Get all tips for a game
+    pub fn get_game_tips(env: Env, game_id: u64) -> Vec<SpectatorTip> {
+        let tips: Map<u64, Vec<SpectatorTip>> = env
+            .storage()
+            .instance()
+            .get(&SPECTATOR_TIPS)
+            .unwrap_or(Map::new(&env));
+        tips.get(game_id).unwrap_or(Vec::new(&env))
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Anti-Cheat Security Deposit (#980)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[contractimpl]
+impl GameContract {
+    /// Initialize anti-cheat deposit configuration
+    pub fn initialize_deposit_config(
+        env: Env,
+        min_deposit: i128,
+        max_deposit: i128,
+        seizure_threshold: u32,
+        refund_period: u64,
+    ) {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let config = DepositConfig {
+            min_deposit,
+            max_deposit,
+            seizure_threshold,
+            refund_period,
+        };
+        env.storage().instance().set(&DEPOSIT_CONFIG, &config);
+    }
+
+    /// Deposit security funds
+    pub fn deposit_security(env: Env, player: Address, amount: i128) -> Result<(), ContractError> {
+        player.require_auth();
+
+        let config: DepositConfig = env
+            .storage()
+            .instance()
+            .get(&DEPOSIT_CONFIG)
+            .ok_or(ContractError::DepositTooLow)?;
+
+        if amount < config.min_deposit {
+            return Err(ContractError::DepositTooLow);
+        }
+        if amount > config.max_deposit {
+            return Err(ContractError::DepositTooHigh);
+        }
+
+        // Transfer deposit from player to contract
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer_from(
+            &player,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        let deposit = CheatDeposit {
+            player: player.clone(),
+            deposit_amount: amount,
+            deposited_at: env.ledger().sequence() as u64,
+            is_seized: false,
+            seizure_reason: None,
+        };
+
+        let mut deposits: Map<Address, CheatDeposit> = env
+            .storage()
+            .instance()
+            .get(&CHEAT_DEPOSITS)
+            .unwrap_or(Map::new(&env));
+        deposits.set(player, deposit);
+        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
+
+        Ok(())
+    }
+
+    /// Refund deposit after refund period
+    pub fn refund_deposit(env: Env, player: Address) -> Result<(), ContractError> {
+        player.require_auth();
+
+        let mut deposits: Map<Address, CheatDeposit> = env
+            .storage()
+            .instance()
+            .get(&CHEAT_DEPOSITS)
+            .ok_or(ContractError::NoDeposit)?;
+        let mut deposit = deposits.get(player.clone()).ok_or(ContractError::NoDeposit)?;
+
+        if deposit.is_seized {
+            return Err(ContractError::DepositLocked);
+        }
+
+        let config: DepositConfig = env
+            .storage()
+            .instance()
+            .get(&DEPOSIT_CONFIG)
+            .ok_or(ContractError::DepositTooLow)?;
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger < deposit.deposited_at + config.refund_period {
+            return Err(ContractError::DepositLocked);
+        }
+
+        // Refund deposit to player
+        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
+        token_client.transfer(
+            &env.current_contract_address(),
+            &player,
+            &deposit.deposit_amount,
+        );
+
+        // Remove deposit record
+        deposits.remove(player);
+        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
+
+        Ok(())
+    }
+
+    /// Seize deposit for cheating (admin only)
+    pub fn seize_deposit(
+        env: Env,
+        player: Address,
+        reason: Bytes,
+    ) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
+        admin.require_auth();
+
+        let mut deposits: Map<Address, CheatDeposit> = env
+            .storage()
+            .instance()
+            .get(&CHEAT_DEPOSITS)
+            .ok_or(ContractError::NoDeposit)?;
+        let mut deposit = deposits.get(player.clone()).ok_or(ContractError::NoDeposit)?;
+
+        if deposit.is_seized {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        deposit.is_seized = true;
+        deposit.seizure_reason = Some(reason);
+        deposits.set(player, deposit);
+        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
+
+        Ok(())
+    }
+
+    /// Check if a player has a security deposit
+    pub fn has_security_deposit(env: Env, player: Address) -> bool {
+        let deposits: Map<Address, CheatDeposit> = env
+            .storage()
+            .instance()
+            .get(&CHEAT_DEPOSITS)
+            .unwrap_or(Map::new(&env));
+        deposits.has(player)
+    }
+
+    /// Get deposit details
+    pub fn get_deposit(env: Env, player: Address) -> Result<CheatDeposit, ContractError> {
+        let deposits: Map<Address, CheatDeposit> = env
+            .storage()
+            .instance()
+            .get(&CHEAT_DEPOSITS)
+            .ok_or(ContractError::NoDeposit)?;
+        deposits.get(player).ok_or(ContractError::NoDeposit)
     }
 }
 

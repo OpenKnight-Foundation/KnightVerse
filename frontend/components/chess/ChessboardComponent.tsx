@@ -12,15 +12,29 @@ import { useBoardTheme } from "@/context/ThemeContext";
 import { Chess } from "chess.js";
 
 function parseFen(fen: string): (string | null)[][] {
-  const board = new Chess(fen);
-  return board.board().map((row) =>
-    row.map((cell) => {
-      if (!cell) return null;
-      const color = cell.color === "w" ? "w" : "b";
-      const piece = cell.type.toUpperCase();
-      return `${color}${piece}`;
-    }),
-  );
+  const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const validFen = !fen || fen === "start" ? START_FEN : fen;
+  try {
+    const board = new Chess(validFen);
+    return board.board().map((row) =>
+      row.map((cell) => {
+        if (!cell) return null;
+        const color = cell.color === "w" ? "w" : "b";
+        const piece = cell.type.toUpperCase();
+        return `${color}${piece}`;
+      }),
+    );
+  } catch {
+    const board = new Chess(START_FEN);
+    return board.board().map((row) =>
+      row.map((cell) => {
+        if (!cell) return null;
+        const color = cell.color === "w" ? "w" : "b";
+        const piece = cell.type.toUpperCase();
+        return `${color}${piece}`;
+      }),
+    );
+  }
 }
 
 function formatPieceName(piece: string): string {

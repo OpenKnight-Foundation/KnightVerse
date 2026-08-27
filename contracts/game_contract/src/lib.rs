@@ -3851,15 +3851,11 @@ escrows.set(escrow_id, escrow);
             .ok_or(ContractError::EscrowNotFound)?;
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
     }
-}
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Puzzle Bounty Proofs (#982)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a new puzzle bounty
     pub fn create_puzzle_bounty(
         env: Env,
@@ -3974,14 +3970,11 @@ impl GameContract {
             .ok_or(ContractError::BountyNotFound)?;
         bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Time-Decay Penalties (#986)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize decay configuration
     pub fn initialize_decay_config(
         env: Env,
@@ -4109,14 +4102,11 @@ impl GameContract {
 
         Ok(())
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Token-Gated VIP (#987)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize VIP configuration
     pub fn initialize_vip_config(
         env: Env,
@@ -4220,14 +4210,11 @@ impl GameContract {
             VipTier::None => 0,
         }
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Soulbound Trophies (#994)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Award a soulbound trophy to a player (admin only)
     pub fn award_trophy(
         env: Env,
@@ -4333,14 +4320,11 @@ impl GameContract {
         // Soulbound tokens cannot be transferred
         Err(ContractError::NotTrophyOwner)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig Dispute Resolution (#977)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a multi-sig dispute proposal
     pub fn create_multisig_dispute(
         env: Env,
@@ -4452,14 +4436,11 @@ impl GameContract {
             .ok_or(ContractError::DisputeNotFound)?;
         disputes.get(dispute_id).ok_or(ContractError::DisputeNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Dynamic Fee Split (#978)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize dynamic fee split configuration
     pub fn initialize_fee_split(
         env: Env,
@@ -4531,14 +4512,11 @@ impl GameContract {
             .ok_or(ContractError::InvalidFeeSplit)?;
         splits.get(game_id).ok_or(ContractError::InvalidFeeSplit)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Spectator Tipping (#979)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Allow a spectator to tip a player
     pub fn tip_player(
         env: Env,
@@ -4625,14 +4603,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         tips.get(game_id).unwrap_or(Vec::new(&env))
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Anti-Cheat Security Deposit (#980)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize anti-cheat deposit configuration
     pub fn initialize_deposit_config(
         env: Env,
@@ -4785,14 +4760,11 @@ impl GameContract {
             .ok_or(ContractError::NoDeposit)?;
         deposits.get(player).ok_or(ContractError::NoDeposit)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Nonce Replay Protection (#983)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Get the next valid nonce for an address
     pub fn get_next_nonce(env: Env, address: Address) -> u64 {
         let nonces: Map<Address, u64> = env
@@ -4850,14 +4822,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         used.get((address, nonce)).unwrap_or(false)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Guild Escrow Splits (#984)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a guild
     pub fn create_guild(
         env: Env,
@@ -5035,14 +5004,11 @@ impl GameContract {
             .ok_or(ContractError::GuildNotFound)?;
         guilds.get(guild_id).ok_or(ContractError::GuildNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Royalty Enforcement (#991)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize royalty configuration
     pub fn initialize_royalty_config(
         env: Env,
@@ -5149,14 +5115,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         payments.get(game_id).unwrap_or(Vec::new(&env))
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // AI Agent Fusion (#992)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create an AI agent
     pub fn create_ai_agent(
         env: Env,
@@ -5303,14 +5266,11 @@ impl GameContract {
             .ok_or(ContractError::AgentNotFound)?;
         fusions.get(fusion_id).ok_or(ContractError::AgentNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // DAO Treasury (#981)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Deposit funds into DAO treasury
     pub fn deposit_to_dao(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
         from.require_auth();
@@ -5520,14 +5480,11 @@ impl GameContract {
     pub fn get_dao_treasury(env: Env) -> i128 {
         env.storage().instance().get(&DAO_TREASURY).unwrap_or(0)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Seasonal Leaderboard (#985)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a new season
     pub fn create_season(
         env: Env,
@@ -5665,14 +5622,11 @@ impl GameContract {
             .ok_or(ContractError::SeasonNotFound)?;
         seasons.get(season_id).ok_or(ContractError::SeasonNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // DEX Swap Routing (#988)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a DEX swap route
     pub fn create_dex_route(
         env: Env,
@@ -5752,14 +5706,11 @@ impl GameContract {
             .ok_or(ContractError::DexRouteNotFound)?;
         routes.get(route_id).ok_or(ContractError::DexRouteNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Circuit Breaker Rollback Vote (#989)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a circuit breaker rollback vote
     pub fn create_circuit_breaker_vote(
         env: Env,

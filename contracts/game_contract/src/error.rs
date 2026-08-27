@@ -96,4 +96,8 @@ pub enum ContractError {
     TokenNotWhitelisted = 48,
     /// Player has reached the maximum number of active tournament escrows (SC-20)
     MaxActiveEscrowsExceeded = 49,
+    /// Reentrant call detected (#860)
+    ReentrantCall = 50,
+    /// Circuit breaker vote not found
+    CircuitBreakerVoteNotFound = 51,
 }

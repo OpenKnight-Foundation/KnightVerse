@@ -4,18 +4,29 @@ use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MatchType {
-    Rated,
-    Casual,
+pub enum QueueType {
+    RatedStaked { token: String, amount: u64 },
+    RatedFree,
+    CasualUnrated,
     Private,
 }
 
-impl MatchType {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StakeInfo {
+    pub token: String,
+    pub amount: u64,
+    pub escrow_signature: Option<String>,
+}
+
+impl QueueType {
     pub fn redis_key(&self) -> String {
         match self {
-            MatchType::Rated => "matchmaking:queue:rated".to_string(),
-            MatchType::Casual => "matchmaking:queue:casual".to_string(),
-            MatchType::Private => "matchmaking:invites".to_string(),
+            QueueType::RatedStaked { token, amount } => {
+                format!("matchmaking:queue:rated_staked:{}:{}", token, amount)
+            }
+            QueueType::RatedFree => "matchmaking:queue:rated_free".to_string(),
+            QueueType::CasualUnrated => "matchmaking:queue:casual_unrated".to_string(),
+            QueueType::Private => "matchmaking:invites".to_string(),
         }
     }
 }

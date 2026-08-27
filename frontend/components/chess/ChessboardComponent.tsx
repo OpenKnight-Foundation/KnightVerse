@@ -139,6 +139,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   orientation = "white",
   lastMove,
 }) => {
+  const { preferences } = useGamePreferences();
   const [premoves, setPremoves] = useState<PreMove[]>([]);
   const premoveService = useRef(new PremoveService());
 

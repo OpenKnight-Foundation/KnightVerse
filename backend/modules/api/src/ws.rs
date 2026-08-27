@@ -12,12 +12,91 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use db_entity::game;
-use sea_orm::{DatabaseConnection, EntityTrait};
-use db_entity::game;
+use db::DbPool;
+use dto::games::GameStatus;
 
 // For Redis Pub/Sub
 // Redis pub/sub integration removed for test stability in CI environment
 use tokio::task::JoinHandle;
+use chrono::{DateTime, Utc};
+
+/// Player connection status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionStatus {
+    Connected,
+    Reconnecting,
+    Disconnected,
+}
+
+/// Player state within a game session
+#[derive(Debug, Clone)]
+pub struct PlayerConnectionState {
+    pub player_id: Uuid,
+    pub status: ConnectionStatus,
+    pub disconnected_at: Option<DateTime<Utc>>,
+    pub grace_timer: Option<JoinHandle<()>>,
+    pub addr: Option<Recipient<WsMessage>>,
+}
+
+/// Game session state tracking all players in a game
+#[derive(Debug, Clone)]
+pub struct GameSessionState {
+    pub game_id: String,
+    pub players: HashMap<Uuid, PlayerConnectionState>,
+    pub is_active: bool,
+}
+
+/// Connection state tracker actor that manages all active game sessions
+pub struct ConnectionStateTracker {
+    game_sessions: HashMap<String, GameSessionState>,
+    db_pool: Option<DbPool>,
+}
+
+/// Message to mark a player as disconnected (start grace period)
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PlayerDisconnected {
+    pub game_id: String,
+    pub player_id: Uuid,
+}
+
+/// Message to mark a player as reconnected
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PlayerReconnected {
+    pub game_id: String,
+    pub player_id: Uuid,
+    pub addr: Recipient<WsMessage>,
+}
+
+/// Message sent when grace period expires
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct GracePeriodExpired {
+    pub game_id: String,
+    pub player_id: Uuid,
+}
+
+/// Message to get full game state for syncing on reconnect
+#[derive(Message)]
+#[rtype(result = "Result<GameDisplayDTO, ApiError>")]
+pub struct GetGameState {
+    pub game_id: String,
+}
+
+/// OpponentDisconnected message sent to connected opponent with grace seconds left
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OpponentDisconnectedPayload {
+    pub grace_seconds_left: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(tag = "type", content = "payload")]
+pub enum ExtendedWsMessage {
+    Original(WsMessage),
+    OpponentDisconnected(OpponentDisconnectedPayload),
+    OpponentReconnected,
+}
 
 /// Core WebSocket message types
 #[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]

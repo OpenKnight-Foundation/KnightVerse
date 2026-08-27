@@ -517,6 +517,13 @@ impl Actor for WsSession {
         let addr = ctx.address().recipient();
         self.lobby.do_send(Connect {
             game_id: self.game_id.clone(),
+            addr: addr.clone(),
+        });
+
+        // Notify connection tracker that player reconnected/connected
+        self.connection_tracker.do_send(PlayerReconnected {
+            game_id: self.game_id.clone(),
+            player_id: self.player_id,
             addr,
         });
 

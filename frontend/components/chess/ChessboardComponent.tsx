@@ -187,23 +187,83 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   }, []);
 
   // Memoize piece image mapping - prevents recreation on every render
-  const pieceImages: Record<string, string> = useMemo(
-    () => ({
-      wP: WhitePawn,
-      wR: WhiteRook,
-      wN: WhiteKnight,
-      wB: WhiteBishop,
-      wQ: WhiteQueen,
-      wK: WhiteKing,
-      bP: BlackPawn,
-      bR: BlackRook,
-      bN: BlackKnight,
-      bB: BlackBishop,
-      bQ: BlackQueen,
-      bK: BlackKing,
-    }),
-    [],
-  );
+  const pieceImages: Record<string, string> = useMemo(() => {
+    // Piece set assets mapping
+    const pieceSetAssets: Record<string, Record<string, string>> = {
+      neo: {
+        wP: NeoWhitePawn,
+        wR: NeoWhiteRook,
+        wN: NeoWhiteKnight,
+        wB: NeoWhiteBishop,
+        wQ: NeoWhiteQueen,
+        wK: NeoWhiteKing,
+        bP: NeoBlackPawn,
+        bR: NeoBlackRook,
+        bN: NeoBlackKnight,
+        bB: NeoBlackBishop,
+        bQ: NeoBlackQueen,
+        bK: NeoBlackKing,
+      },
+      staunton: {
+        wP: StauntonWhitePawn,
+        wR: StauntonWhiteRook,
+        wN: StauntonWhiteKnight,
+        wB: StauntonWhiteBishop,
+        wQ: StauntonWhiteQueen,
+        wK: StauntonWhiteKing,
+        bP: StauntonBlackPawn,
+        bR: StauntonBlackRook,
+        bN: StauntonBlackKnight,
+        bB: StauntonBlackBishop,
+        bQ: StauntonBlackQueen,
+        bK: StauntonBlackKing,
+      },
+      alpha: {
+        wP: AlphaWhitePawn,
+        wR: AlphaWhiteRook,
+        wN: AlphaWhiteKnight,
+        wB: AlphaWhiteBishop,
+        wQ: AlphaWhiteQueen,
+        wK: AlphaWhiteKing,
+        bP: AlphaBlackPawn,
+        bR: AlphaBlackRook,
+        bN: AlphaBlackKnight,
+        bB: AlphaBlackBishop,
+        bQ: AlphaBlackQueen,
+        bK: AlphaBlackKing,
+      },
+      medieval: {
+        wP: MedievalWhitePawn,
+        wR: MedievalWhiteRook,
+        wN: MedievalWhiteKnight,
+        wB: MedievalWhiteBishop,
+        wQ: MedievalWhiteQueen,
+        wK: MedievalWhiteKing,
+        bP: MedievalBlackPawn,
+        bR: MedievalBlackRook,
+        bN: MedievalBlackKnight,
+        bB: MedievalBlackBishop,
+        bQ: MedievalBlackQueen,
+        bK: MedievalBlackKing,
+      },
+      cyberpunk: {
+        wP: CyberpunkWhitePawn,
+        wR: CyberpunkWhiteRook,
+        wN: CyberpunkWhiteKnight,
+        wB: CyberpunkWhiteBishop,
+        wQ: CyberpunkWhiteQueen,
+        wK: CyberpunkWhiteKing,
+        bP: CyberpunkBlackPawn,
+        bR: CyberpunkBlackRook,
+        bN: CyberpunkBlackKnight,
+        bB: CyberpunkBlackBishop,
+        bQ: CyberpunkBlackQueen,
+        bK: CyberpunkBlackKing,
+      },
+    };
+    
+    return pieceSetAssets[preferences.pieceSet] || pieceSetAssets.neo;
+  }, [preferences.pieceSet]);
 
   const getPieceImage = useCallback(
     (piece: string) => {

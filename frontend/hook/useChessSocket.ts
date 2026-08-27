@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { API_BASE, WS_BASE } from "@/lib/api";
+import { useWebSocketScaling } from "@/context/webSocketScalingContext";
 
 export type ChessSocketStatus =
   | "idle"

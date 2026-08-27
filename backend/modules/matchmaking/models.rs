@@ -92,8 +92,9 @@ pub struct Match {
     pub id: Uuid,
     pub player1: Player,
     pub player2: Player,
-    pub match_type: MatchType,
+    pub queue_type: QueueType,
     pub created_at: DateTime<Utc>,
+    pub stake_info: Option<StakeInfo>,
     #[serde(default)]
     pub time_control: TimeControl,
 }
@@ -103,7 +104,7 @@ pub struct QueueStatus {
     pub request_id: Uuid,
     pub position: usize,
     pub estimated_wait_time: Duration,
-    pub match_type: MatchType,
+    pub queue_type: QueueType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

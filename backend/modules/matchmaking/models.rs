@@ -119,10 +119,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_match_type_redis_key() {
-        assert_eq!(MatchType::Rated.redis_key(), "matchmaking:queue:rated");
-        assert_eq!(MatchType::Casual.redis_key(), "matchmaking:queue:casual");
-        assert_eq!(MatchType::Private.redis_key(), "matchmaking:invites");
+    fn test_queue_type_redis_key() {
+        assert_eq!(QueueType::RatedFree.redis_key(), "matchmaking:queue:rated_free");
+        assert_eq!(QueueType::CasualUnrated.redis_key(), "matchmaking:queue:casual_unrated");
+        assert_eq!(QueueType::Private.redis_key(), "matchmaking:invites");
+        assert_eq!(
+            QueueType::RatedStaked { token: "USDC".to_string(), amount: 100 }.redis_key(),
+            "matchmaking:queue:rated_staked:USDC:100"
+        );
     }
 
     #[test]
@@ -136,9 +140,10 @@ mod tests {
         let req = MatchRequest {
             id: Uuid::new_v4(),
             player,
-            match_type: MatchType::Rated,
+            queue_type: QueueType::RatedFree,
             invite_address: None,
             max_elo_diff: Some(100),
+            stake_info: None,
             time_control: TimeControl::default(),
         };
 
@@ -158,9 +163,10 @@ mod tests {
                 elo: 1200,
                 join_time: Utc::now(),
             },
-            match_type: MatchType::Private,
+            queue_type: QueueType::Private,
             invite_address: Some("GINVITEE123".to_string()),
             max_elo_diff: None,
+            stake_info: None,
             time_control: TimeControl::default(),
         };
 
@@ -179,9 +185,37 @@ mod tests {
                 elo: 800,
                 join_time: Utc::now(),
             },
-            match_type: MatchType::Casual,
+            queue_type: QueueType::CasualUnrated,
             invite_address: None,
             max_elo_diff: None,
+            stake_info: None,
+            time_control: TimeControl::default(),
+        };
+
+        let json = req.to_redis_value().expect("Should serialize");
+        let deserialized = MatchRequest::from_redis_value(&json).expect("Should deserialize");
+
+        assert_eq!(req, deserialized);
+    }
+
+    #[test]
+    fn test_staked_match_request_round_trip() {
+        let stake_info = StakeInfo {
+            token: "USDC".to_string(),
+            amount: 100,
+            escrow_signature: Some("valid_signature".to_string()),
+        };
+        let req = MatchRequest {
+            id: Uuid::new_v4(),
+            player: Player {
+                wallet_address: "GSTAKED123".to_string(),
+                elo: 1600,
+                join_time: Utc::now(),
+            },
+            queue_type: QueueType::RatedStaked { token: "USDC".to_string(), amount: 100 },
+            invite_address: None,
+            max_elo_diff: Some(150),
+            stake_info: Some(stake_info),
             time_control: TimeControl::default(),
         };
 

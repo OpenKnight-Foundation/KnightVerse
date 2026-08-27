@@ -8,10 +8,31 @@ use super::models::*;
 use super::service::MatchmakingService;
 
 #[derive(Debug, Deserialize)]
-pub struct JoinQueueRequest {
+pub struct JoinCasualQueueRequest {
     pub wallet_address: String,
     pub elo: u32,
-    pub match_type: MatchType,
+    pub invite_address: Option<String>,
+    #[serde(default)]
+    pub time_control: TimeControl,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JoinRatedFreeQueueRequest {
+    pub wallet_address: String,
+    pub elo: u32,
+    pub invite_address: Option<String>,
+    pub max_elo_diff: Option<u32>,
+    #[serde(default)]
+    pub time_control: TimeControl,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JoinRatedStakedQueueRequest {
+    pub wallet_address: String,
+    pub elo: u32,
+    pub token: String,
+    pub amount: u64,
+    pub escrow_signature: String,
     pub invite_address: Option<String>,
     pub max_elo_diff: Option<u32>,
     #[serde(default)]

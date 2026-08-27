@@ -9,6 +9,8 @@ import {
   calculateContrastRatio,
   getContrastEvaluation,
 } from "@/context/ThemeContext";
+import { useGamePreferences, PieceSet } from "@/context/GamePreferencesContext";
+import Image from "next/image";
 import {
   Palette,
   Check,
@@ -19,7 +21,31 @@ import {
   Cloud,
   Sparkles,
   Info,
+  ChevronDown,
 } from "lucide-react";
+
+// Import preview piece images
+import NeoWhiteKing from "./chess/chesspieces/neo/white-king.svg";
+import StauntonWhiteKing from "./chess/chesspieces/staunton/white-king.svg";
+import AlphaWhiteKing from "./chess/chesspieces/alpha/white-king.svg";
+import MedievalWhiteKing from "./chess/chesspieces/medieval/white-king.svg";
+import CyberpunkWhiteKing from "./chess/chesspieces/cyberpunk/white-king.svg";
+
+const PIECE_SET_PREVIEWS: Record<PieceSet, string> = {
+  neo: NeoWhiteKing,
+  staunton: StauntonWhiteKing,
+  alpha: AlphaWhiteKing,
+  medieval: MedievalWhiteKing,
+  cyberpunk: CyberpunkWhiteKing,
+};
+
+const PIECE_SETS: { id: PieceSet; label: string; description: string }[] = [
+  { id: "neo", label: "Standard Neo", description: "Modern minimalist vector pieces" },
+  { id: "staunton", label: "Staunton Classic", description: "Traditional tournament-style pieces" },
+  { id: "alpha", label: "Alpha", description: "Sleek geometric abstract design" },
+  { id: "medieval", label: "Medieval Knight", description: "Ornate historical fantasy pieces" },
+  { id: "cyberpunk", label: "Cyberpunk Glow", description: "Neon-lit futuristic aesthetic" },
+];
 
 // Sample pieces for interactive preview board (8x8 mini standard layout or demo layout)
 const PREVIEW_BOARD_SETUP: string[][] = [
@@ -58,6 +84,7 @@ export default function AppearanceSettings() {
     resetTheme,
     isSynced,
   } = useBoardTheme();
+  const { preferences, setPreference } = useGamePreferences();
 
   const [activeTab, setActiveTab] = useState<"presets" | "custom">("presets");
   const [previewSelectedSquare, setPreviewSelectedSquare] = useState<string>("6,4"); // e2

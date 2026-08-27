@@ -271,7 +271,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       const isWhite = piece.startsWith("w");
       return (
         <div
-          className="piece-container group"
+          className="piece-container group will-change-transform"
           style={{
             width: "100%",
             height: "100%",
@@ -283,7 +283,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
             cursor: "grab",
             pointerEvents: "none",
             transform: `scale(${boardWidth < 400 ? 0.7 : 0.9})`,
-            transition: "all 0.2s ease",
+            transition: "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), filter 0.15s ease",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
           }}
         >
           <div
@@ -292,11 +294,13 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               height: boardWidth < 400 ? "80%" : "90%",
               position: "relative",
               transform: "scale(1)",
-              transition: "transform 0.2s ease",
+              transition: "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)",
               aspectRatio: "1/1",
               minHeight: "40px",
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
             }}
-            className="group-hover:transform group-hover:scale-110"
+            className="group-hover:transform group-hover:scale-110 will-change-transform"
           >
             <Image
               src={pieceImages[piece]}

@@ -380,7 +380,7 @@ impl MatchmakingService {
         conn: &mut deadpool_redis::Connection,
         key: &str,
         request_id: Uuid,
-        match_type: MatchType,
+        queue_type: &QueueType,
     ) -> Result<Option<QueueStatus>, String> {
         let members: Vec<String> = conn
             .zrange(key, 0, -1)
@@ -393,8 +393,8 @@ impl MatchmakingService {
                     return Ok(Some(QueueStatus {
                         request_id,
                         position: index + 1,
-                        estimated_wait_time: self.estimate_wait_time(index, &match_type),
-                        match_type,
+                        estimated_wait_time: self.estimate_wait_time(index, queue_type),
+                        queue_type: queue_type.clone(),
                     }));
                 }
             }
@@ -653,11 +653,12 @@ impl MatchmakingService {
         Ok(None)
     }
 
-    fn estimate_wait_time(&self, position: usize, match_type: &MatchType) -> Duration {
-        match match_type {
-            MatchType::Rated => Duration::from_secs((30 + position as u64 * 15).min(300)),
-            MatchType::Casual => Duration::from_secs((15 + position as u64 * 10).min(180)),
-            MatchType::Private => DEFAULT_ESTIMATED_WAIT_TIME,
+    fn estimate_wait_time(&self, position: usize, queue_type: &QueueType) -> Duration {
+        match queue_type {
+            QueueType::RatedFree => Duration::from_secs((30 + position as u64 * 15).min(300)),
+            QueueType::CasualUnrated => Duration::from_secs((15 + position as u64 * 10).min(180)),
+            QueueType::RatedStaked { .. } => Duration::from_secs((45 + position as u64 * 20).min(400)), // Staked matches might have longer wait times
+            QueueType::Private => DEFAULT_ESTIMATED_WAIT_TIME,
         }
     }
 

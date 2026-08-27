@@ -55,18 +55,73 @@ function formatPieceName(piece: string): string {
   return pieceMap[piece] || "Unknown Piece";
 }
 
-import WhiteKing from "./chesspieces/white-king.svg";
-import WhiteQueen from "./chesspieces/white-queen.svg";
-import WhiteBishop from "./chesspieces/white-bishop.svg";
-import WhiteKnight from "./chesspieces/white-knight.svg";
-import WhiteRook from "./chesspieces/white-rook.svg";
-import WhitePawn from "./chesspieces/white-pawn.svg";
-import BlackKing from "./chesspieces/black-king.svg";
-import BlackQueen from "./chesspieces/black-queen.svg";
-import BlackBishop from "./chesspieces/black-bishop.svg";
-import BlackKnight from "./chesspieces/black-knight.svg";
-import BlackRook from "./chesspieces/black-rook.svg";
-import BlackPawn from "./chesspieces/black-pawn.svg";
+import { useGamePreferences } from "@/context/GamePreferencesContext";
+
+// Import all piece set assets
+import NeoWhiteKing from "./chesspieces/neo/white-king.svg";
+import NeoWhiteQueen from "./chesspieces/neo/white-queen.svg";
+import NeoWhiteBishop from "./chesspieces/neo/white-bishop.svg";
+import NeoWhiteKnight from "./chesspieces/neo/white-knight.svg";
+import NeoWhiteRook from "./chesspieces/neo/white-rook.svg";
+import NeoWhitePawn from "./chesspieces/neo/white-pawn.svg";
+import NeoBlackKing from "./chesspieces/neo/black-king.svg";
+import NeoBlackQueen from "./chesspieces/neo/black-queen.svg";
+import NeoBlackBishop from "./chesspieces/neo/black-bishop.svg";
+import NeoBlackKnight from "./chesspieces/neo/black-knight.svg";
+import NeoBlackRook from "./chesspieces/neo/black-rook.svg";
+import NeoBlackPawn from "./chesspieces/neo/black-pawn.svg";
+
+import StauntonWhiteKing from "./chesspieces/staunton/white-king.svg";
+import StauntonWhiteQueen from "./chesspieces/staunton/white-queen.svg";
+import StauntonWhiteBishop from "./chesspieces/staunton/white-bishop.svg";
+import StauntonWhiteKnight from "./chesspieces/staunton/white-knight.svg";
+import StauntonWhiteRook from "./chesspieces/staunton/white-rook.svg";
+import StauntonWhitePawn from "./chesspieces/staunton/white-pawn.svg";
+import StauntonBlackKing from "./chesspieces/staunton/black-king.svg";
+import StauntonBlackQueen from "./chesspieces/staunton/black-queen.svg";
+import StauntonBlackBishop from "./chesspieces/staunton/black-bishop.svg";
+import StauntonBlackKnight from "./chesspieces/staunton/black-knight.svg";
+import StauntonBlackRook from "./chesspieces/staunton/black-rook.svg";
+import StauntonBlackPawn from "./chesspieces/staunton/black-pawn.svg";
+
+import AlphaWhiteKing from "./chesspieces/alpha/white-king.svg";
+import AlphaWhiteQueen from "./chesspieces/alpha/white-queen.svg";
+import AlphaWhiteBishop from "./chesspieces/alpha/white-bishop.svg";
+import AlphaWhiteKnight from "./chesspieces/alpha/white-knight.svg";
+import AlphaWhiteRook from "./chesspieces/alpha/white-rook.svg";
+import AlphaWhitePawn from "./chesspieces/alpha/white-pawn.svg";
+import AlphaBlackKing from "./chesspieces/alpha/black-king.svg";
+import AlphaBlackQueen from "./chesspieces/alpha/black-queen.svg";
+import AlphaBlackBishop from "./chesspieces/alpha/black-bishop.svg";
+import AlphaBlackKnight from "./chesspieces/alpha/black-knight.svg";
+import AlphaBlackRook from "./chesspieces/alpha/black-rook.svg";
+import AlphaBlackPawn from "./chesspieces/alpha/black-pawn.svg";
+
+import MedievalWhiteKing from "./chesspieces/medieval/white-king.svg";
+import MedievalWhiteQueen from "./chesspieces/medieval/white-queen.svg";
+import MedievalWhiteBishop from "./chesspieces/medieval/white-bishop.svg";
+import MedievalWhiteKnight from "./chesspieces/medieval/white-knight.svg";
+import MedievalWhiteRook from "./chesspieces/medieval/white-rook.svg";
+import MedievalWhitePawn from "./chesspieces/medieval/white-pawn.svg";
+import MedievalBlackKing from "./chesspieces/medieval/black-king.svg";
+import MedievalBlackQueen from "./chesspieces/medieval/black-queen.svg";
+import MedievalBlackBishop from "./chesspieces/medieval/black-bishop.svg";
+import MedievalBlackKnight from "./chesspieces/medieval/black-knight.svg";
+import MedievalBlackRook from "./chesspieces/medieval/black-rook.svg";
+import MedievalBlackPawn from "./chesspieces/medieval/black-pawn.svg";
+
+import CyberpunkWhiteKing from "./chesspieces/cyberpunk/white-king.svg";
+import CyberpunkWhiteQueen from "./chesspieces/cyberpunk/white-queen.svg";
+import CyberpunkWhiteBishop from "./chesspieces/cyberpunk/white-bishop.svg";
+import CyberpunkWhiteKnight from "./chesspieces/cyberpunk/white-knight.svg";
+import CyberpunkWhiteRook from "./chesspieces/cyberpunk/white-rook.svg";
+import CyberpunkWhitePawn from "./chesspieces/cyberpunk/white-pawn.svg";
+import CyberpunkBlackKing from "./chesspieces/cyberpunk/black-king.svg";
+import CyberpunkBlackQueen from "./chesspieces/cyberpunk/black-queen.svg";
+import CyberpunkBlackBishop from "./chesspieces/cyberpunk/black-bishop.svg";
+import CyberpunkBlackKnight from "./chesspieces/cyberpunk/black-knight.svg";
+import CyberpunkBlackRook from "./chesspieces/cyberpunk/black-rook.svg";
+import CyberpunkBlackPawn from "./chesspieces/cyberpunk/black-pawn.svg";
 
 import { PremoveService, PreMove } from "@/services/premoveService";
 

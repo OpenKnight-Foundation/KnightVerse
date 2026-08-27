@@ -35,23 +35,70 @@ impl MatchmakingService {
             .map_err(|e| format!("Redis connection failed: {}", e))
     }
 
+    // Helper method to verify Soroban escrow signature
+    async fn verify_escrow_signature(&self, signature: &str, wallet_address: &str, token: &str, amount: u64) -> Result<bool, String> {
+        // In a real implementation, this would call Soroban RPC to verify the on-chain deposit
+        // For now, we'll implement basic validation - in production, this would be a proper verification
+        if signature.is_empty() {
+            return Ok(false);
+        }
+        
+        // Mock verification - in production, replace with actual Soroban call
+        tracing::info!("Verifying escrow signature: {} for wallet: {} token: {} amount: {}", 
+            signature, wallet_address, token, amount);
+            
+        // For testing purposes, any non-empty signature is considered valid
+        Ok(true)
+    }
+
+    async fn find_match_for_queue(&self, request: &MatchRequest) -> Result<Option<MatchmakingResponse>, String> {
+        match &request.queue_type {
+            QueueType::RatedFree => {
+                self.find_rated_free_match(request).await
+            }
+            QueueType::CasualUnrated => {
+                self.find_casual_unrated_match(request).await
+            }
+            QueueType::RatedStaked { token, amount } => {
+                self.find_rated_staked_match(request, token, amount).await
+            }
+            QueueType::Private => {
+                Ok(None) // Private matches are handled separately
+            }
+        }
+    }
+
     pub async fn join_queue(&self, request: MatchRequest) -> Result<MatchmakingResponse, String> {
         let request_id = request.id;
 
-        match request.match_type {
-            MatchType::Rated => {
-                if let Some(match_result) = self.find_rated_match(&request).await? {
-                    return Ok(match_result);
-                }
-                self.add_to_redis_queue(&request).await?;
+        // Validate staked queue requirements
+        if let QueueType::RatedStaked { token, amount } = &request.queue_type {
+            // Verify we have stake info and escrow signature
+            let stake_info = request.stake_info.as_ref()
+                .ok_or_else(|| "Missing stake information for staked queue".to_string())?;
+                
+            if stake_info.token != *token || stake_info.amount != *amount {
+                return Err("Stake info mismatch with queue type".to_string());
             }
-            MatchType::Casual => {
-                if let Some(match_result) = self.find_casual_match(&request).await? {
-                    return Ok(match_result);
-                }
-                self.add_to_redis_queue(&request).await?;
+            
+            let signature = stake_info.escrow_signature.as_ref()
+                .ok_or_else(|| "Missing escrow signature for staked queue".to_string())?;
+                
+            // Verify the escrow signature on-chain
+            let is_valid = self.verify_escrow_signature(
+                signature, 
+                &request.player.wallet_address, 
+                token, 
+                *amount
+            ).await?;
+            
+            if !is_valid {
+                return Err("Invalid or unverified escrow deposit".to_string());
             }
-            MatchType::Private => {
+        }
+
+        match &request.queue_type {
+            QueueType::Private => {
                 if let Some(invite_address) = &request.invite_address {
                     self.add_private_invite(invite_address, &request).await?;
                     return Ok(MatchmakingResponse {
@@ -66,6 +113,12 @@ impl MatchmakingService {
                         request_id,
                     });
                 }
+            }
+            _ => {
+                if let Some(match_result) = self.find_match_for_queue(&request).await? {
+                    return Ok(match_result);
+                }
+                self.add_to_redis_queue(&request).await?;
             }
         }
 

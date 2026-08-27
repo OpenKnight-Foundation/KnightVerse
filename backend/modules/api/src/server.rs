@@ -163,6 +163,9 @@ pub async fn main() -> std::io::Result<()> {
 
     // Create a shared LobbyState actor
     let lobby = LobbyState::new().start();
+    
+    // Create a shared ConnectionStateTracker actor with DB pool for game session management
+    let connection_tracker = ConnectionStateTracker::new(Some((*db_pool).clone())).start();
 
     // Load AppConfig
     let config = AppConfig::from_env();

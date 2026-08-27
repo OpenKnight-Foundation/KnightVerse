@@ -23,9 +23,11 @@ from gpu_worker.models import (
     WorkerInfo,
     WorkerStatus,
 )
+from gpu_worker.nl_agent import BlunderCoach, BlunderExplanation, explain_blunder
 from gpu_worker.nl_intent_parser import MoveGuardrail
 from gpu_worker.pool import ConsensusResult, EnsembleEvaluator
 from gpu_worker.resource_monitor import ResourceMonitor
+from gpu_worker.tactics import MotifDetection, TacticalMotif, TacticalPatternExtractor
 from gpu_worker.training_pipeline import LoRAModel, LoRATrainingPipeline
 from gpu_worker.uci_bridge import AsyncUciBridge, UciBestMove, UciBridgeError, UciInfo
 from gpu_worker.worker import GPUAnalysisWorker
@@ -36,6 +38,8 @@ __all__ = [
     "AnomalyRiskLevel",
     "AsyncUciBridge",
     "BatchEvaluator",
+    "BlunderCoach",
+    "BlunderExplanation",
     "BotFarmAnomalyDetector",
     "BotFarmDetectionConfig",
     "BotFarmEvent",
@@ -50,9 +54,13 @@ __all__ = [
     "FENTokenizer",
     "LoRAModel",
     "LoRATrainingPipeline",
+    "MotifDetection",
     "MoveGuardrail",
+    "TacticalMotif",
+    "TacticalPatternExtractor",
     "TensorEvaluationCache",
     "elo_to_engine_params",
+    "explain_blunder",
     "fen_hash",
     "GPUAnalysisWorker",
     "GPUConfig",

@@ -66,7 +66,9 @@ pub struct ErrorResponse {
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/matchmaking")
-            .route("/join", web::post().to(join_queue))
+            .route("/join-casual", web::post().to(join_casual_queue))
+            .route("/join-rated-free", web::post().to(join_rated_free_queue))
+            .route("/join-rated-staked", web::post().to(join_rated_staked_queue))
             .route("/status/{request_id}", web::get().to(get_status))
             .route("/cancel", web::post().to(cancel_request))
             .route("/accept-invite", web::post().to(accept_invite))

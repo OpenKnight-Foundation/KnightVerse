@@ -538,11 +538,13 @@ impl Actor for WsSession {
         if let Ok(reconnect_token) = self.generate_reconnect_token() {
             let reconnect_msg = WsMessage::ReconnectToken {
                 token: reconnect_token,
-                expires_in: 30,
+                expires_in: 60, // Match grace period
             };
 
             // Try to send the reconnection token
-            ctx.address().do_send(reconnect_msg);
+            if let Err(e) = ctx.address().try_send(reconnect_msg) {
+                warn!("Could not send reconnection token (connection already closed): {}", e);
+            }
             info!("Sent reconnection token for user: {}", self.username);
         } else {
             error!(
@@ -556,6 +558,13 @@ impl Actor for WsSession {
             game_id: self.game_id.clone(),
             addr,
         });
+
+        // Notify connection tracker that player disconnected - start grace period
+        self.connection_tracker.do_send(PlayerDisconnected {
+            game_id: self.game_id.clone(),
+            player_id: self.player_id,
+        });
+
         // Cancel Redis subscription task if running
         if let Some(handle) = self.redis_sub_task.take() {
             handle.abort();
@@ -611,6 +620,7 @@ pub async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
     lobby: web::Data<Addr<LobbyState>>,
+    connection_tracker: web::Data<Addr<ConnectionStateTracker>>,
 ) -> Result<HttpResponse, Error> {
     let auth_header = req
         .headers()
@@ -654,6 +664,7 @@ pub async fn ws_route(
         WsSession {
             game_id,
             lobby: lobby.get_ref().clone(),
+            connection_tracker: connection_tracker.get_ref().clone(),
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
             player_id: claims.player_id,

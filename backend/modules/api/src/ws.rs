@@ -222,6 +222,244 @@ impl Handler<Broadcast> for LobbyState {
     }
 }
 
+impl Default for ConnectionStateTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConnectionStateTracker {
+    const GRACE_PERIOD_SECONDS: u64 = 60;
+
+    pub fn new(db_pool: Option<DbPool>) -> Self {
+        ConnectionStateTracker {
+            game_sessions: HashMap::new(),
+            db_pool,
+        }
+    }
+
+    /// Get or create a game session
+    fn get_or_create_session(&mut self, game_id: String) -> &mut GameSessionState {
+        self.game_sessions.entry(game_id.clone()).or_insert_with(|| {
+            GameSessionState {
+                game_id,
+                players: HashMap::new(),
+                is_active: true,
+            }
+        })
+    }
+
+    /// Broadcast message to all other players in the game
+    fn broadcast_to_other_players(
+        &mut self,
+        session: &GameSessionState,
+        exclude_player_id: Uuid,
+        message: WsMessage,
+    ) {
+        for (player_id, player_state) in &session.players {
+            if *player_id != exclude_player_id {
+                if let Some(addr) = &player_state.addr {
+                    let _ = addr.do_send(message.clone());
+                }
+            }
+        }
+    }
+}
+
+impl Actor for ConnectionStateTracker {
+    type Context = Context<Self>;
+}
+
+/// Handle PlayerDisconnected message - start grace period timer
+impl Handler<PlayerDisconnected> for ConnectionStateTracker {
+    type Result = ();
+
+    fn handle(&mut self, msg: PlayerDisconnected, ctx: &mut Context<Self>) {
+        let session = self.get_or_create_session(msg.game_id.clone());
+        
+        // Only process if game is active and player exists
+        if !session.is_active {
+            return;
+        }
+
+        if let Some(player_state) = session.players.get_mut(&msg.player_id) {
+            // Only start timer if not already disconnected
+            if player_state.status != ConnectionStatus::Disconnected {
+                player_state.status = ConnectionStatus::Reconnecting;
+                player_state.disconnected_at = Some(Utc::now());
+                player_state.addr = None; // Clear old address
+
+                info!(
+                    "Player {} disconnected from game {}, starting {}s grace period",
+                    msg.player_id, msg.game_id, Self::GRACE_PERIOD_SECONDS
+                );
+
+                // Notify opponent that player disconnected with grace period
+                self.broadcast_to_other_players(
+                    session,
+                    msg.player_id,
+                    WsMessage::OpponentDisconnected(OpponentDisconnectedPayload {
+                        grace_seconds_left: Self::GRACE_PERIOD_SECONDS as u32,
+                    }),
+                );
+
+                // Spawn grace period timer
+                let tracker_addr = ctx.address().clone();
+                let game_id_clone = msg.game_id.clone();
+                let player_id_clone = msg.player_id;
+
+                let timer_handle = tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(Self::GRACE_PERIOD_SECONDS)).await;
+                    tracker_addr.do_send(GracePeriodExpired {
+                        game_id: game_id_clone,
+                        player_id: player_id_clone,
+                    });
+                });
+
+                player_state.grace_timer = Some(timer_handle);
+            }
+        }
+    }
+}
+
+/// Handle PlayerReconnected message - cancel timer, sync state
+impl Handler<PlayerReconnected> for ConnectionStateTracker {
+    type Result = ();
+
+    fn handle(&mut self, msg: PlayerReconnected, ctx: &mut Context<Self>) {
+        let session = match self.game_sessions.get_mut(&msg.game_id) {
+            Some(s) => s,
+            None => return,
+        };
+
+        if !session.is_active {
+            return;
+        }
+
+        if let Some(player_state) = session.players.get_mut(&msg.player_id) {
+            // Cancel any existing grace timer
+            if let Some(timer) = player_state.grace_timer.take() {
+                timer.abort();
+                info!(
+                    "Player {} reconnected to game {}, grace period cancelled",
+                    msg.player_id, msg.game_id
+                );
+            }
+
+            // Update player state
+            player_state.status = ConnectionStatus::Connected;
+            player_state.disconnected_at = None;
+            player_state.addr = Some(msg.addr.clone());
+
+            // Notify opponent that player reconnected
+            self.broadcast_to_other_players(
+                session,
+                msg.player_id,
+                WsMessage::OpponentReconnected,
+            );
+
+            // If we have a DB pool, fetch full game state to sync
+            if let Some(db_pool) = &self.db_pool {
+                let db_pool_clone = db_pool.clone();
+                let addr_clone = msg.addr.clone();
+                let game_id_uuid = match Uuid::parse_str(&msg.game_id) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
+
+                // Spawn task to fetch game state and send full sync
+                tokio::spawn(async move {
+                    match crate::service::games::GameService::get_game(&db_pool_clone, game_id_uuid).await {
+                        Ok(game_state) => {
+                            // Convert move history to Vec<String>
+                            let move_list: Vec<String> = game_state.move_history
+                                .into_iter()
+                                .map(|m| m.to_string())
+                                .collect();
+
+                            let sync_message = WsMessage::FullStateSync {
+                                fen: game_state.current_fen,
+                                move_list,
+                                white_time: game_state.white_time_remaining as u32,
+                                black_time: game_state.black_time_remaining as u32,
+                            };
+
+                            let _ = addr_clone.do_send(sync_message);
+                            info!("Sent full state sync to reconnected player {} in game {}", msg.player_id, msg.game_id);
+                        }
+                        Err(e) => {
+                            error!("Failed to fetch game state for sync: {}", e);
+                        }
+                    }
+                });
+            }
+        } else {
+            // New player joining the game
+            session.players.insert(msg.player_id, PlayerConnectionState {
+                player_id: msg.player_id,
+                status: ConnectionStatus::Connected,
+                disconnected_at: None,
+                grace_timer: None,
+                addr: Some(msg.addr),
+            });
+            info!("New player {} added to game {}", msg.player_id, msg.game_id);
+        }
+    }
+}
+
+/// Handle GracePeriodExpired message - trigger abandonment timeout
+impl Handler<GracePeriodExpired> for ConnectionStateTracker {
+    type Result = ();
+
+    fn handle(&mut self, msg: GracePeriodExpired, _: &mut Context<Self>) {
+        let session = match self.game_sessions.get_mut(&msg.game_id) {
+            Some(s) => s,
+            None => return,
+        };
+
+        if !session.is_active {
+            return;
+        }
+
+        if let Some(player_state) = session.players.get_mut(&msg.player_id) {
+            if player_state.status == ConnectionStatus::Reconnecting {
+                info!(
+                    "Grace period expired for player {} in game {}, triggering abandonment",
+                    msg.player_id, msg.game_id
+                );
+
+                // Mark player as disconnected permanently
+                player_state.status = ConnectionStatus::Disconnected;
+                player_state.grace_timer = None;
+
+                // If we have a DB pool, call abandon_game to declare timeout
+                if let Some(db_pool) = &self.db_pool {
+                    let db_pool_clone = db_pool.clone();
+                    let game_id_uuid = match Uuid::parse_str(&msg.game_id) {
+                        Ok(id) => id,
+                        Err(_) => return,
+                    };
+                    let player_id_clone = msg.player_id;
+
+                    tokio::spawn(async move {
+                        match crate::service::games::GameService::abandon_game(&db_pool_clone, game_id_uuid, player_id_clone).await {
+                            Ok(_) => {
+                                info!("Successfully marked game {} as abandoned by player {}", game_id_uuid, player_id_clone);
+                            }
+                            Err(e) => {
+                                error!("Failed to mark game as abandoned: {}", e);
+                            }
+                        }
+                    });
+
+                    // Mark game as inactive to prevent further processing
+                    session.is_active = false;
+                }
+            }
+        }
+    }
+}
+
 /// WebSocket session actor
 pub struct WsSession {
     pub game_id: String,

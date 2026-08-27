@@ -472,26 +472,34 @@ describe("MatchmakingModal — ARIA & accessibility", () => {
 describe("ChessboardComponent — ARIA structure and keyboard navigation", () => {
   const noop = vi.fn(() => false);
 
-  it("renders a grid with an accessible label", () => {
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+  it("renders a grid with an accessible label", async () => {
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const grid = screen.getByRole("grid");
     expect(grid.getAttribute("aria-label")).toMatch(/chess board/i);
   });
 
-  it("renders 64 gridcells", () => {
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+  it("renders 64 gridcells", async () => {
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     expect(screen.getAllByRole("gridcell")).toHaveLength(64);
   });
 
-  it("each gridcell has a non-empty aria-label", () => {
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+  it("each gridcell has a non-empty aria-label", async () => {
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     screen.getAllByRole("gridcell").forEach((cell) => {
       expect(cell.getAttribute("aria-label")!.length).toBeGreaterThan(0);
     });
   });
 
-  it("each gridcell has tabIndex=0", () => {
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+  it("each gridcell has tabIndex=0", async () => {
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     screen.getAllByRole("gridcell").forEach((cell) => {
       expect(cell.tabIndex).toBe(0);
     });
@@ -499,7 +507,9 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
 
   it("ArrowRight moves DOM focus to the next cell", async () => {
     const user = userEvent.setup();
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     cells[0].focus();
     await user.keyboard("{ArrowRight}");
@@ -508,7 +518,9 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
 
   it("ArrowDown moves DOM focus down a row", async () => {
     const user = userEvent.setup();
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     cells[0].focus();
     await user.keyboard("{ArrowDown}");
@@ -517,7 +529,9 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
 
   it("arrow keys do not navigate beyond board boundaries", async () => {
     const user = userEvent.setup();
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     cells[0].focus();
     await user.keyboard("{ArrowLeft}");
@@ -526,7 +540,9 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
 
   it("Space selects a piece cell", async () => {
     const user = userEvent.setup();
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     const whitePawnCell = cells[48]; // row 6, col 0 — white pawn
     whitePawnCell.focus();
@@ -536,7 +552,9 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
 
   it("Escape clears the selection", async () => {
     const user = userEvent.setup();
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     const whitePawnCell = cells[48];
     whitePawnCell.focus();
@@ -546,8 +564,10 @@ describe("ChessboardComponent — ARIA structure and keyboard navigation", () =>
     expect(whitePawnCell).toHaveAttribute("aria-selected", "false");
   });
 
-  it("piece cells include color and piece name in aria-label", () => {
-    render(<ChessboardComponent position="start" onDrop={noop} />);
+  it("piece cells include color and piece name in aria-label", async () => {
+    await act(async () => {
+      render(<ChessboardComponent position="start" onDrop={noop} />);
+    });
     const cells = screen.getAllByRole("gridcell");
     expect(cells[56].getAttribute("aria-label")).toMatch(/white rook/i); // a1
   });

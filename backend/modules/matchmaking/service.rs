@@ -399,12 +399,12 @@ impl MatchmakingService {
         Ok(None)
     }
 
-    async fn find_rated_match(
+    async fn find_rated_free_match(
         &self,
         request: &MatchRequest,
     ) -> Result<Option<MatchmakingResponse>, String> {
         let mut conn = self.get_redis_connection().await?;
-        let key = "matchmaking:queue:rated";
+        let key = QueueType::RatedFree.redis_key();
         let player_elo = request.player.elo;
 
         // Calculate expanding search window based on wait time
@@ -428,12 +428,16 @@ impl MatchmakingService {
             
             for i, member in ipairs(members) do
                 local opponent = cjson.decode(member)
+                if opponent.queue_type != "RatedFree" then
+                    goto continue
+                end
                 local elo_diff = math.abs(opponent.player.elo - player_elo)
                 
                 if elo_diff <= search_range then
                     redis.call('ZREM', key, member)
                     return member
                 end
+                ::continue::
             end
             
             return nil
@@ -454,8 +458,9 @@ impl MatchmakingService {
                     id: match_id,
                     player1: opponent_request.player,
                     player2: request.player.clone(),
-                    match_type: MatchType::Rated,
+                    queue_type: QueueType::RatedFree,
                     created_at: Utc::now(),
+                    stake_info: None,
                     time_control: request.time_control.clone(),
                 };
 
@@ -473,12 +478,12 @@ impl MatchmakingService {
         Ok(None)
     }
 
-    async fn find_casual_match(
+    async fn find_casual_unrated_match(
         &self,
         request: &MatchRequest,
     ) -> Result<Option<MatchmakingResponse>, String> {
         let mut conn = self.get_redis_connection().await?;
-        let key = "matchmaking:queue:casual";
+        let key = QueueType::CasualUnrated.redis_key();
 
         // Pop the oldest player from queue (FIFO)
         let result: Vec<(String, f64)> = conn
@@ -490,13 +495,143 @@ impl MatchmakingService {
 
         if let Some((member, _score)) = result {
             if let Ok(opponent_request) = MatchRequest::from_redis_value(&member) {
+                // Ensure we only match with other CasualUnrated players
+                if !matches!(opponent_request.queue_type, QueueType::CasualUnrated) {
+                    // Put the player back in the queue if they're not the right type
+                    let now = Utc::now();
+                    let score = now.timestamp() as f64;
+                    conn.zadd::<_, _, _, ()>(&key, &member, score)
+                        .await
+                        .map_err(|e| format!("Redis ZADD failed: {}", e))?;
+                    return Ok(None);
+                }
+
                 let match_id = Uuid::new_v4();
                 let new_match = Match {
                     id: match_id,
                     player1: opponent_request.player,
                     player2: request.player.clone(),
-                    match_type: MatchType::Casual,
+                    queue_type: QueueType::CasualUnrated,
                     created_at: Utc::now(),
+                    stake_info: None,
+                    time_control: request.time_control.clone(),
+                };
+
+                let mut active_matches = self.active_matches.lock().unwrap();
+                active_matches.insert(match_id, new_match);
+
+                return Ok(Some(MatchmakingResponse {
+                    status: "Match found".to_string(),
+                    match_id: Some(match_id),
+                    request_id: request.id,
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn find_rated_staked_match(
+        &self,
+        request: &MatchRequest,
+        token: &str,
+        amount: &u64,
+    ) -> Result<Option<MatchmakingResponse>, String> {
+        let mut conn = self.get_redis_connection().await?;
+        let queue_type = QueueType::RatedStaked { 
+            token: token.to_string(), 
+            amount: *amount 
+        };
+        let key = queue_type.redis_key();
+        let player_elo = request.player.elo;
+
+        // Calculate expanding search window based on wait time
+        let wait_seconds = Utc::now()
+            .signed_duration_since(request.player.join_time)
+            .num_seconds()
+            .max(0) as u32;
+        let expansion_steps = wait_seconds / 5;
+        let search_range = (INITIAL_ELO_RANGE
+            + expansion_steps * ELO_RANGE_INCREMENT_PER_5_SECONDS)
+            .min(MAX_ELO_RANGE);
+
+        // Lua script for atomic find-and-remove operation with expanding range
+        // This prevents race conditions where two players try to match with the same opponent
+        let lua_script = r#"
+            local key = KEYS[1]
+            local player_elo = tonumber(ARGV[1])
+            local search_range = tonumber(ARGV[2])
+            local expected_token = ARGV[3]
+            local expected_amount = tonumber(ARGV[4])
+            
+            local members = redis.call('ZRANGE', key, 0, -1)
+            
+            for i, member in ipairs(members) do
+                local opponent = cjson.decode(member)
+                -- Only match with players in the same staked queue (same token and amount)
+                if opponent.queue_type.RatedStaked 
+                    and opponent.queue_type.RatedStaked.token == expected_token
+                    and opponent.queue_type.RatedStaked.amount == expected_amount then
+                    
+                    -- Verify both players have valid escrow signatures
+                    if opponent.stake_info 
+                        and opponent.stake_info.escrow_signature ~= nil then
+                        
+                        local elo_diff = math.abs(opponent.player.elo - player_elo)
+                        if elo_diff <= search_range then
+                            redis.call('ZREM', key, member)
+                            return member
+                        end
+                    end
+                end
+            end
+            
+            return nil
+        "#;
+
+        let result: Option<String> = redis::Script::new(lua_script)
+            .key(key)
+            .arg(player_elo)
+            .arg(search_range)
+            .arg(token)
+            .arg(amount)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| format!("Redis Lua script failed: {}", e))?;
+
+        if let Some(opponent_json) = result {
+            if let Ok(opponent_request) = MatchRequest::from_redis_value(&opponent_json) {
+                // Double-check that both players have valid escrow signatures
+                let opponent_stake = opponent_request.stake_info.as_ref()
+                    .ok_or_else(|| "Opponent missing stake info".to_string())?;
+                let player_stake = request.stake_info.as_ref()
+                    .ok_or_else(|| "Player missing stake info".to_string())?;
+                
+                if opponent_stake.escrow_signature.is_none() || player_stake.escrow_signature.is_none() {
+                    // Put the player back if one doesn't have a valid signature
+                    let now = Utc::now();
+                    let score = now.timestamp() as f64;
+                    conn.zadd::<_, _, _, ()>(&key, &opponent_json, score)
+                        .await
+                        .map_err(|e| format!("Redis ZADD failed: {}", e))?;
+                    return Err("Both players must have verified escrow deposits".to_string());
+                }
+
+                let match_id = Uuid::new_v4();
+                let new_match = Match {
+                    id: match_id,
+                    player1: opponent_request.player,
+                    player2: request.player.clone(),
+                    queue_type: QueueType::RatedStaked { 
+                        token: token.to_string(), 
+                        amount: *amount 
+                    },
+                    created_at: Utc::now(),
+                    stake_info: Some(StakeInfo {
+                        token: token.to_string(),
+                        amount: *amount,
+                        escrow_signature: None, // Match stores the combined stake info
+                    }),
                     time_control: request.time_control.clone(),
                 };
 

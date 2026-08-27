@@ -464,6 +464,7 @@ impl Handler<GracePeriodExpired> for ConnectionStateTracker {
 pub struct WsSession {
     pub game_id: String,
     pub lobby: Addr<LobbyState>,
+    pub connection_tracker: Addr<ConnectionStateTracker>,
     pub hb: std::time::Instant,
     pub user_id: i32,
     pub player_id: Uuid,

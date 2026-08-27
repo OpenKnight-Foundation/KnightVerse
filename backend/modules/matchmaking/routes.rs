@@ -76,9 +76,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     );
 }
 
-async fn join_queue(
+async fn join_casual_queue(
     service: web::Data<MatchmakingService>,
-    req: web::Json<JoinQueueRequest>,
+    req: web::Json<JoinCasualQueueRequest>,
 ) -> impl Responder {
     let request_id = Uuid::new_v4();
 
@@ -91,16 +91,94 @@ async fn join_queue(
     let match_request = MatchRequest {
         id: request_id,
         player,
-        match_type: req.match_type.clone(),
+        queue_type: QueueType::CasualUnrated,
         invite_address: req.invite_address.clone(),
-        max_elo_diff: req.max_elo_diff,
+        max_elo_diff: None,
+        stake_info: None,
         time_control: req.time_control.clone(),
     };
 
     match service.join_queue(match_request).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => {
-            error!("Failed to join queue: {}", e);
+            error!("Failed to join casual queue: {}", e);
+            HttpResponse::ServiceUnavailable().json(ErrorResponse {
+                status: "error".to_string(),
+                error: "internal_error".to_string(),
+            })
+        }
+    }
+}
+
+async fn join_rated_free_queue(
+    service: web::Data<MatchmakingService>,
+    req: web::Json<JoinRatedFreeQueueRequest>,
+) -> impl Responder {
+    let request_id = Uuid::new_v4();
+
+    let player = Player {
+        wallet_address: req.wallet_address.clone(),
+        elo: req.elo,
+        join_time: Utc::now(),
+    };
+
+    let match_request = MatchRequest {
+        id: request_id,
+        player,
+        queue_type: QueueType::RatedFree,
+        invite_address: req.invite_address.clone(),
+        max_elo_diff: req.max_elo_diff,
+        stake_info: None,
+        time_control: req.time_control.clone(),
+    };
+
+    match service.join_queue(match_request).await {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(e) => {
+            error!("Failed to join rated free queue: {}", e);
+            HttpResponse::ServiceUnavailable().json(ErrorResponse {
+                status: "error".to_string(),
+                error: "internal_error".to_string(),
+            })
+        }
+    }
+}
+
+async fn join_rated_staked_queue(
+    service: web::Data<MatchmakingService>,
+    req: web::Json<JoinRatedStakedQueueRequest>,
+) -> impl Responder {
+    let request_id = Uuid::new_v4();
+
+    let player = Player {
+        wallet_address: req.wallet_address.clone(),
+        elo: req.elo,
+        join_time: Utc::now(),
+    };
+
+    let stake_info = StakeInfo {
+        token: req.token.clone(),
+        amount: req.amount,
+        escrow_signature: Some(req.escrow_signature.clone()),
+    };
+
+    let match_request = MatchRequest {
+        id: request_id,
+        player,
+        queue_type: QueueType::RatedStaked { 
+            token: req.token.clone(), 
+            amount: req.amount 
+        },
+        invite_address: req.invite_address.clone(),
+        max_elo_diff: req.max_elo_diff,
+        stake_info: Some(stake_info),
+        time_control: req.time_control.clone(),
+    };
+
+    match service.join_queue(match_request).await {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(e) => {
+            error!("Failed to join rated staked queue: {}", e);
             HttpResponse::ServiceUnavailable().json(ErrorResponse {
                 status: "error".to_string(),
                 error: "internal_error".to_string(),

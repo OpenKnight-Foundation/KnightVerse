@@ -99,6 +99,12 @@ pub enum ExtendedWsMessage {
     OpponentReconnected,
 }
 
+/// OpponentDisconnected message payload
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OpponentDisconnectedPayload {
+    pub grace_seconds_left: u32,
+}
+
 /// Core WebSocket message types
 #[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[rtype(result = "()")]
@@ -125,6 +131,14 @@ pub enum WsMessage {
     ReconnectToken {
         token: String,
         expires_in: u32,
+    },
+    OpponentDisconnected(OpponentDisconnectedPayload),
+    OpponentReconnected,
+    FullStateSync {
+        fen: String,
+        move_list: Vec<String>,
+        white_time: u32,
+        black_time: u32,
     },
 }
 

@@ -327,26 +327,26 @@ impl MatchmakingService {
     pub async fn get_queue_status(&self, request_id: Uuid) -> Result<Option<QueueStatus>, String> {
         let mut conn = self.get_redis_connection().await?;
 
-        // Check rated queue
+        // Check rated free queue
         if let Some(status) = self
             .get_status_from_queue(
                 &mut conn,
-                "matchmaking:queue:rated",
+                &QueueType::RatedFree.redis_key(),
                 request_id,
-                MatchType::Rated,
+                &QueueType::RatedFree,
             )
             .await?
         {
             return Ok(Some(status));
         }
 
-        // Check casual queue
+        // Check casual unrated queue
         if let Some(status) = self
             .get_status_from_queue(
                 &mut conn,
-                "matchmaking:queue:casual",
+                &QueueType::CasualUnrated.redis_key(),
                 request_id,
-                MatchType::Casual,
+                &QueueType::CasualUnrated,
             )
             .await?
         {

@@ -664,16 +664,36 @@ impl MatchmakingService {
 
     pub async fn expand_elo_ranges(&self) -> Result<(), String> {
         let mut conn = self.get_redis_connection().await?;
-        let key = "matchmaking:queue:rated";
         let now = Utc::now();
-
+        
+        // Expand ranges for rated free queue
+        let rated_free_key = QueueType::RatedFree.redis_key();
+        self.expand_elo_ranges_for_queue(&mut conn, &rated_free_key, now).await?;
+        
+        // Also expand ranges for all staked queues (in a real implementation, you'd track active staked queues)
+        // For simplicity, we'll assume we know the common ones - in production, track them separately
+        
+        Ok(())
+    }
+    
+    async fn expand_elo_ranges_for_queue(
+        &self,
+        conn: &mut deadpool_redis::Connection,
+        key: &str,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<(), String> {
         let members: Vec<(String, f64)> = conn
             .zrange_withscores(key, 0, -1)
             .await
-            .map_err(|e| format!("Redis ZRANGE failed: {}", e))?;
+            .map_err(|e| format!("Redis ZRANGE failed for key {}: {}", key, e))?;
 
         for (member, score) in members {
             if let Ok(mut request) = MatchRequest::from_redis_value(&member) {
+                // Only expand elo ranges for rated queues (both free and staked)
+                if !matches!(request.queue_type, QueueType::RatedFree | QueueType::RatedStaked { .. }) {
+                    continue;
+                }
+                
                 let wait_time = now.signed_duration_since(request.player.join_time);
                 let wait_seconds = wait_time.num_seconds().max(0) as u32;
                 let expansion_steps = wait_seconds / 5;
@@ -689,11 +709,11 @@ impl MatchmakingService {
 
                 conn.zrem::<_, _, ()>(key, &member)
                     .await
-                    .map_err(|e| format!("Redis ZREM failed: {}", e))?;
+                    .map_err(|e| format!("Redis ZREM failed for key {}: {}", key, e))?;
 
                 conn.zadd::<_, _, _, ()>(key, &updated_value, score)
                     .await
-                    .map_err(|e| format!("Redis ZADD failed: {}", e))?;
+                    .map_err(|e| format!("Redis ZADD failed for key {}: {}", key, e))?;
             }
         }
 

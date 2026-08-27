@@ -6,6 +6,7 @@ export type PieceInputMethod = "drag" | "click" | "both";
 export type AutoQueenMode = "always" | "prompt" | "premoves";
 export type LegalMoveDots = "enabled" | "disabled";
 export type BoardCoordinates = "inside" | "outside" | "hidden";
+export type PieceSet = "neo" | "staunton" | "alpha" | "medieval" | "cyberpunk";
 
 export interface GamePreferences {
   pieceInputMethod: PieceInputMethod;
@@ -13,6 +14,7 @@ export interface GamePreferences {
   showLegalMoveDots: LegalMoveDots;
   confirmMoveCorrespondence: boolean;
   boardCoordinates: BoardCoordinates;
+  pieceSet: PieceSet;
 }
 
 export const DEFAULT_PREFERENCES: GamePreferences = {
@@ -21,6 +23,7 @@ export const DEFAULT_PREFERENCES: GamePreferences = {
   showLegalMoveDots: "enabled",
   confirmMoveCorrespondence: false,
   boardCoordinates: "inside",
+  pieceSet: "neo",
 };
 
 const STORAGE_KEY = "knightverse_game_preferences";

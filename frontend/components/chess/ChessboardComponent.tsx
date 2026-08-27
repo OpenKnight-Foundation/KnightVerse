@@ -312,6 +312,21 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     e.preventDefault();
   }, []);
 
+  const handleDragEnd = useCallback(() => {
+    setHoveredSquare(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, targetRow: number, targetCol: number) => {
+      e.preventDefault();
+      const data = e.dataTransfer.getData("text/plain");
+      if (!data) return;
+      const [sourceRow, sourceCol] = data.split(",").map(Number);
+      attemptMove(sourceRow, sourceCol, targetRow, targetCol);
+    },
+    [attemptMove],
+  );
+
   const focusSquare = useCallback((row: number, col: number) => {
     const key = `${row},${col}`;
     setFocusedSquare(key);

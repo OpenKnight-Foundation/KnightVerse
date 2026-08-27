@@ -14,7 +14,7 @@ use crate::idempotency::IdempotencyMiddleware;
 use crate::players::{add_player, delete_player, find_player_by_id, update_player};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
-use crate::ws::{ws_route, LobbyState};
+use crate::ws::{ws_route, LobbyState, ConnectionStateTracker};
 use actix::Actor;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};

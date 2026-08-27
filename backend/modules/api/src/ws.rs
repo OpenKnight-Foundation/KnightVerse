@@ -13,7 +13,8 @@ use uuid::Uuid;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use db_entity::game;
 use db::DbPool;
-use dto::games::GameStatus;
+use dto::games::{GameStatus, GameDisplayDTO};
+use error::error::ApiError;
 
 // For Redis Pub/Sub
 // Redis pub/sub integration removed for test stability in CI environment

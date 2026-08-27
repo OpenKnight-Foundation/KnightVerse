@@ -69,9 +69,10 @@ pub struct Player {
 pub struct MatchRequest {
     pub id: Uuid,
     pub player: Player,
-    pub match_type: MatchType,
+    pub queue_type: QueueType,
     pub invite_address: Option<String>,
     pub max_elo_diff: Option<u32>,
+    pub stake_info: Option<StakeInfo>,
     #[serde(default)]
     pub time_control: TimeControl,
 }

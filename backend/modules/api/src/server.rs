@@ -194,6 +194,7 @@ pub async fn main() -> std::io::Result<()> {
         let jwt_secret = jwt_secret.clone();
         let matchmaking_service = matchmaking_service.clone();
         let puzzle_service = puzzle_service.clone();
+        let connection_tracker = connection_tracker.clone();
 
         // Configure CORS middleware with environment variables for flexibility
         let cors = {
@@ -261,6 +262,7 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::from(db_pool.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(lobby.clone()))
+            .app_data(web::Data::new(connection_tracker.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
             .app_data(web::Data::new(metrics_collector.clone()))

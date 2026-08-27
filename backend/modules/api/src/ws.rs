@@ -748,6 +748,143 @@ mod tests {
     async fn test_broadcast_to_two_clients() {
         let lobby = LobbyState::new().start();
         let (tx1, mut rx1) = unbounded_channel();
+
+    #[actix_web::test]
+    async fn test_websocket_drop_and_reconnect() {
+        // Create connection tracker with no DB pool for testing
+        let connection_tracker = ConnectionStateTracker::new(None).start();
+        
+        // Create two test players
+        let player1_id = Uuid::new_v4();
+        let player2_id = Uuid::new_v4();
+        let game_id = Uuid::new_v4().to_string();
+
+        // Channel to receive messages for player 2 (opponent)
+        let (tx2, mut rx2) = unbounded_channel();
+        let test_recipient = TestRecipient { tx: tx2 }.start();
+        let player2_addr = test_recipient.recipient();
+
+        // First, player 2 connects
+        connection_tracker.do_send(PlayerReconnected {
+            game_id: game_id.clone(),
+            player_id: player2_id,
+            addr: player2_addr,
+        });
+
+        // Player 1 connects
+        let (tx1, mut rx1) = unbounded_channel();
+        let test_recipient1 = TestRecipient { tx: tx1 }.start();
+        let player1_addr = test_recipient1.recipient();
+        
+        connection_tracker.do_send(PlayerReconnected {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+            addr: player1_addr,
+        });
+
+        // Verify both players are connected
+        let session = connection_tracker.state().game_sessions.get(&game_id).unwrap();
+        assert_eq!(session.players.get(&player1_id).unwrap().status, ConnectionStatus::Connected);
+        assert_eq!(session.players.get(&player2_id).unwrap().status, ConnectionStatus::Connected);
+
+        // Player 1 disconnects - this should start the grace period
+        connection_tracker.do_send(PlayerDisconnected {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+        });
+
+        // Player 2 should receive OpponentDisconnected message with 60s grace
+        let msg = tokio::time::timeout(std::time::Duration::from_millis(100), rx2.recv()).await;
+        assert!(msg.is_ok());
+        if let Ok(Some(WsMessage::OpponentDisconnected(payload))) = msg {
+            assert_eq!(payload.grace_seconds_left, 60);
+        } else {
+            panic!("Expected OpponentDisconnected message");
+        }
+
+        // Verify player 1 is in Reconnecting state
+        let session = connection_tracker.state().game_sessions.get(&game_id).unwrap();
+        assert_eq!(session.players.get(&player1_id).unwrap().status, ConnectionStatus::Reconnecting);
+        assert!(session.players.get(&player1_id).unwrap().grace_timer.is_some());
+
+        // Wait 10 seconds (simulate brief network drop)
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+        // Player 1 reconnects with new connection
+        let (tx1_new, mut rx1_new) = unbounded_channel();
+        let test_recipient1_new = TestRecipient { tx: tx1_new }.start();
+        let player1_new_addr = test_recipient1_new.recipient();
+        
+        connection_tracker.do_send(PlayerReconnected {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+            addr: player1_new_addr,
+        });
+
+        // Player 2 should receive OpponentReconnected message
+        let msg = tokio::time::timeout(std::time::Duration::from_millis(100), rx2.recv()).await;
+        assert!(msg.is_ok());
+        if let Ok(Some(WsMessage::OpponentReconnected)) = msg {
+            // Success - opponent was notified of reconnection
+        } else {
+            panic!("Expected OpponentReconnected message");
+        }
+
+        // Verify player 1 is back to Connected state, timer was cancelled
+        let session = connection_tracker.state().game_sessions.get(&game_id).unwrap();
+        assert_eq!(session.players.get(&player1_id).unwrap().status, ConnectionStatus::Connected);
+        assert!(session.players.get(&player1_id).unwrap().grace_timer.is_none());
+    }
+
+    #[actix_web::test]
+    async fn test_grace_period_expiry() {
+        // Create connection tracker with no DB pool for testing
+        let connection_tracker = ConnectionStateTracker::new(None).start();
+        
+        let player1_id = Uuid::new_v4();
+        let player2_id = Uuid::new_v4();
+        let game_id = Uuid::new_v4().to_string();
+
+        // Player 2 connects
+        let (tx2, mut rx2) = unbounded_channel();
+        let test_recipient = TestRecipient { tx: tx2 }.start();
+        connection_tracker.do_send(PlayerReconnected {
+            game_id: game_id.clone(),
+            player_id: player2_id,
+            addr: test_recipient.recipient(),
+        });
+
+        // Player 1 connects
+        let (tx1, _rx1) = unbounded_channel();
+        let test_recipient1 = TestRecipient { tx: tx1 }.start();
+        connection_tracker.do_send(PlayerReconnected {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+            addr: test_recipient1.recipient(),
+        });
+
+        // Player 1 disconnects
+        connection_tracker.do_send(PlayerDisconnected {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+        });
+
+        // Verify player 1 is reconnecting
+        let session = connection_tracker.state().game_sessions.get(&game_id).unwrap();
+        assert_eq!(session.players.get(&player1_id).unwrap().status, ConnectionStatus::Reconnecting);
+
+        // Wait for grace period to expire (we set it to 60s normally, but in test we can check the logic)
+        // For this test, we manually send the expiry message to simulate timer expiration
+        connection_tracker.do_send(GracePeriodExpired {
+            game_id: game_id.clone(),
+            player_id: player1_id,
+        });
+
+        // Verify player 1 is now permanently disconnected
+        let session = connection_tracker.state().game_sessions.get(&game_id).unwrap();
+        assert_eq!(session.players.get(&player1_id).unwrap().status, ConnectionStatus::Disconnected);
+        assert!(!session.is_active);
+    }
         let (tx2, mut rx2) = unbounded_channel();
         let recipient1 = TestRecipient { tx: tx1 }.start().recipient();
         let recipient2 = TestRecipient { tx: tx2 }.start().recipient();

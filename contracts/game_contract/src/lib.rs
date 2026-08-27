@@ -491,6 +491,14 @@ impl GameContract {
         }
     }
 
+    /// Internal helper — returns Err(ContractError::ContractPaused) when the contract is paused.
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            return Err(ContractError::ContractPaused);
+        }
+        Ok(())
+    }
+
     /// Gas-optimized tournament payout — single pass, no redundant map reads.
     ///
     /// Validates that `percentages` sum to exactly 100, then distributes the
@@ -2614,43 +2622,6 @@ impl GameContract {
             .get(dispute.game_id)
             .ok_or(ContractError::GameNotFound)?;
 
-        // Update dispute status
-        dispute.status = DisputeStatus::Resolved;
-        dispute.resolution = Some(resolution.clone());
-        let game_id = dispute.game_id;
-        disputes.set(dispute_id, dispute);
-        env.storage().instance().set(&DISPUTES, &disputes);
-
-        // Update game state and process payout based on arbitrator's decision
-        if let Some(ref winner_addr) = winner {
-            // Winner takes all
-            let mut games: Map<u64, Game> = env
-                .storage()
-                .instance()
-                .get(&GAMES)
-                .ok_or(ContractError::GameNotFound)?;
-
-            let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
-
-            game.state = GameState::Completed;
-            game.winner = Some(winner_addr.clone());
-            Self::process_payout(&env, &game, winner_addr)?;
-
-            games.set(game_id, game);
-            env.storage().instance().set(&GAMES, &games);
-        } else {
-            // Draw - refund both players
-            let mut games: Map<u64, Game> = env
-                .storage()
-                .instance()
-                .get(&GAMES)
-                .ok_or(ContractError::GameNotFound)?;
-
-            let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
-        if game.state != GameState::InProgress {
-            return Err(ContractError::GameAlreadyCompleted);
-        }
-
         Self::non_reentrant_enter(&env)?;
 
         match winner {
@@ -3414,6 +3385,47 @@ impl GameContract {
         admin: Address,
         player: Address,
         new_rating: i32,
+    ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        if new_rating < 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let mut profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(&env));
+
+        let mut profile = Self::initialize_player_profile(&env, &player);
+        profile.rating = new_rating;
+
+        // Update highest rating if new rating is higher
+        if new_rating > profile.highest_rating {
+            profile.highest_rating = new_rating;
+        }
+
+        profile.last_updated = env.ledger().sequence() as u64;
+
+        profiles.set(player, profile);
+        env.storage()
+            .persistent()
+            .set(&PLAYER_PROFILES, &profiles);
+
+        Ok(())
+    }
+
     // ── SEP-40 Oracle Clock Sync (#533) ───────────────────────────────────────
     //
     // SEP-40 defines a standard oracle interface on Stellar/Soroban.
@@ -3530,31 +3542,11 @@ impl GameContract {
             return Err(ContractError::Unauthorized);
         }
 
-        if new_rating < 0 {
+        if duration == 0 {
             return Err(ContractError::InvalidAmount);
         }
 
-        let mut profiles: Map<Address, PlayerRating> = env
-            .storage()
-            .persistent()
-            .get(&PLAYER_PROFILES)
-            .unwrap_or(Map::new(&env));
-
-        let mut profile = Self::initialize_player_profile(&env, &player);
-        profile.rating = new_rating;
-
-        // Update highest rating if new rating is higher
-        if new_rating > profile.highest_rating {
-            profile.highest_rating = new_rating;
-        }
-
-        profile.last_updated = env.ledger().sequence() as u64;
-
-        profiles.set(player, profile);
-        env.storage()
-            .persistent()
-            .set(&PLAYER_PROFILES, &profiles);
-
+        env.storage().instance().set(&TOURNAMENT_TIMELOCK, &duration);
         Ok(())
     }
 

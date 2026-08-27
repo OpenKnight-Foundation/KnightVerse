@@ -79,7 +79,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     setPremoves([]);
   };
 
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(typeof window !== "undefined");
   const [boardWidth] = useState(560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);

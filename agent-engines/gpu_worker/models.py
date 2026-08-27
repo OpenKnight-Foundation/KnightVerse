@@ -1,4 +1,4 @@
-from __future__import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -179,7 +179,7 @@ class CommentaryTone(str, Enum):
     EXCITED_HYPE = "excited/hype"
     DRY_SARCASTIC = "dry/sarcastic"
     ACADEMIC_GRANDMASTER = "academic_grandmaster"
-    CASUAM_BEGINNER = "casual_beginner"
+    CASUAL_BEGINNER = "casual_beginner"
 
 
 class CommentaryEventType(str, Enum):

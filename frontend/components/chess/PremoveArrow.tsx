@@ -7,9 +7,19 @@ interface PremoveArrowProps {
   color: string;
 }
 
+const squareToPercent = (sq: string) => {
+  if (!sq || sq.length < 2) return { x: 0, y: 0 };
+  const col = sq.charCodeAt(0) - 97;
+  const row = 8 - parseInt(sq[1], 10);
+  return {
+    x: (col + 0.5) * 12.5,
+    y: (row + 0.5) * 12.5,
+  };
+};
+
 const PremoveArrow: React.FC<PremoveArrowProps> = ({ from, to, color }) => {
-  const fromPos = { x: 0, y: 0 };
-  const toPos = { x: 0, y: 0 };
+  const fromPos = squareToPercent(from);
+  const toPos = squareToPercent(to);
 
   return (
     <svg

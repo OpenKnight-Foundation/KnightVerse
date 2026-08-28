@@ -26,9 +26,10 @@ async function fetchGameSummary(gameId: string): Promise<GameResultSummary | nul
 /** Generates a 1200x630 OpenGraph share card for a finished/ongoing game. */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const summary = await fetchGameSummary(params.id);
+  const { id } = await params;
+  const summary = await fetchGameSummary(id);
 
   if (!summary) {
     return new ImageResponse(

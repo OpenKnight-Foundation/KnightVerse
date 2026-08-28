@@ -196,8 +196,6 @@ export default function PuzzlesPage() {
 
   const completionRate = Math.round((completedPuzzles.size / MOCK_PUZZLES.length) * 100);
 
-  if (showRush) return <PuzzleRushView onExit={() => setShowRush(false)} />;
-
   // Chess game instance for the selected puzzle
   const [puzzleGame] = useState(() => new Chess());
   const [puzzleFen, setPuzzleFen] = useState("");
@@ -239,6 +237,8 @@ export default function PuzzlesPage() {
     },
     [selectedPuzzle, puzzleGame, currentMove, handleSolutionSubmit],
   );
+
+  if (showRush) return <PuzzleRushView onExit={() => setShowRush(false)} />;
 
   if (selectedPuzzle) {
     return (

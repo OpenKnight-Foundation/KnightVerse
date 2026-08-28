@@ -18,7 +18,7 @@ import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
-import { MoveHistory } from "@/components/chess/MoveHistory";
+import MoveTree from "@/components/chess/MoveTree";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const ChessboardComponent = dynamic(
@@ -279,7 +279,9 @@ export default function HeroChessGame({
       const currentMoveIndex = viewIndex ?? history.length - 1;
 
       if (viewIndex !== null && viewIndex < history.length - 1) {
-        const parentMove = history[currentMoveIndex];
+        const parentMove = history[currentMoveIndex] as typeof history[number] & {
+          variations?: Array<{ san: string }[]>;
+        };
         if (!parentMove.variations) {
           parentMove.variations = [];
         }
@@ -292,7 +294,7 @@ export default function HeroChessGame({
         });
 
         if (move) {
-          if (!parentMove.variations.some((v: any) => v[0].san === move.san)) {
+          if (!parentMove.variations.some((v) => v[0]?.san === move.san)) {
             parentMove.variations.push([move]);
           }
           game.load(tempGame.fen());

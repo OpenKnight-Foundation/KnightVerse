@@ -57,7 +57,21 @@ function formatPieceName(piece: string): string {
 
 import { useGamePreferences } from "@/context/GamePreferencesContext";
 
-// Import all piece set assets
+// Import standard piece set assets
+import StandardWhiteKing from "./chesspieces/white-king.svg";
+import StandardWhiteQueen from "./chesspieces/white-queen.svg";
+import StandardWhiteBishop from "./chesspieces/white-bishop.svg";
+import StandardWhiteKnight from "./chesspieces/white-knight.svg";
+import StandardWhiteRook from "./chesspieces/white-rook.svg";
+import StandardWhitePawn from "./chesspieces/white-pawn.svg";
+import StandardBlackKing from "./chesspieces/black-king.svg";
+import StandardBlackQueen from "./chesspieces/black-queen.svg";
+import StandardBlackBishop from "./chesspieces/black-bishop.svg";
+import StandardBlackKnight from "./chesspieces/black-knight.svg";
+import StandardBlackRook from "./chesspieces/black-rook.svg";
+import StandardBlackPawn from "./chesspieces/black-pawn.svg";
+
+// Import all Neo piece set assets
 import NeoWhiteKing from "./chesspieces/neo/white-king.svg";
 import NeoWhiteQueen from "./chesspieces/neo/white-queen.svg";
 import NeoWhiteBishop from "./chesspieces/neo/white-bishop.svg";
@@ -71,66 +85,30 @@ import NeoBlackKnight from "./chesspieces/neo/black-knight.svg";
 import NeoBlackRook from "./chesspieces/neo/black-rook.svg";
 import NeoBlackPawn from "./chesspieces/neo/black-pawn.svg";
 
+// Import custom King piece set assets
 import StauntonWhiteKing from "./chesspieces/staunton/white-king.svg";
-import StauntonWhiteQueen from "./chesspieces/staunton/white-queen.svg";
-import StauntonWhiteBishop from "./chesspieces/staunton/white-bishop.svg";
-import StauntonWhiteKnight from "./chesspieces/staunton/white-knight.svg";
-import StauntonWhiteRook from "./chesspieces/staunton/white-rook.svg";
-import StauntonWhitePawn from "./chesspieces/staunton/white-pawn.svg";
 import StauntonBlackKing from "./chesspieces/staunton/black-king.svg";
-import StauntonBlackQueen from "./chesspieces/staunton/black-queen.svg";
-import StauntonBlackBishop from "./chesspieces/staunton/black-bishop.svg";
-import StauntonBlackKnight from "./chesspieces/staunton/black-knight.svg";
-import StauntonBlackRook from "./chesspieces/staunton/black-rook.svg";
-import StauntonBlackPawn from "./chesspieces/staunton/black-pawn.svg";
 
 import AlphaWhiteKing from "./chesspieces/alpha/white-king.svg";
-import AlphaWhiteQueen from "./chesspieces/alpha/white-queen.svg";
-import AlphaWhiteBishop from "./chesspieces/alpha/white-bishop.svg";
-import AlphaWhiteKnight from "./chesspieces/alpha/white-knight.svg";
-import AlphaWhiteRook from "./chesspieces/alpha/white-rook.svg";
-import AlphaWhitePawn from "./chesspieces/alpha/white-pawn.svg";
 import AlphaBlackKing from "./chesspieces/alpha/black-king.svg";
-import AlphaBlackQueen from "./chesspieces/alpha/black-queen.svg";
-import AlphaBlackBishop from "./chesspieces/alpha/black-bishop.svg";
-import AlphaBlackKnight from "./chesspieces/alpha/black-knight.svg";
-import AlphaBlackRook from "./chesspieces/alpha/black-rook.svg";
-import AlphaBlackPawn from "./chesspieces/alpha/black-pawn.svg";
 
 import MedievalWhiteKing from "./chesspieces/medieval/white-king.svg";
-import MedievalWhiteQueen from "./chesspieces/medieval/white-queen.svg";
-import MedievalWhiteBishop from "./chesspieces/medieval/white-bishop.svg";
-import MedievalWhiteKnight from "./chesspieces/medieval/white-knight.svg";
-import MedievalWhiteRook from "./chesspieces/medieval/white-rook.svg";
-import MedievalWhitePawn from "./chesspieces/medieval/white-pawn.svg";
 import MedievalBlackKing from "./chesspieces/medieval/black-king.svg";
-import MedievalBlackQueen from "./chesspieces/medieval/black-queen.svg";
-import MedievalBlackBishop from "./chesspieces/medieval/black-bishop.svg";
-import MedievalBlackKnight from "./chesspieces/medieval/black-knight.svg";
-import MedievalBlackRook from "./chesspieces/medieval/black-rook.svg";
-import MedievalBlackPawn from "./chesspieces/medieval/black-pawn.svg";
 
 import CyberpunkWhiteKing from "./chesspieces/cyberpunk/white-king.svg";
-import CyberpunkWhiteQueen from "./chesspieces/cyberpunk/white-queen.svg";
-import CyberpunkWhiteBishop from "./chesspieces/cyberpunk/white-bishop.svg";
-import CyberpunkWhiteKnight from "./chesspieces/cyberpunk/white-knight.svg";
-import CyberpunkWhiteRook from "./chesspieces/cyberpunk/white-rook.svg";
-import CyberpunkWhitePawn from "./chesspieces/cyberpunk/white-pawn.svg";
 import CyberpunkBlackKing from "./chesspieces/cyberpunk/black-king.svg";
-import CyberpunkBlackQueen from "./chesspieces/cyberpunk/black-queen.svg";
-import CyberpunkBlackBishop from "./chesspieces/cyberpunk/black-bishop.svg";
-import CyberpunkBlackKnight from "./chesspieces/cyberpunk/black-knight.svg";
-import CyberpunkBlackRook from "./chesspieces/cyberpunk/black-rook.svg";
-import CyberpunkBlackPawn from "./chesspieces/cyberpunk/black-pawn.svg";
 
 import { PremoveService, PreMove } from "@/services/premoveService";
+import PremoveArrow from "./PremoveArrow";
 
 interface ChessboardComponentProps {
   position: string;
-  onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
+  onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean | Promise<boolean>;
   width?: number; // Added width as optional prop
   orientation?: "white" | "black"; // Board orientation: white = normal, black = flipped
   lastMove?: { from: string; to: string } | [string, string] | null;
+  isMyTurn?: boolean;
+  "aria-label"?: string;
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
@@ -138,6 +116,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   onDrop,
   orientation = "white",
   lastMove,
+  "aria-label": ariaLabel,
 }) => {
   const { preferences } = useGamePreferences();
   const [premoves, setPremoves] = useState<PreMove[]>([]);
@@ -189,6 +168,21 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   // Memoize piece image mapping - prevents recreation on every render
   const pieceImages: Record<string, string> = useMemo(() => {
     // Piece set assets mapping
+    const standardPieces = {
+      wP: StandardWhitePawn,
+      wR: StandardWhiteRook,
+      wN: StandardWhiteKnight,
+      wB: StandardWhiteBishop,
+      wQ: StandardWhiteQueen,
+      wK: StandardWhiteKing,
+      bP: StandardBlackPawn,
+      bR: StandardBlackRook,
+      bN: StandardBlackKnight,
+      bB: StandardBlackBishop,
+      bQ: StandardBlackQueen,
+      bK: StandardBlackKing,
+    };
+
     const pieceSetAssets: Record<string, Record<string, string>> = {
       neo: {
         wP: NeoWhitePawn,
@@ -205,59 +199,23 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         bK: NeoBlackKing,
       },
       staunton: {
-        wP: StauntonWhitePawn,
-        wR: StauntonWhiteRook,
-        wN: StauntonWhiteKnight,
-        wB: StauntonWhiteBishop,
-        wQ: StauntonWhiteQueen,
+        ...standardPieces,
         wK: StauntonWhiteKing,
-        bP: StauntonBlackPawn,
-        bR: StauntonBlackRook,
-        bN: StauntonBlackKnight,
-        bB: StauntonBlackBishop,
-        bQ: StauntonBlackQueen,
         bK: StauntonBlackKing,
       },
       alpha: {
-        wP: AlphaWhitePawn,
-        wR: AlphaWhiteRook,
-        wN: AlphaWhiteKnight,
-        wB: AlphaWhiteBishop,
-        wQ: AlphaWhiteQueen,
+        ...standardPieces,
         wK: AlphaWhiteKing,
-        bP: AlphaBlackPawn,
-        bR: AlphaBlackRook,
-        bN: AlphaBlackKnight,
-        bB: AlphaBlackBishop,
-        bQ: AlphaBlackQueen,
         bK: AlphaBlackKing,
       },
       medieval: {
-        wP: MedievalWhitePawn,
-        wR: MedievalWhiteRook,
-        wN: MedievalWhiteKnight,
-        wB: MedievalWhiteBishop,
-        wQ: MedievalWhiteQueen,
+        ...standardPieces,
         wK: MedievalWhiteKing,
-        bP: MedievalBlackPawn,
-        bR: MedievalBlackRook,
-        bN: MedievalBlackKnight,
-        bB: MedievalBlackBishop,
-        bQ: MedievalBlackQueen,
         bK: MedievalBlackKing,
       },
       cyberpunk: {
-        wP: CyberpunkWhitePawn,
-        wR: CyberpunkWhiteRook,
-        wN: CyberpunkWhiteKnight,
-        wB: CyberpunkWhiteBishop,
-        wQ: CyberpunkWhiteQueen,
+        ...standardPieces,
         wK: CyberpunkWhiteKing,
-        bP: CyberpunkBlackPawn,
-        bR: CyberpunkBlackRook,
-        bN: CyberpunkBlackKnight,
-        bB: CyberpunkBlackBishop,
-        bQ: CyberpunkBlackQueen,
         bK: CyberpunkBlackKing,
       },
     };
@@ -404,18 +362,17 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [highlightedSquares, setHighlightedSquares] = useState<
     { square: string; color: string }[]
   >([]);
-  const [arrows, setArrows] = useState<[string, string][]>([]);
 
   const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault();
     const square = `${row},${col}`;
     const color = e.shiftKey
-      ? "red"
+      ? "rgba(239, 68, 68, 0.6)"
       : e.altKey
-        ? "blue"
+        ? "rgba(59, 130, 246, 0.6)"
         : e.ctrlKey
-          ? "yellow"
-          : "green";
+          ? "rgba(234, 179, 8, 0.6)"
+          : "rgba(34, 197, 94, 0.6)";
 
     setHighlightedSquares((prev) =>
       prev.some((s) => s.square === square)
@@ -602,7 +559,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         ref={boardRef}
         className="chessboard-container w-full mx-auto relative"
         role="grid"
-        aria-label={`Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
+        aria-label={ariaLabel || `Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
         aria-roledescription="chessboard"
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -627,12 +584,14 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           transformOrigin: "center center",
         }}
       >
-        {premoves.map(() => {
-          // const fromSquare = premove.from;
-          // const toSquare = premove.to;
-          // const color = index === 0 ? "blue" : "purple";
-          // return <PremoveArrow key={index} from={fromSquare} to={toSquare} color={color} />;
-        })}
+        {premoves.map((premove, index) => (
+          <PremoveArrow
+            key={`arrow-${index}-${premove.from}-${premove.to}`}
+            from={premove.from}
+            to={premove.to}
+            color={index === 0 ? "#3b82f6" : "#a855f7"}
+          />
+        ))}
         {premoves.map((premove) => {
           const toSquare = premove.to;
           const piece = premove.piece;
@@ -715,7 +674,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 }
               }}
               style={{
-                backgroundColor: isLight ? colors.dark : colors.light,
+                backgroundColor: highlightedSquare
+                  ? highlightedSquare.color
+                  : isLight
+                  ? colors.dark
+                  : colors.light,
                 width: "100%",
                 height: "100%",
                 display: "flex",
@@ -735,6 +698,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                   : "none",
                 transition: "background-color 0.2s ease, box-shadow 0.1s ease",
               }}
+              onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
               onClick={() => handleSquareClick(rowIndex, colIndex)}
               onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
               draggable={!!piece}

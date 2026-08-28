@@ -13,6 +13,7 @@ interface WASMEngineConfig {
 export interface AnalysisResult {
   bestMove: string;
   evaluation: number | null;
+  mate?: number | null;
   depth: number;
   principalVariation: string[];
   nodesSearched: number;
@@ -56,10 +57,11 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
   const latestInfo = useRef<{
     depth: number;
     evaluation: number | null;
+    mate: number | null;
     pv: string[];
     nodes: number;
     timeMs: number;
-  }>({ depth: 0, evaluation: null, pv: [], nodes: 0, timeMs: 0 });
+  }>({ depth: 0, evaluation: null, mate: null, pv: [], nodes: 0, timeMs: 0 });
 
   // ─── Parse a UCI "info" line ───
   const parseInfoLine = useCallback((line: string) => {
@@ -74,7 +76,13 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
         case 'score': {
           const scoreType = tokens[++i]; // "cp" or "mate"
           const scoreVal = parseInt(tokens[++i], 10) || 0;
-          info.evaluation = scoreType === 'cp' ? scoreVal / 100 : (scoreVal > 0 ? 100 : -100);
+          if (scoreType === 'mate') {
+            info.mate = scoreVal;
+            info.evaluation = scoreVal > 0 ? 10000 : -10000;
+          } else {
+            info.mate = null;
+            info.evaluation = scoreVal;
+          }
           break;
         }
         case 'nodes':
@@ -106,6 +114,7 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
           resolveRef.current({
             bestMove,
             evaluation: latestInfo.current.evaluation,
+            mate: latestInfo.current.mate,
             depth: latestInfo.current.depth,
             principalVariation: latestInfo.current.pv,
             nodesSearched: latestInfo.current.nodes,
@@ -250,7 +259,7 @@ export function useStockfishWASM(config: WASMEngineConfig = {}): UseStockfishWAS
       const timeLimit = config.defaultTimeLimit || 3000;
 
       // Reset info accumulator
-      latestInfo.current = { depth: 0, evaluation: null, pv: [], nodes: 0, timeMs: 0 };
+      latestInfo.current = { depth: 0, evaluation: null, mate: null, pv: [], nodes: 0, timeMs: 0 };
 
       return new Promise((resolve, reject) => {
         // Wire abort signal so unmount immediately rejects the promise.

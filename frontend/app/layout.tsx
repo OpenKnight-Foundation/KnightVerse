@@ -40,7 +40,9 @@ export default function RootLayout({
                     <TransactionProvider>
                       <BoardThemeProvider>
                         <SoundProvider>
-                          <ClientRoot>{children}</ClientRoot>
+                          <GamePreferencesProvider>
+                            <ClientRoot>{children}</ClientRoot>
+                          </GamePreferencesProvider>
                         </SoundProvider>
                       </BoardThemeProvider>
                     </TransactionProvider>

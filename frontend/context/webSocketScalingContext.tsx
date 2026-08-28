@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { WS_BASE } from "@/lib/api";
 
 export type WebSocketNode = {
   id: string;
@@ -15,6 +16,19 @@ type WebSocketScalingContextType = {
   isScaling: boolean;
   getOptimalNode: (gameId: string) => Promise<WebSocketNode>;
   reportLoad: (nodeId: string, load: number) => void;
+};
+
+const defaultScalingContext: WebSocketScalingContextType = {
+  currentNode: null,
+  availableNodes: [],
+  isScaling: false,
+  getOptimalNode: async (gameId: string) => ({
+    id: "default-node",
+    url: WS_BASE || "ws://localhost:8000",
+    region: "default",
+    load: 0,
+  }),
+  reportLoad: () => {},
 };
 
 const WebSocketScalingContext = createContext<WebSocketScalingContextType | undefined>(undefined);
@@ -86,7 +100,7 @@ export function WebSocketScalingProvider({ children }: { children: React.ReactNo
 export const useWebSocketScaling = () => {
   const context = useContext(WebSocketScalingContext);
   if (!context) {
-    throw new Error("useWebSocketScaling must be used within a WebSocketScalingProvider");
+    return defaultScalingContext;
   }
   return context;
 };

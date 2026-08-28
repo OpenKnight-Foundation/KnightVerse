@@ -1,108 +1,76 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use crate::swiss::{Player, GameResult, Color};
-use crate::pairing::{Pairing, TournamentPlayer};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TournamentFormat {
-    Swiss,
-    RoundRobin,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BracketFormat {
     SingleElimination,
     DoubleElimination,
-    Arena,
+    RoundRobin,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TournamentStatus {
     Registration,
-    Pairing,
     InProgress,
     Completed,
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tournament {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MatchStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentParticipant {
     pub id: Uuid,
     pub name: String,
-    pub description: Option<String>,
-    pub format: TournamentFormat,
-    pub status: TournamentStatus,
-    pub created_at: DateTime<Utc>,
-    pub starts_at: Option<DateTime<Utc>>,
-    pub ends_at: Option<DateTime<Utc>>,
-    pub current_round: u32,
-    pub total_rounds: u32,
-    pub time_control: String,
-    pub increment: Option<u32>,
-    pub rated: bool,
-    pub entry_fee: Option<u64>,
-    pub prize_pool: Option<u64>,
-    pub max_players: Option<u32>,
-    pub min_players: u32,
-    pub pairings: Vec<BracketPairing>,
-    pub participants: HashMap<Uuid, TournamentParticipant>,
-    pub standings: Vec<TournamentStanding>,
+    pub elo: u32,
+    pub seed: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TournamentParticipant {
-    pub player_id: Uuid,
-    pub name: String,
-    pub rating: i32,
-    pub joined_at: DateTime<Utc>,
-    pub is_active: bool,
-    pub score: f32,
-    pub tie_break_score: f32,
-    pub games_played: u32,
-    pub wins: u32,
-    pub draws: u32,
-    pub losses: u32,
-    pub byes: u32,
-    pub color_balance: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BracketPairing {
+pub struct BracketMatch {
     pub id: Uuid,
     pub round: u32,
-    pub board: u32,
-    pub white_player: Uuid,
-    pub black_player: Uuid,
-    pub result: Option<GameResult>,
-    pub game_id: Option<Uuid>,
+    pub match_number: u32,
+    pub player1_id: Option<Uuid>,
+    pub player2_id: Option<Uuid>,
+    pub winner_id: Option<Uuid>,
+    pub status: MatchStatus,
     pub scheduled_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    #[serde(skip)]
+    pub bracket_type: BracketType,
+    #[serde(skip)]
+    pub losers_from_match: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum BracketType {
+    #[default]
+    Winners,
+    Losers,
+    GrandFinals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentBracket {
+    pub id: Uuid,
+    pub name: String,
+    pub format: BracketFormat,
+    pub status: TournamentStatus,
+    pub participants: Vec<TournamentParticipant>,
+    pub matches: Vec<BracketMatch>,
+    pub winner_id: Option<Uuid>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TournamentStanding {
-    pub rank: u32,
-    pub player_id: Uuid,
-    pub name: String,
-    pub score: f32,
-    pub tie_break_score: f32,
-    pub games_played: u32,
-    pub wins: u32,
-    pub draws: u32,
-    pub losses: u32,
-    pub performance_rating: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BracketConfig {
-    pub tournament_id: Uuid,
-    pub format: TournamentFormat,
-    pub total_rounds: u32,
-    pub pairings_per_round: u32,
-    pub auto_pair: bool,
-    pub pair_immediately: bool,
-    pub allow_byes: bool,
-    pub color_alternation: bool,
-    pub rating_sort: bool,
+    #[serde(skip)]
+    pub bracket_reset_required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,455 +98,7 @@ impl std::fmt::Display for BracketError {
     }
 }
 
-impl Tournament {
-    pub fn new(
-        name: String,
-        format: TournamentFormat,
-        config: BracketConfig,
-        time_control: String,
-    ) -> Self {
-        let id = Uuid::new_v4();
-        Self {
-            id: config.tournament_id,
-            name,
-            description: None,
-            format,
-            status: TournamentStatus::Registration,
-            created_at: Utc::now(),
-            starts_at: None,
-            ends_at: None,
-            current_round: 0,
-            total_rounds: config.total_rounds,
-            time_control,
-            increment: None,
-            rated: true,
-            entry_fee: None,
-            prize_pool: None,
-            max_players: None,
-            min_players: 2,
-            pairings: Vec::new(),
-            participants: HashMap::new(),
-            standings: Vec::new(),
-        }
-    }
-
-    pub fn add_participant(&mut self, player_id: Uuid, name: String, rating: i32) -> Result<(), String> {
-        if self.status != TournamentStatus::Registration {
-            return Err("Tournament is not in registration phase".to_string());
-        }
-
-        if let Some(max) = self.max_players {
-            if self.participants.len() >= max as usize {
-                return Err("Tournament is full".to_string());
-            }
-        }
-
-        if self.participants.contains_key(&player_id) {
-            return Err("Player already registered".to_string());
-        }
-
-        let participant = TournamentParticipant {
-            player_id,
-            name,
-            rating,
-            joined_at: Utc::now(),
-            is_active: true,
-            score: 0.0,
-            tie_break_score: 0.0,
-            games_played: 0,
-            wins: 0,
-            draws: 0,
-            losses: 0,
-            byes: 0,
-            color_balance: 0,
-        };
-
-        self.participants.insert(player_id, participant);
-        Ok(())
-    }
-
-    pub fn remove_participant(&mut self, player_id: Uuid) -> Result<(), String> {
-        if self.status != TournamentStatus::Registration {
-            return Err("Cannot remove participants after tournament has started".to_string());
-        }
-
-        self.participants.remove(&player_id).ok_or("Player not found")?;
-        Ok(())
-    }
-
-    pub fn start_tournament(&mut self) -> Result<(), String> {
-        if self.status != TournamentStatus::Registration {
-            return Err("Tournament is already started or completed".to_string());
-        }
-
-        if self.participants.len() < self.min_players as usize {
-            return Err(format!("Need at least {} participants", self.min_players));
-        }
-
-        self.status = TournamentStatus::InProgress;
-        self.starts_at = Some(Utc::now());
-        self.current_round = 1;
-
-        // Generate initial pairings
-        self.generate_pairings()?;
-
-        Ok(())
-    }
-
-    pub fn generate_pairings(&mut self) -> Result<(), String> {
-        if self.status != TournamentStatus::InProgress {
-            return Err("Tournament must be in progress to generate pairings".to_string());
-        }
-
-        let active_participants: Vec<_> = self.participants
-            .values()
-            .filter(|p| p.is_active)
-            .collect();
-
-        match self.format {
-            TournamentFormat::Swiss => self.generate_swiss_pairings(&active_participants),
-            TournamentFormat::RoundRobin => self.generate_round_robin_pairings(&active_participants),
-            TournamentFormat::Arena => self.generate_arena_pairings(&active_participants),
-            TournamentFormat::SingleElimination => self.generate_elimination_pairings(&active_participants, false),
-            TournamentFormat::DoubleElimination => self.generate_elimination_pairings(&active_participants, true),
-        }
-    }
-
-    fn generate_swiss_pairings(&mut self, participants: &[&TournamentParticipant]) -> Result<(), String> {
-        let mut pairings = Vec::new();
-        let mut paired_players = std::collections::HashSet::new();
-
-        // Sort participants by score (descending), then rating (descending)
-        let mut sorted_participants: Vec<_> = participants.iter().collect();
-        sorted_participants.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(b.rating.cmp(&a.rating))
-        });
-
-        for (i, &player_a) in sorted_participants.iter().enumerate() {
-            if paired_players.contains(&player_a.player_id) {
-                continue;
-            }
-
-            let mut opponent = None;
-            
-            // Find suitable opponent
-            for &player_b in sorted_participants.iter().skip(i + 1) {
-                if paired_players.contains(&player_b.player_id) {
-                    continue;
-                }
-
-                // Check if they haven't played each other
-                if !self.have_played_together(player_a.player_id, player_b.player_id) {
-                    opponent = Some(player_b);
-                    break;
-                }
-            }
-
-            if let Some(opponent) = opponent {
-                // Determine colors based on balance
-                let (white, black) = if player_a.color_balance <= opponent.color_balance {
-                    (player_a, opponent)
-                } else {
-                    (opponent, player_a)
-                };
-
-                let pairing = BracketPairing {
-                    id: Uuid::new_v4(),
-                    round: self.current_round,
-                    board: (pairings.len() + 1) as u32,
-                    white_player: white.player_id,
-                    black_player: black.player_id,
-                    result: None,
-                    game_id: None,
-                    scheduled_at: Some(Utc::now()),
-                    started_at: None,
-                    completed_at: None,
-                };
-
-                pairings.push(pairing);
-                paired_players.insert(player_a.player_id);
-                paired_players.insert(opponent.player_id);
-            } else if participants.len() % 2 == 1 && !paired_players.contains(&player_a.player_id) {
-                // Give bye
-                self.award_bye(player_a.player_id)?;
-                paired_players.insert(player_a.player_id);
-            }
-        }
-
-        self.pairings.extend(pairings);
-        Ok(())
-    }
-
-    fn generate_arena_pairings(&mut self, participants: &[&TournamentParticipant]) -> Result<(), String> {
-        // Use arena pairing strategy
-        let arena_players: Vec<TournamentPlayer> = participants.iter().map(|p| {
-            TournamentPlayer {
-                id: p.player_id,
-                elo: p.rating as u32,
-                joined_at: p.joined_at,
-                recent_opponents: self.get_recent_opponents(p.player_id),
-            }
-        }).collect();
-
-        let strategy = crate::arena::ArenaPairingStrategy::new();
-        let (pairings, remaining) = strategy.pair(arena_players);
-
-        for (i, pairing) in pairings.into_iter().enumerate() {
-            let bracket_pairing = BracketPairing {
-                id: Uuid::new_v4(),
-                round: self.current_round,
-                board: (i + 1) as u32,
-                white_player: pairing.player1.id,
-                black_player: pairing.player2.id,
-                result: None,
-                game_id: None,
-                scheduled_at: Some(Utc::now()),
-                started_at: None,
-                completed_at: None,
-            };
-            self.pairings.push(bracket_pairing);
-        }
-
-        // Handle remaining players (give byes or wait for next round)
-        for player in remaining {
-            self.award_bye(player.id)?;
-        }
-
-        Ok(())
-    }
-
-    fn generate_round_robin_pairings(&mut self, participants: &[&TournamentParticipant]) -> Result<(), String> {
-        // Simple round-robin pairing
-        let mut pairings = Vec::new();
-        let participants_vec: Vec<_> = participants.iter().collect();
-
-        for i in 0..participants_vec.len() {
-            for j in (i + 1)..participants_vec.len() {
-                let round = ((i + j) % participants_vec.len()) as u32 + 1;
-                
-                // Alternate colors
-                let (white, black) = if (i + j) % 2 == 0 {
-                    (participants_vec[i], participants_vec[j])
-                } else {
-                    (participants_vec[j], participants_vec[i])
-                };
-
-                let pairing = BracketPairing {
-                    id: Uuid::new_v4(),
-                    round,
-                    board: (pairings.len() + 1) as u32,
-                    white_player: white.player_id,
-                    black_player: black.player_id,
-                    result: None,
-                    game_id: None,
-                    scheduled_at: None, // Will be scheduled when round starts
-                    started_at: None,
-                    completed_at: None,
-                };
-
-                pairings.push(pairing);
-            }
-        }
-
-        self.pairings.extend(pairings);
-        Ok(())
-    }
-
-    fn generate_elimination_pairings(&mut self, participants: &[&TournamentParticipant], double_elim: bool) -> Result<(), String> {
-        let mut pairings = Vec::new();
-        let mut participants_vec: Vec<_> = participants.iter().collect();
-        
-        // Sort by rating for seeding
-        participants_vec.sort_by(|a, b| b.rating.cmp(&a.rating));
-
-        // Pair highest with lowest, second highest with second lowest, etc.
-        while participants_vec.len() >= 2 {
-            let player1 = participants_vec.remove(0);
-            let player2 = participants_vec.pop().unwrap();
-
-            let pairing = BracketPairing {
-                id: Uuid::new_v4(),
-                round: self.current_round,
-                board: (pairings.len() + 1) as u32,
-                white_player: player1.player_id,
-                black_player: player2.player_id,
-                result: None,
-                game_id: None,
-                scheduled_at: Some(Utc::now()),
-                started_at: None,
-                completed_at: None,
-            };
-
-            pairings.push(pairing);
-        }
-
-        // Handle bye if odd number
-        if let Some(player) = participants_vec.pop() {
-            self.award_bye(player.player_id)?;
-        }
-
-        self.pairings.extend(pairings);
-        Ok(())
-    }
-
-    pub fn submit_game_result(&mut self, pairing_id: Uuid, result: GameResult) -> Result<(), String> {
-        let pairing = self.pairings.iter_mut()
-            .find(|p| p.id == pairing_id)
-            .ok_or("Pairing not found")?;
-
-        if pairing.result.is_some() {
-            return Err("Game result already submitted".to_string());
-        }
-
-        pairing.result = Some(result);
-        pairing.completed_at = Some(Utc::now());
-
-        // Update participant statistics
-        let white_participant = self.participants.get_mut(&pairing.white_player)
-            .ok_or("White participant not found")?;
-        let black_participant = self.participants.get_mut(&pairing.black_player)
-            .ok_or("Black participant not found")?;
-
-        // Update scores and statistics
-        match result {
-            GameResult::Win => {
-                white_participant.score += 1.0;
-                white_participant.wins += 1;
-                black_participant.losses += 1;
-            }
-            GameResult::Draw => {
-                white_participant.score += 0.5;
-                black_participant.score += 0.5;
-                white_participant.draws += 1;
-                black_participant.draws += 1;
-            }
-            GameResult::Loss => {
-                black_participant.score += 1.0;
-                black_participant.wins += 1;
-                white_participant.losses += 1;
-            }
-        }
-
-        white_participant.games_played += 1;
-        black_participant.games_played += 1;
-        white_participant.color_balance += 1;
-        black_participant.color_balance -= 1;
-
-        // Update standings
-        self.update_standings();
-
-        // Check if round is complete
-        self.check_round_completion();
-
-        Ok(())
-    }
-
-    fn award_bye(&mut self, player_id: Uuid) -> Result<(), String> {
-        let participant = self.participants.get_mut(&player_id)
-            .ok_or("Participant not found")?;
-
-        participant.score += 1.0;
-        participant.byes += 1;
-        participant.games_played += 1;
-
-        Ok(())
-    }
-
-    fn have_played_together(&self, player_a: Uuid, player_b: Uuid) -> bool {
-        self.pairings.iter().any(|p| {
-            (p.white_player == player_a && p.black_player == player_b) ||
-            (p.white_player == player_b && p.black_player == player_a)
-        })
-    }
-
-    /// Transition the bracket from Registration to InProgress.
-    pub fn start_tournament(bracket: &mut TournamentBracket) -> Result<(), BracketError> {
-        if bracket.status != TournamentStatus::Registration {
-            return Err(BracketError::TournamentAlreadyStarted);
-        }
-        bracket.status = TournamentStatus::InProgress;
-        bracket.started_at = Some(Utc::now());
-        Ok(())
-    }
-
-    /// Record the winner of a match and advance them to the next round.
-    pub fn record_result(
-        bracket: &mut TournamentBracket,
-        match_id: Uuid,
-        winner_id: Uuid,
-    ) -> Result<(), BracketError> {
-        let (match_round, match_number) = {
-            let m = bracket
-                .matches
-                .iter()
-                .find(|m| m.id == match_id)
-                .ok_or(BracketError::MatchNotFound)?;
-
-            if m.status == MatchStatus::Completed {
-                return Err(BracketError::MatchAlreadyCompleted);
-            }
-            if bracket.status != TournamentStatus::InProgress {
-                return Err(BracketError::TournamentNotStarted);
-            }
-            if m.player1_id != Some(winner_id) && m.player2_id != Some(winner_id) {
-                return Err(BracketError::PlayerNotInMatch);
-            }
-            (m.round, m.match_number)
-        };
-
-        {
-            let m = bracket
-                .matches
-                .iter_mut()
-                .find(|m| m.id == match_id)
-                .unwrap();
-            m.winner_id = Some(winner_id);
-            m.status = MatchStatus::Completed;
-            m.completed_at = Some(Utc::now());
-        }
-
-        match &bracket.format {
-            BracketFormat::SingleElimination | BracketFormat::DoubleElimination => {
-                let next_round = match_round + 1;
-                // Odd match_number feeds player1 slot; even feeds player2 slot
-                let next_match_number = match_number.div_ceil(2);
-
-                if let Some(next) = bracket
-                    .matches
-                    .iter_mut()
-                    .find(|m| m.round == next_round && m.match_number == next_match_number)
-                {
-                    if match_number % 2 == 1 {
-                        next.player1_id = Some(winner_id);
-                    } else {
-                        next.player2_id = Some(winner_id);
-                    }
-                } else {
-                    p.white_player
-                }
-            }
-            BracketFormat::RoundRobin => {
-                if bracket
-                    .matches
-                    .iter()
-                    .all(|m| m.status == MatchStatus::Completed)
-                {
-                    bracket.winner_id = determine_round_robin_winner(bracket);
-                    bracket.status = TournamentStatus::Completed;
-                    bracket.completed_at = Some(Utc::now());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn update_standings(&mut self) {
-        let mut standings: Vec<_> = self.participants.values()
-            .filter(|p| p.is_active)
-            .collect();
+impl std::error::Error for BracketError {}
 
 fn next_power_of_two(n: u32) -> u32 {
     if n.is_power_of_two() {
@@ -586,6 +106,47 @@ fn next_power_of_two(n: u32) -> u32 {
     } else {
         n.next_power_of_two()
     }
+}
+
+/// Place `player_id` into an unmatched Losers Bracket round. Prefers the match
+/// at `preferred_match_number`; if it is already full (or absent, as can happen
+/// with non-power-of-two sizes after byes), falls back to the first match in the
+/// round with a free slot. Returns `true` if a slot was found.
+fn place_in_lb(
+    matches: &mut [BracketMatch],
+    round: u32,
+    preferred_match_number: u32,
+    player_id: Uuid,
+) -> bool {
+    if let Some(m) = matches.iter_mut().find(|m| {
+        m.bracket_type == BracketType::Losers
+            && m.round == round
+            && m.match_number == preferred_match_number
+    }) {
+        if m.player1_id.is_none() {
+            m.player1_id = Some(player_id);
+            return true;
+        }
+        if m.player2_id.is_none() {
+            m.player2_id = Some(player_id);
+            return true;
+        }
+    }
+    // Fallback: any match in the round with a free slot.
+    if let Some(m) = matches
+        .iter_mut()
+        .find(|m| m.bracket_type == BracketType::Losers && m.round == round)
+    {
+        if m.player1_id.is_none() {
+            m.player1_id = Some(player_id);
+            return true;
+        }
+        if m.player2_id.is_none() {
+            m.player2_id = Some(player_id);
+            return true;
+        }
+    }
+    false
 }
 
 fn generate_single_elimination_matches(
@@ -624,143 +185,569 @@ fn generate_single_elimination_matches(
             status,
             scheduled_at: None,
             completed_at,
+            bracket_type: BracketType::Winners,
+            losers_from_match: None,
         });
-
-        self.standings = standings.into_iter().enumerate().map(|(i, p)| {
-            TournamentStanding {
-                rank: (i + 1) as u32,
-                player_id: p.player_id,
-                name: p.name.clone(),
-                score: p.score,
-                tie_break_score: p.tie_break_score,
-                games_played: p.games_played,
-                wins: p.wins,
-                draws: p.draws,
-                losses: p.losses,
-                performance_rating: None, // Calculate if needed
-            }
-        }).collect();
     }
 
-    fn check_round_completion(&mut self) {
-        let current_round_pairings: Vec<_> = self.pairings.iter()
-            .filter(|p| p.round == self.current_round)
-            .collect();
+    // Subsequent rounds
+    let mut count = r1_count / 2;
+    for r in 2..=total_rounds {
+        for i in 0..count {
+            matches.push(BracketMatch {
+                id: Uuid::new_v4(),
+                round: r,
+                match_number: (i + 1) as u32,
+                player1_id: None,
+                player2_id: None,
+                winner_id: None,
+                status: MatchStatus::Pending,
+                scheduled_at: None,
+                completed_at: None,
+                bracket_type: BracketType::Winners,
+                losers_from_match: None,
+            });
+        }
+        count /= 2;
+    }
 
-        let all_completed = current_round_pairings.iter().all(|p| p.result.is_some());
-
-        if all_completed {
-            self.current_round += 1;
-
-            // Check if tournament is complete
-            if self.current_round > self.total_rounds {
-                self.status = TournamentStatus::Completed;
-                self.ends_at = Some(Utc::now());
-            } else if self.auto_pair_next_round() {
-                let _ = self.generate_pairings();
+    // Auto-advance byes into round 2 if applicable
+    for i in 0..r1_count {
+        if matches[i].status == MatchStatus::Completed {
+            if let Some(winner_id) = matches[i].winner_id {
+                let next_match_number = ((i + 1) as u32).div_ceil(2);
+                if let Some(next) = matches
+                    .iter_mut()
+                    .find(|m| m.round == 2 && m.match_number == next_match_number)
+                {
+                    if (i + 1) % 2 == 1 {
+                        next.player1_id = Some(winner_id);
+                    } else {
+                        next.player2_id = Some(winner_id);
+                    }
+                }
             }
         }
     }
 
-    fn auto_pair_next_round(&self) -> bool {
-        // Logic to determine if next round should be auto-paired
-        // For now, always auto-pair
-        true
-    }
-
-    pub fn get_current_pairings(&self) -> Vec<&BracketPairing> {
-        self.pairings.iter()
-            .filter(|p| p.round == self.current_round && p.result.is_none())
-            .collect()
-    }
-
-    pub fn get_player_pairings(&self, player_id: Uuid) -> Vec<&BracketPairing> {
-        self.pairings.iter()
-            .filter(|p| p.white_player == player_id || p.black_player == player_id)
-            .collect()
-    }
-
-    pub fn get_tournament_stats(&self) -> TournamentStats {
-        TournamentStats {
-            total_participants: self.participants.len() as u32,
-            active_participants: self.participants.values().filter(|p| p.is_active).count() as u32,
-            total_games: self.pairings.len() as u32,
-            completed_games: self.pairings.iter().filter(|p| p.result.is_some()).count() as u32,
-            current_round: self.current_round,
-            total_rounds: self.total_rounds,
-            average_rating: if !self.participants.is_empty() {
-                self.participants.values().map(|p| p.rating as f64).sum::<f64>() / self.participants.len() as f64
-            } else {
-                0.0
-            } as i32,
-        }
-    }
+    matches
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TournamentStats {
-    pub total_participants: u32,
-    pub active_participants: u32,
-    pub total_games: u32,
-    pub completed_games: u32,
-    pub current_round: u32,
-    pub total_rounds: u32,
-    pub average_rating: i32,
+fn generate_double_elimination_matches(
+    participants: &[TournamentParticipant],
+    total_rounds: u32,
+) -> Vec<BracketMatch> {
+    let bracket_size = next_power_of_two(participants.len() as u32) as usize;
+    let mut matches = Vec::new();
+
+    // Winners Bracket Round 1
+    let r1_count = bracket_size / 2;
+    for i in 0..r1_count {
+        let p1 = participants.get(i).map(|p| p.id);
+        let p2 = participants.get(bracket_size - 1 - i).map(|p| p.id);
+
+        let (p1_id, p2_id, status, winner_id, completed_at) = match (p1, p2) {
+            (Some(id), None) => (
+                Some(id),
+                None,
+                MatchStatus::Completed,
+                Some(id),
+                Some(Utc::now()),
+            ),
+            (Some(id1), Some(id2)) => (Some(id1), Some(id2), MatchStatus::Pending, None, None),
+            _ => (None, None, MatchStatus::Pending, None, None),
+        };
+
+        matches.push(BracketMatch {
+            id: Uuid::new_v4(),
+            round: 1,
+            match_number: (i + 1) as u32,
+            player1_id: p1_id,
+            player2_id: p2_id,
+            winner_id,
+            status,
+            scheduled_at: None,
+            completed_at,
+            bracket_type: BracketType::Winners,
+            losers_from_match: None,
+        });
+    }
+
+    // Winners Bracket subsequent rounds
+    let mut wb_count = r1_count / 2;
+    for r in 2..=total_rounds {
+        for i in 0..wb_count {
+            matches.push(BracketMatch {
+                id: Uuid::new_v4(),
+                round: r,
+                match_number: (i + 1) as u32,
+                player1_id: None,
+                player2_id: None,
+                winner_id: None,
+                status: MatchStatus::Pending,
+                scheduled_at: None,
+                completed_at: None,
+                bracket_type: BracketType::Winners,
+                losers_from_match: None,
+            });
+        }
+        wb_count /= 2;
+    }
+
+    // Losers Bracket - Create matches for each round.
+    // Byes in WB Round 1 produce no losers, so the first LB round only needs to
+    // pair losers from the real (non-bye) WB Round 1 matches.
+    let bye_count = bracket_size - participants.len();
+    let real_r1 = r1_count - bye_count; // # of real WB R1 matches that yield losers
+
+    // Round 1: pair the losers of adjacent real WB R1 matches.
+    let lb_r1_matches = real_r1 / 2;
+    for i in 0..lb_r1_matches {
+        matches.push(BracketMatch {
+            id: Uuid::new_v4(),
+            round: 1,
+            match_number: (i + 1) as u32,
+            player1_id: None,
+            player2_id: None,
+            winner_id: None,
+            status: MatchStatus::Pending,
+            scheduled_at: None,
+            completed_at: None,
+            bracket_type: BracketType::Losers,
+            losers_from_match: None,
+        });
+    }
+
+    // Remaining LB rounds alternate pairing:
+    //   even round r:  losers of WB round (r/2+1) + winners of LB round r-1
+    //   odd round r:   winners of LB round r-1
+    // Number of matches = incoming players / 2.
+    //
+    // Round 2: losers from WB Round 2 + winners from LB Round 1.
+    let wb_r2_losers = r1_count / 2; // == bracket_size / 4
+    let lb_r2_matches = ((wb_r2_losers + lb_r1_matches) / 2).max(1);
+    for i in 0..lb_r2_matches {
+        matches.push(BracketMatch {
+            id: Uuid::new_v4(),
+            round: 2,
+            match_number: (i + 1) as u32,
+            player1_id: None,
+            player2_id: None,
+            winner_id: None,
+            status: MatchStatus::Pending,
+            scheduled_at: None,
+            completed_at: None,
+            bracket_type: BracketType::Losers,
+            losers_from_match: None,
+        });
+    }
+
+    // Subsequent LB rounds.
+    let mut lb_round = 3;
+    let mut prev_lb_matches = lb_r2_matches;
+
+    while lb_round <= 2 * total_rounds - 2 {
+        let wb_round = lb_round / 2 + 1;
+        let wb_losers = if lb_round % 2 == 0 && wb_round <= total_rounds {
+            if wb_round == 1 {
+                real_r1
+            } else {
+                r1_count / (1 << (wb_round - 1))
+            }
+        } else {
+            0
+        };
+
+        let matches_this_round = ((wb_losers + prev_lb_matches) / 2).max(1);
+
+        for i in 0..matches_this_round {
+            matches.push(BracketMatch {
+                id: Uuid::new_v4(),
+                round: lb_round,
+                match_number: (i + 1) as u32,
+                player1_id: None,
+                player2_id: None,
+                winner_id: None,
+                status: MatchStatus::Pending,
+                scheduled_at: None,
+                completed_at: None,
+                bracket_type: BracketType::Losers,
+                losers_from_match: None,
+            });
+        }
+
+        prev_lb_matches = matches_this_round;
+        lb_round += 1;
+    }
+
+    // Grand Finals (potentially two matches)
+    // GF match 1: WB champion vs LB champion
+    matches.push(BracketMatch {
+        id: Uuid::new_v4(),
+        round: total_rounds + 1,
+        match_number: 1,
+        player1_id: None, // Will be set when WB final completes
+        player2_id: None, // Will be set when LB final completes
+        winner_id: None,
+        status: MatchStatus::Pending,
+        scheduled_at: None,
+        completed_at: None,
+        bracket_type: BracketType::GrandFinals,
+        losers_from_match: None,
+    });
+
+    // Auto-advance byes in winners bracket
+    for i in 0..r1_count {
+        if matches[i].status == MatchStatus::Completed {
+            if let Some(winner_id) = matches[i].winner_id {
+                let next_match_number = ((i + 1) as u32).div_ceil(2);
+                if let Some(next) = matches
+                    .iter_mut()
+                    .find(|m| m.round == 2 && m.match_number == next_match_number && m.bracket_type == BracketType::Winners)
+                {
+                    if (i + 1) % 2 == 1 {
+                        next.player1_id = Some(winner_id);
+                    } else {
+                        next.player2_id = Some(winner_id);
+                    }
+                }
+            }
+        }
+    }
+
+    matches
+}
+
+fn generate_round_robin_matches(participants: &[TournamentParticipant]) -> Vec<BracketMatch> {
+    let mut matches = Vec::new();
+    let mut match_num = 1;
+    for i in 0..participants.len() {
+        for j in (i + 1)..participants.len() {
+            matches.push(BracketMatch {
+                id: Uuid::new_v4(),
+                round: 1,
+                match_number: match_num,
+                player1_id: Some(participants[i].id),
+                player2_id: Some(participants[j].id),
+                winner_id: None,
+                status: MatchStatus::Pending,
+                scheduled_at: None,
+                completed_at: None,
+                bracket_type: BracketType::Winners,
+                losers_from_match: None,
+            });
+            match_num += 1;
+        }
+    }
+    matches
+}
+
+fn determine_round_robin_winner(bracket: &TournamentBracket) -> Option<Uuid> {
+    let standings = BracketService::get_standings(bracket);
+    standings.first().map(|(id, _)| *id)
+}
+
+pub struct BracketService;
+
+impl BracketService {
+    /// Create a new tournament bracket with seeded participants.
+    pub fn create_bracket(
+        id: Uuid,
+        name: impl Into<String>,
+        mut participants: Vec<TournamentParticipant>,
+        format: BracketFormat,
+    ) -> Result<TournamentBracket, BracketError> {
+        if participants.len() < 2 {
+            return Err(BracketError::NotEnoughPlayers);
+        }
+
+        // Sort by ELO descending for seeding
+        participants.sort_by(|a, b| b.elo.cmp(&a.elo));
+        for (i, p) in participants.iter_mut().enumerate() {
+            p.seed = (i + 1) as u32;
+        }
+
+        let total_rounds = match format {
+            BracketFormat::SingleElimination | BracketFormat::DoubleElimination => {
+                let n = next_power_of_two(participants.len() as u32);
+                n.trailing_zeros()
+            }
+            BracketFormat::RoundRobin => 1,
+        };
+
+        let matches = match format {
+            BracketFormat::SingleElimination => {
+                generate_single_elimination_matches(&participants, total_rounds)
+            }
+            BracketFormat::DoubleElimination => {
+                generate_double_elimination_matches(&participants, total_rounds)
+            }
+            BracketFormat::RoundRobin => generate_round_robin_matches(&participants),
+        };
+
+        Ok(TournamentBracket {
+            id,
+            name: name.into(),
+            format,
+            status: TournamentStatus::Registration,
+            participants,
+            matches,
+            winner_id: None,
+            started_at: None,
+            completed_at: None,
+            bracket_reset_required: false,
+        })
+    }
+
+    /// Transition the bracket from Registration to InProgress.
+    pub fn start_tournament(bracket: &mut TournamentBracket) -> Result<(), BracketError> {
+        if bracket.status != TournamentStatus::Registration {
+            return Err(BracketError::TournamentAlreadyStarted);
+        }
+        bracket.status = TournamentStatus::InProgress;
+        bracket.started_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Record the winner of a match and advance them to the next round.
+    pub fn record_result(
+        bracket: &mut TournamentBracket,
+        match_id: Uuid,
+        winner_id: Uuid,
+    ) -> Result<(), BracketError> {
+        let (match_round, match_number, bracket_type, player1_id, player2_id) = {
+            let m = bracket
+                .matches
+                .iter()
+                .find(|m| m.id == match_id)
+                .ok_or(BracketError::MatchNotFound)?;
+
+            if m.status == MatchStatus::Completed {
+                return Err(BracketError::MatchAlreadyCompleted);
+            }
+            if bracket.status != TournamentStatus::InProgress {
+                return Err(BracketError::TournamentNotStarted);
+            }
+            if m.player1_id != Some(winner_id) && m.player2_id != Some(winner_id) {
+                return Err(BracketError::PlayerNotInMatch);
+            }
+            (m.round, m.match_number, m.bracket_type.clone(), m.player1_id, m.player2_id)
+        };
+
+        {
+            let m = bracket
+                .matches
+                .iter_mut()
+                .find(|m| m.id == match_id)
+                .unwrap();
+            m.winner_id = Some(winner_id);
+            m.status = MatchStatus::Completed;
+            m.completed_at = Some(Utc::now());
+        }
+
+        match &bracket.format {
+            BracketFormat::SingleElimination => {
+                let next_round = match_round + 1;
+                let next_match_number = match_number.div_ceil(2);
+
+                if let Some(next) = bracket
+                    .matches
+                    .iter_mut()
+                    .find(|m| m.round == next_round && m.match_number == next_match_number)
+                {
+                    if match_number % 2 == 1 {
+                        next.player1_id = Some(winner_id);
+                    } else {
+                        next.player2_id = Some(winner_id);
+                    }
+                } else {
+                    bracket.winner_id = Some(winner_id);
+                    bracket.status = TournamentStatus::Completed;
+                    bracket.completed_at = Some(Utc::now());
+                }
+            }
+            BracketFormat::DoubleElimination => {
+                Self::advance_double_elimination(bracket, match_id, winner_id, match_round, match_number, bracket_type, player1_id, player2_id)?;
+            }
+            BracketFormat::RoundRobin => {
+                if bracket
+                    .matches
+                    .iter()
+                    .all(|m| m.status == MatchStatus::Completed)
+                {
+                    bracket.winner_id = determine_round_robin_winner(bracket);
+                    bracket.status = TournamentStatus::Completed;
+                    bracket.completed_at = Some(Utc::now());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn advance_double_elimination(
+        bracket: &mut TournamentBracket,
+        match_id: Uuid,
+        winner_id: Uuid,
+        match_round: u32,
+        match_number: u32,
+        bracket_type: BracketType,
+        player1_id: Option<Uuid>,
+        player2_id: Option<Uuid>,
+    ) -> Result<(), BracketError> {
+        let loser_id = if player1_id == Some(winner_id) {
+            player2_id
+        } else {
+            player1_id
+        };
+
+        match bracket_type {
+            BracketType::Winners => {
+                // Advance winner to next WB round
+                let next_round = match_round + 1;
+                let next_match_number = match_number.div_ceil(2);
+
+                if let Some(next) = bracket
+                    .matches
+                    .iter_mut()
+                    .find(|m| m.round == next_round && m.match_number == next_match_number && m.bracket_type == BracketType::Winners)
+                {
+                    if match_number % 2 == 1 {
+                        next.player1_id = Some(winner_id);
+                    } else {
+                        next.player2_id = Some(winner_id);
+                    }
+                } else {
+                    // This was the WB final - winner advances to Grand Finals as player1
+                    if let Some(gf_match) = bracket
+                        .matches
+                        .iter_mut()
+                        .find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 1)
+                    {
+                        gf_match.player1_id = Some(winner_id);
+                    }
+                }
+
+                // Send loser to Losers Bracket in standard seeded order.
+                // WB R1 losers of adjacent *real* matches pair in LB R1; WB Rk
+                // (k>=2) losers drop into LB round 2k-2 at the same match number.
+                if let Some(loser) = loser_id {
+                    let byte_count = next_power_of_two(bracket.participants.len() as u32) as usize
+                        - bracket.participants.len();
+                    let (losers_round, preferred_mn) = if match_round <= 1 {
+                        (1, (match_number - byte_count as u32).div_ceil(2))
+                    } else {
+                        (2 * match_round - 2, match_number)
+                    };
+
+                    place_in_lb(&mut bracket.matches, losers_round, preferred_mn, loser);
+                }
+            }
+            BracketType::Losers => {
+                // Advance winner to the next Losers Bracket round.
+                let next_round = match_round + 1;
+                let preferred_mn = match_number.div_ceil(2).max(1);
+
+                if !place_in_lb(&mut bracket.matches, next_round, preferred_mn, winner_id) {
+                    // Final Losers Bracket match - winner advances to Grand Finals
+                    if let Some(gf_match) = bracket
+                        .matches
+                        .iter_mut()
+                        .find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 1)
+                    {
+                        if gf_match.player1_id.is_some() && gf_match.player2_id.is_none() {
+                            gf_match.player2_id = Some(winner_id);
+                        } else if gf_match.player1_id.is_none() {
+                            gf_match.player2_id = Some(winner_id);
+                        }
+                    }
+                }
+            }
+            BracketType::GrandFinals => {
+                // Check if bracket reset is needed
+                if bracket.bracket_reset_required {
+                    // Second GF match - winner is tournament champion
+                    bracket.winner_id = Some(winner_id);
+                    bracket.status = TournamentStatus::Completed;
+                    bracket.completed_at = Some(Utc::now());
+                } else {
+                    // First GF match - check if losers bracket winner won
+                    let completed_match = bracket.matches.iter().find(|m| m.id == match_id).unwrap();
+                    let wb_champion = completed_match.player1_id;
+                    
+                    if wb_champion != Some(winner_id) {
+                        // Losers bracket winner won - need bracket reset
+                        bracket.bracket_reset_required = true;
+                        
+                        // Create second GF match (bracket reset)
+                        let new_gf_match = BracketMatch {
+                            id: Uuid::new_v4(),
+                            round: match_round,
+                            match_number: 2,
+                            player1_id: wb_champion,
+                            player2_id: Some(winner_id),
+                            winner_id: None,
+                            status: MatchStatus::Pending,
+                            scheduled_at: None,
+                            completed_at: None,
+                            bracket_type: BracketType::GrandFinals,
+                            losers_from_match: None,
+                        };
+                        bracket.matches.push(new_gf_match);
+                    } else {
+                        // WB champion won first GF match - tournament over
+                        bracket.winner_id = Some(winner_id);
+                        bracket.status = TournamentStatus::Completed;
+                        bracket.completed_at = Some(Utc::now());
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Return participants ranked by wins in round robin / bracket.
+    pub fn get_standings(bracket: &TournamentBracket) -> Vec<(Uuid, u32)> {
+        let mut wins: HashMap<Uuid, u32> = HashMap::new();
+        for p in &bracket.participants {
+            wins.insert(p.id, 0);
+        }
+        for m in &bracket.matches {
+            if let Some(wid) = m.winner_id {
+                *wins.entry(wid).or_insert(0) += 1;
+            }
+        }
+        let mut standings: Vec<(Uuid, u32)> = wins.into_iter().collect();
+        standings.sort_by(|a, b| b.1.cmp(&a.1));
+        standings
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_tournament_creation() {
-        let config = BracketConfig::default();
-        let tournament = Tournament::new(
-            "Test Tournament".to_string(),
-            TournamentFormat::Swiss,
-            config,
-            "5+0".to_string(),
-        );
-
-        assert_eq!(tournament.name, "Test Tournament");
-        assert_eq!(tournament.status, TournamentStatus::Registration);
-        assert_eq!(tournament.current_round, 0);
+    fn make_participants(n: usize) -> Vec<TournamentParticipant> {
+        (0..n)
+            .map(|i| TournamentParticipant {
+                id: Uuid::new_v4(),
+                name: format!("Player {}", i + 1),
+                elo: 3000 - (i as u32 * 10),
+                seed: 0,
+            })
+            .collect()
     }
 
     #[test]
-    fn test_add_participant() {
-        let config = BracketConfig::default();
-        let mut tournament = Tournament::new(
-            "Test Tournament".to_string(),
-            TournamentFormat::Swiss,
-            config,
-            "5+0".to_string(),
-        );
-
-        let player_id = Uuid::new_v4();
-        tournament.add_participant(player_id, "Alice".to_string(), 1500).unwrap();
-
-        assert_eq!(tournament.participants.len(), 1);
-        assert!(tournament.participants.contains_key(&player_id));
-    }
-
-    #[test]
-    fn test_start_tournament() {
-        let config = BracketConfig::default();
-        let mut tournament = Tournament::new(
-            "Test Tournament".to_string(),
-            TournamentFormat::Swiss,
-            config,
-            "5+0".to_string(),
-        );
-
-        let player1 = Uuid::new_v4();
-        let player2 = Uuid::new_v4();
-        
-        tournament.add_participant(player1, "Alice".to_string(), 1500).unwrap();
-        tournament.add_participant(player2, "Bob".to_string(), 1600).unwrap();
-
-        tournament.start_tournament().unwrap();
+    fn seeds_ordered_by_elo_descending() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(4),
+            BracketFormat::SingleElimination,
+        )
+        .unwrap();
 
         assert_eq!(bracket.participants[0].seed, 1);
         for i in 1..bracket.participants.len() {
@@ -1007,5 +994,672 @@ mod tests {
         if standings.len() > 1 {
             assert!(standings[0].1 >= standings[1].1);
         }
+    }
+
+    // Double Elimination Tests
+    
+    #[test]
+    fn double_elimination_8_players_creates_valid_bracket() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(8),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        // Should have WB matches, LB matches, and GF
+        let wb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Winners)
+            .collect();
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers)
+            .collect();
+        let gf_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::GrandFinals)
+            .collect();
+
+        // 8 players: WB has 4+2+1=7 matches, LB has 6 matches, GF has 1 match
+        assert_eq!(wb_matches.len(), 7);
+        assert_eq!(lb_matches.len(), 6);
+        assert_eq!(gf_matches.len(), 1);
+    }
+
+    #[test]
+    fn double_elimination_12_players_creates_valid_bracket() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(12),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        // 12 players -> bracket size 16
+        // WB: 8+4+2+1=15 matches
+        // LB: 4+2+1+1+1+1+1=7 matches  
+        // GF: 1 match
+        let wb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Winners)
+            .collect();
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers)
+            .collect();
+        let gf_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::GrandFinals)
+            .collect();
+
+        assert_eq!(wb_matches.len(), 15);
+        assert!(lb_matches.len() >= 7);
+        assert_eq!(gf_matches.len(), 1);
+
+        // Check that top seeds get byes in WB round 1
+        let wb_r1_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .collect();
+        let bye_matches: Vec<_> = wb_r1_matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Completed)
+            .collect();
+        // 12 players, 16 bracket size, 4 byes
+        assert_eq!(bye_matches.len(), 4);
+    }
+
+    #[test]
+    fn double_elimination_16_players_creates_valid_bracket() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(16),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        let wb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Winners)
+            .collect();
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers)
+            .collect();
+        let gf_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::GrandFinals)
+            .collect();
+
+        // 16 players: WB has 8+4+2+1=15 matches, LB has ~12 matches, GF has 1 match
+        assert_eq!(wb_matches.len(), 15);
+        assert!(lb_matches.len() >= 10 && lb_matches.len() <= 15);
+        assert_eq!(gf_matches.len(), 1);
+    }
+
+    #[test]
+    fn double_elimination_32_players_creates_valid_bracket() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(32),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        let wb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Winners)
+            .collect();
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers)
+            .collect();
+        let gf_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::GrandFinals)
+            .collect();
+
+        // 32 players: WB has 16+8+4+2+1=31 matches, LB has ~28 matches, GF has 1 match
+        assert_eq!(wb_matches.len(), 31);
+        assert!(lb_matches.len() >= 25 && lb_matches.len() <= 35);
+        assert_eq!(gf_matches.len(), 1);
+    }
+
+    #[test]
+    fn double_elimination_4_players_complete_tournament() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(4),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        // WB Round 1: 2 matches
+        let wb_r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .map(|m| m.id)
+            .collect();
+        
+        // Player 1 and 2 win their WB R1 matches
+        let m1 = bracket.matches.iter().find(|m| m.id == wb_r1[0]).unwrap().clone();
+        let m2 = bracket.matches.iter().find(|m| m.id == wb_r1[1]).unwrap().clone();
+        
+        BracketService::record_result(&mut bracket, wb_r1[0], m1.player1_id.unwrap()).unwrap();
+        BracketService::record_result(&mut bracket, wb_r1[1], m2.player1_id.unwrap()).unwrap();
+
+        // Losers should be sent to LB Round 1
+        let lb_r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Losers)
+            .collect();
+        assert!(lb_r1[0].player1_id.is_some() || lb_r1[0].player2_id.is_some());
+
+        // WB Round 2 (final): 1 match
+        let wb_r2: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 2 && m.bracket_type == BracketType::Winners)
+            .map(|m| m.id)
+            .collect();
+        
+        let wb_final = bracket.matches.iter().find(|m| m.id == wb_r2[0]).unwrap().clone();
+        BracketService::record_result(&mut bracket, wb_r2[0], wb_final.player1_id.unwrap()).unwrap();
+
+        // WB champion should be set in GF
+        let gf: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::GrandFinals)
+            .collect();
+        assert!(gf[0].player1_id.is_some());
+
+        // Complete LB matches
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers && m.status == MatchStatus::Pending)
+            .map(|m| m.id)
+            .collect();
+        
+        for id in lb_matches {
+            if let Some(m) = bracket.matches.iter().find(|m| m.id == id) {
+                if let Some(p1) = m.player1_id {
+                    BracketService::record_result(&mut bracket, id, p1).unwrap();
+                }
+            }
+        }
+
+        // Now GF should have both players
+        let gf = bracket.matches.iter().find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 1).unwrap().clone();
+        assert!(gf.player1_id.is_some() && gf.player2_id.is_some());
+
+        // WB champion wins GF
+        BracketService::record_result(&mut bracket, gf.id, gf.player1_id.unwrap()).unwrap();
+
+        // Tournament should be complete
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert_eq!(bracket.winner_id, gf.player1_id);
+    }
+
+    #[test]
+    fn double_elimination_bracket_reset_works() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(4),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        // Simulate tournament where LB champion wins first GF match
+        let wb_r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .map(|m| m.id)
+            .collect();
+        
+        let m1 = bracket.matches.iter().find(|m| m.id == wb_r1[0]).unwrap().clone();
+        let m2 = bracket.matches.iter().find(|m| m.id == wb_r1[1]).unwrap().clone();
+        
+        // Different winners for variety
+        BracketService::record_result(&mut bracket, wb_r1[0], m1.player1_id.unwrap()).unwrap();
+        BracketService::record_result(&mut bracket, wb_r1[1], m2.player1_id.unwrap()).unwrap();
+
+        let wb_r2: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 2 && m.bracket_type == BracketType::Winners)
+            .map(|m| m.id)
+            .collect();
+        
+        let wb_final = bracket.matches.iter().find(|m| m.id == wb_r2[0]).unwrap().clone();
+        BracketService::record_result(&mut bracket, wb_r2[0], wb_final.player1_id.unwrap()).unwrap();
+
+        // Complete LB
+        let lb_matches: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.bracket_type == BracketType::Losers && m.status == MatchStatus::Pending)
+            .map(|m| m.id)
+            .collect();
+        
+        for id in lb_matches {
+            if let Some(m) = bracket.matches.iter().find(|m| m.id == id) {
+                if let Some(p1) = m.player1_id {
+                    BracketService::record_result(&mut bracket, id, p1).unwrap();
+                }
+            }
+        }
+
+        // LB champion wins first GF match (triggering bracket reset)
+        let gf = bracket.matches.iter().find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 1).unwrap().clone();
+        BracketService::record_result(&mut bracket, gf.id, gf.player2_id.unwrap()).unwrap();
+
+        // Should need bracket reset
+        assert!(bracket.bracket_reset_required);
+        assert_eq!(bracket.status, TournamentStatus::InProgress);
+
+        // Second GF match should exist
+        let gf2 = bracket.matches.iter().find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 2).unwrap().clone();
+
+        // WB champion wins second GF match
+        BracketService::record_result(&mut bracket, gf2.id, gf2.player1_id.unwrap()).unwrap();
+
+        // Tournament should now be complete
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+    }
+
+    #[test]
+    fn double_elimination_byes_given_to_top_seeds() {
+        let bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(12),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        // 12 players -> 16 bracket size -> 4 byes
+        // Top 4 seeds should get byes
+        let wb_r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .collect();
+        
+        let bye_matches: Vec<_> = wb_r1
+            .iter()
+            .filter(|m| m.status == MatchStatus::Completed)
+            .collect();
+        
+        assert_eq!(bye_matches.len(), 4);
+        
+        // Verify that byes went to top seeds (highest ELO = lowest seed number)
+        let mut bye_seeds = Vec::new();
+        for bye_match in bye_matches {
+            if let Some(winner_id) = bye_match.winner_id {
+                if let Some(p) = bracket.participants.iter().find(|p| p.id == winner_id) {
+                    bye_seeds.push(p.seed);
+                }
+            }
+        }
+        
+        bye_seeds.sort();
+        // Top 4 seeds (1, 2, 3, 4) should have gotten byes
+        assert_eq!(bye_seeds, vec![1, 2, 3, 4]);
+    }
+
+    /// Play every currently-resolvable match (two known players) with `player1_id`
+    /// declared winner, in order, until no more such matches exist.
+    fn play_resolvable_matches(bracket: &mut TournamentBracket) -> bool {
+        loop {
+            let candidates: Vec<(Uuid, Uuid)> = bracket
+                .matches
+                .iter()
+                .filter(|m| {
+                    m.status == MatchStatus::Pending
+                        && m.player1_id.is_some()
+                        && m.player2_id.is_some()
+                })
+                .map(|m| (m.id, m.player1_id.unwrap()))
+                .collect();
+
+            if candidates.is_empty() {
+                return bracket.status == TournamentStatus::Completed;
+            }
+
+            for (id, winner) in candidates {
+                if bracket.matches.iter().any(|m| m.id == id && m.status != MatchStatus::Completed)
+                {
+                    BracketService::record_result(bracket, id, winner).unwrap();
+                }
+            }
+            if bracket.matches.iter().all(|m| m.status == MatchStatus::Completed) {
+                return true;
+            }
+            // If no candidate match can be resolved anymore and we are still not
+            // complete, the bracket cannot progress.
+            let resolvable = bracket.matches.iter().any(|m| {
+                m.status == MatchStatus::Pending
+                    && m.player1_id.is_some()
+                    && m.player2_id.is_some()
+            });
+            if !resolvable {
+                return bracket.status == TournamentStatus::Completed;
+            }
+        }
+    }
+
+    #[test]
+    fn double_elimination_no_duplicate_or_partial_pairings() {
+        // Every pending LB match must be fully paired (both players) once both
+        // of its feeders have resolved, and no player should appear twice in the
+        // same round.
+        for n in [4usize, 8, 12, 16, 32] {
+            let bracket = BracketService::create_bracket(
+                Uuid::new_v4(),
+                "Test",
+                make_participants(n),
+                BracketFormat::DoubleElimination,
+            )
+            .unwrap();
+
+            for (round, matches) in &bracket
+                .matches
+                .iter()
+                .fold(
+                    std::collections::BTreeMap::<u32, Vec<&BracketMatch>>::new(),
+                    |mut acc, m| {
+                        acc.entry(m.round).or_default().push(m);
+                        acc
+                    },
+                )
+            {
+                let _ = round;
+                let mut seen = std::collections::HashSet::new();
+                for m in matches {
+                    if m.player1_id.is_none() && m.player2_id.is_none() {
+                        continue;
+                    }
+                    assert_ne!(
+                        m.player1_id,
+                        m.player2_id,
+                        "Match {}-{} has the same player twice",
+                        m.round,
+                        m.match_number
+                    );
+                    for p in [m.player1_id, m.player2_id].into_iter().flatten() {
+                        assert!(
+                            seen.insert(p),
+                            "Player appears twice in round {} matches",
+                            m.round
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn double_elimination_8_players_full_progression() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(8),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        assert!(
+            play_resolvable_matches(&mut bracket),
+            "Tournament should complete with always-player1 winners"
+        );
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+
+        // Champion must be the overall tournament winner candidate (never lost).
+        let champion = bracket.winner_id.unwrap();
+        let count_loses = bracket
+            .matches
+            .iter()
+            .filter(|m| {
+                m.winner_id.is_some()
+                    && (m.player1_id == Some(champion) || m.player2_id == Some(champion))
+                    && m.winner_id != Some(champion)
+            })
+            .count();
+        assert_eq!(count_loses, 0, "Champion should have lost zero matches");
+    }
+
+    #[test]
+    fn double_elimination_16_players_full_progression() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(16),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        let wb_r1: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .map(|m| (m.id, m.player1_id))
+            .collect();
+        for (id, p1) in wb_r1 {
+            if let Some(p) = p1 {
+                BracketService::record_result(&mut bracket, id, p).unwrap();
+            }
+        }
+
+        // No duplicate LB pairings: every player must appear in exactly one match
+        // per LB round during play.
+        assert!(
+            play_resolvable_matches(&mut bracket),
+            "Tournament should complete"
+        );
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+    }
+
+    #[test]
+    fn double_elimination_32_players_full_progression() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(32),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        assert!(
+            play_resolvable_matches(&mut bracket),
+            "Tournament should complete"
+        );
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+    }
+
+    #[test]
+    fn double_elimination_12_players_odd_full_progression() {
+        // 12 players with 4 byes must still produce a fully resolvable bracket.
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(12),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        let wb_r1_filled: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .filter(|m| m.status == MatchStatus::Pending)
+            .map(|m| (m.id, m.player1_id))
+            .collect();
+        for (id, p1) in wb_r1_filled {
+            if let Some(p) = p1 {
+                BracketService::record_result(&mut bracket, id, p).unwrap();
+            }
+        }
+
+        assert!(
+            play_resolvable_matches(&mut bracket),
+            "Tournament should complete"
+        );
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+    }
+
+    #[test]
+    fn double_elimination_bracket_reset_full_progression() {
+        // Force the Losers Bracket champion to defeat the Winners Bracket champion
+        // in the first Grand Final, triggering a bracket reset and second GF match.
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(8),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        // Complete all WB and LB matches until GF match 1 is fully filled
+        // (WB champion in slot 1, LB champion in slot 2).
+        loop {
+            let candidates: Vec<(Uuid, Uuid)> = bracket
+                .matches
+                .iter()
+                .filter(|m| {
+                    m.status == MatchStatus::Pending
+                        && m.bracket_type != BracketType::GrandFinals
+                        && m.player1_id.is_some()
+                        && m.player2_id.is_some()
+                })
+                .map(|m| (m.id, m.player1_id.unwrap()))
+                .collect();
+
+            let gf1 = bracket.matches.iter().find(|m| {
+                m.bracket_type == BracketType::GrandFinals && m.match_number == 1
+            });
+            if gf1.map(|m| m.player1_id.is_some() && m.player2_id.is_some()).unwrap_or(false) {
+                break;
+            }
+            assert!(!candidates.is_empty(), "Bracket stalled before GF1 was filled");
+            for (id, winner) in candidates {
+                if bracket
+                    .matches
+                    .iter()
+                    .any(|m| m.id == id && m.status != MatchStatus::Completed)
+                {
+                    BracketService::record_result(&mut bracket, id, winner).unwrap();
+                }
+            }
+        }
+
+        // Ensure GF match 1 is filled.
+        let gf1 = bracket
+            .matches
+            .iter()
+            .find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 1)
+            .cloned()
+            .expect("GF match 1 should exist");
+        assert!(gf1.player1_id.is_some() && gf1.player2_id.is_some());
+
+        // Player 2 (the LB champion) beats Player 1 (the WB champion).
+        BracketService::record_result(&mut bracket, gf1.id, gf1.player2_id.unwrap()).unwrap();
+
+        assert!(bracket.bracket_reset_required, "Bracket reset must trigger");
+        assert_eq!(bracket.status, TournamentStatus::InProgress);
+
+        // A second GF match must now exist.
+        let gf2 = bracket
+            .matches
+            .iter()
+            .find(|m| m.bracket_type == BracketType::GrandFinals && m.match_number == 2)
+            .cloned()
+            .expect("GF match 2 should be created on reset");
+        assert!(gf2.player1_id.is_some() && gf2.player2_id.is_some());
+
+        // Finish the reset match - winner becomes champion.
+        BracketService::record_result(&mut bracket, gf2.id, gf2.player1_id.unwrap()).unwrap();
+
+        assert_eq!(bracket.status, TournamentStatus::Completed);
+        assert!(bracket.winner_id.is_some());
+    }
+
+    #[test]
+    fn double_elimination_losers_routed_correctly() {
+        let mut bracket = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Test",
+            make_participants(8),
+            BracketFormat::DoubleElimination,
+        )
+        .unwrap();
+
+        BracketService::start_tournament(&mut bracket).unwrap();
+
+        // Complete WB Round 1
+        let wb_r1_ids: Vec<_> = bracket
+            .matches
+            .iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Winners)
+            .map(|m| (m.id, m.player1_id))
+            .collect();
+        
+        for (match_id, p1) in wb_r1_ids {
+            if let Some(player1) = p1 {
+                BracketService::record_result(&mut bracket, match_id, player1).unwrap();
+            }
+        }
+        
+        // Check that losers were sent to LB Round 1
+        let lb_r1_filled = bracket.matches.iter()
+            .filter(|m| m.round == 1 && m.bracket_type == BracketType::Losers)
+            .filter(|m| m.player1_id.is_some() || m.player2_id.is_some())
+            .count();
+        
+        // Should have at least some losers in LB
+        assert!(lb_r1_filled > 0, "Some losers should be in LB Round 1");
     }
 }

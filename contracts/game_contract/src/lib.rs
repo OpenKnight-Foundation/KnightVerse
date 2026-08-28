@@ -361,6 +361,30 @@ impl GameContract {
             .set(&TOKEN_CONTRACT, &token_contract);
     }
 
+    /// Upgrade this contract's WASM. Restricted to the ADMIN_KEY holder.
+    ///
+    /// The caller must provide an ED25519 signature (from the backend signing
+    /// service) over `SHA256(wasm_hash)`.
+    pub fn upgrade(env: Env, wasm_hash: BytesN<32>, signature: BytesN<64>) {
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        let payload: Bytes = wasm_hash.clone().into();
+        let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload).into();
+        let digest_bytes: Bytes = digest_bytesn.into();
+        env.crypto()
+            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+
+        env.deployer().update_current_contract_wasm(wasm_hash);
+    }
+
     /// Add a token address to the whitelist.
     /// Authorised by the `admin` address — the contract admin once
     /// `initialize_puzzle_rewards` has been called, or any authorised caller
@@ -489,6 +513,14 @@ impl GameContract {
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
             panic_with_error!(env, ContractError::ContractPaused);
         }
+    }
+
+    /// Internal helper — returns Err(ContractError::ContractPaused) when the contract is paused.
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        if env.storage().instance().get(&PAUSED).unwrap_or(false) {
+            return Err(ContractError::ContractPaused);
+        }
+        Ok(())
     }
 
     /// Gas-optimized tournament payout — single pass, no redundant map reads.
@@ -2614,43 +2646,6 @@ impl GameContract {
             .get(dispute.game_id)
             .ok_or(ContractError::GameNotFound)?;
 
-        // Update dispute status
-        dispute.status = DisputeStatus::Resolved;
-        dispute.resolution = Some(resolution.clone());
-        let game_id = dispute.game_id;
-        disputes.set(dispute_id, dispute);
-        env.storage().instance().set(&DISPUTES, &disputes);
-
-        // Update game state and process payout based on arbitrator's decision
-        if let Some(ref winner_addr) = winner {
-            // Winner takes all
-            let mut games: Map<u64, Game> = env
-                .storage()
-                .instance()
-                .get(&GAMES)
-                .ok_or(ContractError::GameNotFound)?;
-
-            let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
-
-            game.state = GameState::Completed;
-            game.winner = Some(winner_addr.clone());
-            Self::process_payout(&env, &game, winner_addr)?;
-
-            games.set(game_id, game);
-            env.storage().instance().set(&GAMES, &games);
-        } else {
-            // Draw - refund both players
-            let mut games: Map<u64, Game> = env
-                .storage()
-                .instance()
-                .get(&GAMES)
-                .ok_or(ContractError::GameNotFound)?;
-
-            let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
-        if game.state != GameState::InProgress {
-            return Err(ContractError::GameAlreadyCompleted);
-        }
-
         Self::non_reentrant_enter(&env)?;
 
         match winner {
@@ -3414,6 +3409,47 @@ impl GameContract {
         admin: Address,
         player: Address,
         new_rating: i32,
+    ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .expect("Not initialized");
+        current_admin.require_auth();
+
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        if new_rating < 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let mut profiles: Map<Address, PlayerRating> = env
+            .storage()
+            .persistent()
+            .get(&PLAYER_PROFILES)
+            .unwrap_or(Map::new(&env));
+
+        let mut profile = Self::initialize_player_profile(&env, &player);
+        profile.rating = new_rating;
+
+        // Update highest rating if new rating is higher
+        if new_rating > profile.highest_rating {
+            profile.highest_rating = new_rating;
+        }
+
+        profile.last_updated = env.ledger().sequence() as u64;
+
+        profiles.set(player, profile);
+        env.storage()
+            .persistent()
+            .set(&PLAYER_PROFILES, &profiles);
+
+        Ok(())
+    }
+
     // ── SEP-40 Oracle Clock Sync (#533) ───────────────────────────────────────
     //
     // SEP-40 defines a standard oracle interface on Stellar/Soroban.
@@ -3530,31 +3566,11 @@ impl GameContract {
             return Err(ContractError::Unauthorized);
         }
 
-        if new_rating < 0 {
+        if duration == 0 {
             return Err(ContractError::InvalidAmount);
         }
 
-        let mut profiles: Map<Address, PlayerRating> = env
-            .storage()
-            .persistent()
-            .get(&PLAYER_PROFILES)
-            .unwrap_or(Map::new(&env));
-
-        let mut profile = Self::initialize_player_profile(&env, &player);
-        profile.rating = new_rating;
-
-        // Update highest rating if new rating is higher
-        if new_rating > profile.highest_rating {
-            profile.highest_rating = new_rating;
-        }
-
-        profile.last_updated = env.ledger().sequence() as u64;
-
-        profiles.set(player, profile);
-        env.storage()
-            .persistent()
-            .set(&PLAYER_PROFILES, &profiles);
-
+        env.storage().instance().set(&TOURNAMENT_TIMELOCK, &duration);
         Ok(())
     }
 
@@ -3859,15 +3875,11 @@ escrows.set(escrow_id, escrow);
             .ok_or(ContractError::EscrowNotFound)?;
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
     }
-}
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Puzzle Bounty Proofs (#982)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a new puzzle bounty
     pub fn create_puzzle_bounty(
         env: Env,
@@ -3982,14 +3994,11 @@ impl GameContract {
             .ok_or(ContractError::BountyNotFound)?;
         bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Time-Decay Penalties (#986)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize decay configuration
     pub fn initialize_decay_config(
         env: Env,
@@ -4117,14 +4126,11 @@ impl GameContract {
 
         Ok(())
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Token-Gated VIP (#987)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize VIP configuration
     pub fn initialize_vip_config(
         env: Env,
@@ -4228,14 +4234,11 @@ impl GameContract {
             VipTier::None => 0,
         }
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Soulbound Trophies (#994)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Award a soulbound trophy to a player (admin only)
     pub fn award_trophy(
         env: Env,
@@ -4341,14 +4344,11 @@ impl GameContract {
         // Soulbound tokens cannot be transferred
         Err(ContractError::NotTrophyOwner)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Multi-sig Dispute Resolution (#977)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a multi-sig dispute proposal
     pub fn create_multisig_dispute(
         env: Env,
@@ -4460,14 +4460,11 @@ impl GameContract {
             .ok_or(ContractError::DisputeNotFound)?;
         disputes.get(dispute_id).ok_or(ContractError::DisputeNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Dynamic Fee Split (#978)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize dynamic fee split configuration
     pub fn initialize_fee_split(
         env: Env,
@@ -4539,14 +4536,11 @@ impl GameContract {
             .ok_or(ContractError::InvalidFeeSplit)?;
         splits.get(game_id).ok_or(ContractError::InvalidFeeSplit)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Spectator Tipping (#979)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Allow a spectator to tip a player
     pub fn tip_player(
         env: Env,
@@ -4633,14 +4627,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         tips.get(game_id).unwrap_or(Vec::new(&env))
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Anti-Cheat Security Deposit (#980)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize anti-cheat deposit configuration
     pub fn initialize_deposit_config(
         env: Env,
@@ -4793,14 +4784,11 @@ impl GameContract {
             .ok_or(ContractError::NoDeposit)?;
         deposits.get(player).ok_or(ContractError::NoDeposit)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Nonce Replay Protection (#983)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Get the next valid nonce for an address
     pub fn get_next_nonce(env: Env, address: Address) -> u64 {
         let nonces: Map<Address, u64> = env
@@ -4858,14 +4846,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         used.get((address, nonce)).unwrap_or(false)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Guild Escrow Splits (#984)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a guild
     pub fn create_guild(
         env: Env,
@@ -5043,14 +5028,11 @@ impl GameContract {
             .ok_or(ContractError::GuildNotFound)?;
         guilds.get(guild_id).ok_or(ContractError::GuildNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Royalty Enforcement (#991)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Initialize royalty configuration
     pub fn initialize_royalty_config(
         env: Env,
@@ -5157,14 +5139,11 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
         payments.get(game_id).unwrap_or(Vec::new(&env))
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // AI Agent Fusion (#992)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create an AI agent
     pub fn create_ai_agent(
         env: Env,
@@ -5311,14 +5290,11 @@ impl GameContract {
             .ok_or(ContractError::AgentNotFound)?;
         fusions.get(fusion_id).ok_or(ContractError::AgentNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // DAO Treasury (#981)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Deposit funds into DAO treasury
     pub fn deposit_to_dao(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
         from.require_auth();
@@ -5528,14 +5504,11 @@ impl GameContract {
     pub fn get_dao_treasury(env: Env) -> i128 {
         env.storage().instance().get(&DAO_TREASURY).unwrap_or(0)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Seasonal Leaderboard (#985)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a new season
     pub fn create_season(
         env: Env,
@@ -5673,14 +5646,11 @@ impl GameContract {
             .ok_or(ContractError::SeasonNotFound)?;
         seasons.get(season_id).ok_or(ContractError::SeasonNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // DEX Swap Routing (#988)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a DEX swap route
     pub fn create_dex_route(
         env: Env,
@@ -5760,14 +5730,11 @@ impl GameContract {
             .ok_or(ContractError::DexRouteNotFound)?;
         routes.get(route_id).ok_or(ContractError::DexRouteNotFound)
     }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Circuit Breaker Rollback Vote (#989)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl GameContract {
     /// Create a circuit breaker rollback vote
     pub fn create_circuit_breaker_vote(
         env: Env,

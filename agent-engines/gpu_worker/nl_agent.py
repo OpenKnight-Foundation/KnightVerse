@@ -7,11 +7,15 @@ with chess engine analysis to provide intelligent, conversational responses.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
+
+import chess
 
 from gpu_worker.config import WorkerConfig
-from gpu_worker.models import AnalysisRequest, AnalysisResult
+from gpu_worker.models import AnalysisRequest, AnalysisResult, PersonalityTraits
 from gpu_worker.nl_intent_parser import (
     detect_complexity,
     extract_fen_from_input,
@@ -26,8 +30,307 @@ from gpu_worker.nl_models import (
     NLAnalysisResponse,
 )
 from gpu_worker.pool import WorkerPool
+from gpu_worker.tactics import (
+    TacticalAnalysis,
+    TacticalMotif,
+    TacticalPatternExtractor,
+    color_name,
+    parse_move,
+)
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Conversational blunder coaching
+# ---------------------------------------------------------------------------
+
+#: Hard cap on a coaching line so it can be read at a glance during play.
+MAX_EXPLANATION_LENGTH = 250
+
+#: Evaluation drop (in pawns) at which a move is treated as a blunder.
+BLUNDER_THRESHOLD = 1.5
+
+#: Short persona flavour prefixes keyed by the companion's configured tone.
+_TONE_PREFIXES: dict[str, str] = {
+    "neutral": "",
+    "aggressive": "Ouch! ",
+    "humorous": "Yikes! ",
+    "formal": "Note: ",
+}
+
+#: Message used when coaching is withheld during rated play.
+COACHING_DISABLED_MESSAGE = (
+    "Coaching is off during rated play. Enable companion mode and I'll break "
+    "this position down with you."
+)
+
+#: Message used when the move or position could not be verified on the board.
+UNVERIFIABLE_MESSAGE = (
+    "I couldn't verify that move in this position, so I'd rather not guess at "
+    "what went wrong."
+)
+
+
+@dataclass
+class BlunderExplanation:
+    """A coaching line about a blunder plus the evidence behind it."""
+
+    text: str
+    motifs: list[str] = field(default_factory=list)
+    blunder_move: str = ""
+    best_move: str = ""
+    refutation: str = ""
+    is_mate: bool = False
+    material_swing: int = 0
+    latency_ms: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the explanation to a dictionary representation."""
+        return {
+            "text": self.text,
+            "motifs": self.motifs,
+            "blunder_move": self.blunder_move,
+            "best_move": self.best_move,
+            "refutation": self.refutation,
+            "is_mate": self.is_mate,
+            "material_swing": self.material_swing,
+            "latency_ms": self.latency_ms,
+        }
+
+
+class BlunderCoach:
+    """Turns engine output about a blunder into a short coaching sentence.
+
+    The coach is a deterministic template engine on top of
+    :class:`~gpu_worker.tactics.TacticalPatternExtractor`. It never mentions a
+    move it has not verified as legal, and never claims a threat that is not on
+    the board, which keeps it usable as a live in-game companion.
+    """
+
+    def __init__(self, extractor: Optional[TacticalPatternExtractor] = None) -> None:
+        """Initialize the coach.
+
+        Args:
+            extractor: Optional tactical pattern extractor to reuse.
+        """
+        self._extractor = extractor or TacticalPatternExtractor()
+
+    def explain(
+        self,
+        fen: str,
+        blunder_move: str,
+        best_move: str,
+        engine_pv: List[str],
+        traits: Optional[PersonalityTraits] = None,
+        companion_mode: bool = True,
+        rated_game: bool = False,
+        max_length: int = MAX_EXPLANATION_LENGTH,
+    ) -> BlunderExplanation:
+        """Explain a blunder and return the coaching line with its evidence.
+
+        Args:
+            fen: Position before the blunder was played.
+            blunder_move: The move actually played, in UCI or SAN.
+            best_move: The move the engine preferred, in UCI or SAN.
+            engine_pv: The engine's refutation line after the blunder.
+            traits: Optional companion personality driving the tone.
+            companion_mode: Whether the coaching companion is enabled.
+            rated_game: Whether this is an active rated game.
+            max_length: Maximum length of the response.
+
+        Returns:
+            A :class:`BlunderExplanation` whose ``text`` is at most
+            ``max_length`` characters.
+        """
+        start = time.perf_counter()
+
+        if rated_game and not companion_mode:
+            # Never hand out moves or threats in a rated game the player has not
+            # opted into coaching for.
+            return BlunderExplanation(
+                text=_truncate(COACHING_DISABLED_MESSAGE, max_length),
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        analysis = self._extractor.extract(fen, blunder_move, best_move, engine_pv)
+        if not analysis.valid:
+            return BlunderExplanation(
+                text=_truncate(UNVERIFIABLE_MESSAGE, max_length),
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        text = self._compose(analysis, traits, companion_mode, max_length)
+        return BlunderExplanation(
+            text=text,
+            motifs=analysis.motif_names,
+            blunder_move=analysis.blunder_label,
+            best_move=analysis.best_label,
+            refutation=analysis.refutation_label,
+            is_mate=analysis.is_mate,
+            material_swing=analysis.material_swing,
+            latency_ms=(time.perf_counter() - start) * 1000,
+        )
+
+    # ------------------------------------------------------------------
+    # Template engine
+    # ------------------------------------------------------------------
+
+    def _compose(
+        self,
+        analysis: TacticalAnalysis,
+        traits: Optional[PersonalityTraits],
+        companion_mode: bool,
+        max_length: int,
+    ) -> str:
+        """Assemble prefix + cause + consequence + advice within the length budget."""
+        prefix = self._tone_prefix(traits)
+        sentence = self._cause_clause(analysis)
+
+        consequence = self._threat_clause(analysis)
+        if consequence:
+            sentence = f"{sentence}, {consequence}"
+        sentence = f"{sentence}."
+
+        body = f"{prefix}{sentence}"
+
+        # The suggested improvement is optional: it is the first thing dropped
+        # when the budget is tight, and it is withheld outside companion mode.
+        if companion_mode and analysis.best_label:
+            with_advice = f"{body} Better was {analysis.best_label}."
+            if len(with_advice) <= max_length:
+                return with_advice
+
+        if len(body) <= max_length:
+            return body
+        return _truncate(sentence, max_length)
+
+    def _tone_prefix(self, traits: Optional[PersonalityTraits]) -> str:
+        """Map the companion's personality tone to a short flavour prefix."""
+        if traits is None:
+            return ""
+        return _TONE_PREFIXES.get(traits.tone, _TONE_PREFIXES["neutral"])
+
+    def _cause_clause(self, analysis: TacticalAnalysis) -> str:
+        """Describe what the played move gave away."""
+        move = analysis.blunder_label
+        cause = analysis.cause
+
+        if cause is None:
+            if analysis.threat is None:
+                return f"{move} is the losing move here"
+            return f"{move} misses the tactic"
+
+        if cause.motif == TacticalMotif.BACK_RANK_MATE:
+            return f"{move} abandons your back rank"
+
+        square = cause.victim_squares[0] if cause.victim_squares else "the board"
+        piece = cause.victims[0] if cause.victims else "piece"
+        if cause.self_inflicted:
+            return f"{move} puts your {piece} on {square} en prise"
+        if cause.defended:
+            return f"{move} leaves your {piece} on {square} under-defended"
+        return f"{move} leaves your {piece} on {square} undefended"
+
+    def _threat_clause(self, analysis: TacticalAnalysis) -> str:
+        """Describe how the opponent punishes the move."""
+        threat = analysis.threat
+        if threat is None:
+            return ""
+
+        villain = color_name(analysis.villain)
+        with_move = (
+            f" with {analysis.refutation_label}" if analysis.refutation_label else ""
+        )
+
+        if threat.motif in (TacticalMotif.BACK_RANK_MATE, TacticalMotif.MATE_THREAT):
+            mate = (
+                "back-rank mate"
+                if threat.motif == TacticalMotif.BACK_RANK_MATE
+                else "mate"
+            )
+            if threat.immediate:
+                return f"allowing {mate}{with_move}"
+            if threat.forced:
+                return f"allowing {villain} to force {mate}{with_move}"
+            return f"allowing {villain} to threaten {mate}{with_move}"
+
+        if threat.motif == TacticalMotif.FORK:
+            return f"allowing {villain} to fork {threat.victim_phrase()}{with_move}"
+
+        if threat.motif == TacticalMotif.PIN:
+            front, back = threat.victims[0], threat.victims[1]
+            return (
+                f"allowing {villain} to pin your {front} on "
+                f"{threat.victim_squares[0]} to your {back}{with_move}"
+            )
+
+        if threat.motif == TacticalMotif.SKEWER:
+            front, back = threat.victims[0], threat.victims[1]
+            return (
+                f"allowing {villain} to skewer your {front} and win the "
+                f"{back} on {threat.victim_squares[1]}{with_move}"
+            )
+
+        return f"allowing {villain} to win {threat.victim_phrase()}{with_move}"
+
+
+def _truncate(text: str, max_length: int) -> str:
+    """Trim ``text`` to ``max_length`` characters on a word boundary."""
+    if len(text) <= max_length:
+        return text
+    clipped = text[: max_length - 1].rstrip()
+    if " " in clipped:
+        clipped = clipped[: clipped.rindex(" ")].rstrip(" ,;:")
+    return f"{clipped}…"
+
+
+#: Shared coach instance; the extractor is stateless so it is safe to reuse.
+_DEFAULT_COACH = BlunderCoach()
+
+
+def explain_blunder(
+    fen: str,
+    blunder_move: str,
+    best_move: str,
+    engine_pv: List[str],
+    traits: Optional[PersonalityTraits] = None,
+    companion_mode: bool = True,
+    rated_game: bool = False,
+) -> str:
+    """Explain a blunder in plain chess English instead of raw engine output.
+
+    Example::
+
+        >>> fen = "2rb2k1/5ppp/8/3N4/8/8/P5P1/R5K1 b - - 0 34"
+        >>> explain_blunder(fen, "d8a5", "d8e7", ["d5e7"])
+        '34...Ba5 misses the tactic, allowing White to fork your King and Rook
+         with 35.Ne7+. Better was 34...Be7.'
+
+    Args:
+        fen: Position before the blunder was played.
+        blunder_move: The move actually played, in UCI or SAN.
+        best_move: The move the engine preferred, in UCI or SAN.
+        engine_pv: The engine's principal variation refuting the blunder.
+        traits: Optional companion personality; its ``tone`` drives the phrasing.
+        companion_mode: Whether the coaching companion is enabled. When it is
+            off during a rated game no move is suggested.
+        rated_game: Whether this is an active rated game.
+
+    Returns:
+        A coaching line of at most :data:`MAX_EXPLANATION_LENGTH` characters.
+        Every move and threat it names is verified against the board, so an
+        unverifiable input yields a safe fallback rather than a guess.
+    """
+    return _DEFAULT_COACH.explain(
+        fen=fen,
+        blunder_move=blunder_move,
+        best_move=best_move,
+        engine_pv=engine_pv,
+        traits=traits,
+        companion_mode=companion_mode,
+        rated_game=rated_game,
+    ).text
 
 
 class NaturalLanguageAgent:
@@ -45,6 +348,7 @@ class NaturalLanguageAgent:
         """
         self._pool = worker_pool
         self._request_history: dict[str, NLAnalysisRequest] = {}
+        self._coach = BlunderCoach()
     
     async def process_request(
         self,
@@ -179,6 +483,19 @@ class NaturalLanguageAgent:
                 confidence=0.5,
             )
         
+        # When the caller tells us which move was actually played, run the
+        # blunder pipeline so the answer names the tactic instead of the engine line.
+        played_move = request.context.get("played_move")
+        if played_move:
+            return await self.coach_move(
+                fen=request.fen,
+                played_move=played_move,
+                traits=request.context.get("traits"),
+                companion_mode=request.context.get("companion_mode", True),
+                rated_game=request.context.get("rated_game", False),
+                request_id=request.request_id,
+            )
+        
         # Analyze position
         analysis_result = await self._analyze_position(request.fen, depth=18)
         
@@ -270,6 +587,133 @@ class NaturalLanguageAgent:
                 "- Teach you chess concepts"
             ),
             confidence=0.3,
+        )
+    
+    async def coach_move(
+        self,
+        fen: str,
+        played_move: str,
+        traits: Optional[PersonalityTraits] = None,
+        companion_mode: bool = True,
+        rated_game: bool = False,
+        depth: int = 16,
+        blunder_threshold: float = BLUNDER_THRESHOLD,
+        request_id: Optional[str] = None,
+    ) -> NLAnalysisResponse:
+        """Detect whether a played move was a blunder and coach the player on it.
+
+        This is the bridge between the engine-side blunder detection and the
+        natural language generator: the position is analysed before and after
+        the move, and any evaluation collapse is explained in chess terms by
+        :class:`BlunderCoach`.
+
+        Args:
+            fen: Position before the move was played.
+            played_move: The move actually played, in UCI or SAN.
+            traits: Optional companion personality driving the tone.
+            companion_mode: Whether the coaching companion is enabled.
+            rated_game: Whether this is an active rated game. Combined with
+                ``companion_mode=False`` no move is suggested at all.
+            depth: Search depth for both analyses.
+            blunder_threshold: Evaluation drop (in pawns) that counts as a blunder.
+            request_id: Optional request id to echo back.
+
+        Returns:
+            An :class:`NLAnalysisResponse` carrying the coaching line and the
+            motifs behind it in ``metadata``.
+        """
+        request_id = request_id or str(uuid.uuid4())
+        
+        if rated_game and not companion_mode:
+            return NLAnalysisResponse(
+                request_id=request_id,
+                intent=IntentType.EXPLAIN_MOVE,
+                natural_language_response=COACHING_DISABLED_MESSAGE,
+                confidence=1.0,
+                metadata={"companion_mode": False, "rated_game": True},
+            )
+        
+        try:
+            board = chess.Board(fen)
+        except ValueError:
+            board = None
+        
+        move = parse_move(board, played_move) if board is not None else None
+        if move is None:
+            return NLAnalysisResponse(
+                request_id=request_id,
+                intent=IntentType.EXPLAIN_MOVE,
+                natural_language_response=UNVERIFIABLE_MESSAGE,
+                confidence=0.0,
+                metadata={"error": "unverifiable_move", "played_move": played_move},
+            )
+        
+        board.push(move)
+        fen_after = board.fen()
+        
+        before = await self._analyze_position(fen, depth=depth)
+        after = await self._analyze_position(fen_after, depth=depth)
+        
+        # UCI scores are relative to the side to move, so the swing across the
+        # move is the sum of both evaluations.
+        eval_loss: Optional[float] = None
+        if before.evaluation is not None and after.evaluation is not None:
+            eval_loss = before.evaluation + after.evaluation
+        
+        played_is_best = parse_move(chess.Board(fen), before.best_move) == move
+        is_blunder = (
+            not played_is_best
+            and eval_loss is not None
+            and eval_loss >= blunder_threshold
+        )
+        
+        if not is_blunder:
+            return NLAnalysisResponse(
+                request_id=request_id,
+                intent=IntentType.EXPLAIN_MOVE,
+                natural_language_response=(
+                    "That move holds up - I don't see a tactic against it here."
+                ),
+                best_move=before.best_move if companion_mode else None,
+                evaluation=after.evaluation,
+                principal_variation=after.principal_variation,
+                confidence=0.8,
+                metadata={
+                    "is_blunder": False,
+                    "eval_loss": eval_loss,
+                    "played_move": played_move,
+                },
+            )
+        
+        explanation = self._coach.explain(
+            fen=fen,
+            blunder_move=played_move,
+            best_move=before.best_move,
+            engine_pv=after.principal_variation,
+            traits=traits,
+            companion_mode=companion_mode,
+            rated_game=rated_game,
+        )
+        
+        logger.info(
+            f"Coached blunder {request_id}: motifs={explanation.motifs}, "
+            f"loss={eval_loss}, latency={explanation.latency_ms:.1f}ms"
+        )
+        
+        return NLAnalysisResponse(
+            request_id=request_id,
+            intent=IntentType.EXPLAIN_MOVE,
+            natural_language_response=explanation.text,
+            best_move=before.best_move if companion_mode else None,
+            evaluation=after.evaluation,
+            principal_variation=after.principal_variation,
+            confidence=0.9,
+            metadata={
+                "is_blunder": True,
+                "eval_loss": eval_loss,
+                "played_move": played_move,
+                **explanation.to_dict(),
+            },
         )
     
     async def _analyze_position(self, fen: str, depth: int = 18) -> AnalysisResult:

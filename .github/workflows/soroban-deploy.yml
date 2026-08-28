@@ -76,9 +76,7 @@ jobs:
     name: Deploy to Testnet
     runs-on: ubuntu-latest
     needs: validate
-    if: |
-      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
-      secrets.SOROBAN_SECRET_KEY != ''
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     environment: testnet
 
     steps:
@@ -117,6 +115,10 @@ jobs:
 
       - name: Setup deployment identity
         run: |
+          if [ -z "${{ secrets.SOROBAN_SECRET_KEY }}" ]; then
+            echo "SOROBAN_SECRET_KEY is not set – skipping deployment"
+            exit 0
+          fi
           echo "${{ secrets.SOROBAN_SECRET_KEY }}" > secret.key
           soroban config identity add testnet-deployer \
             --secret-key "$(cat secret.key)"
@@ -181,9 +183,7 @@ jobs:
     name: Deploy to Futurenet
     runs-on: ubuntu-latest
     needs: validate
-    if: |
-      github.event.inputs.environment == 'futurenet' &&
-      secrets.SOROBAN_FUTURENET_SECRET_KEY != ''
+    if: github.event.inputs.environment == 'futurenet'
     environment: futurenet
 
     steps:

@@ -14,7 +14,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 actix-web = "4"
-actix-ws = "0.5"
+actix-ws = "0.3.0"
 log = "0.4"
 env_logger = "0.11"
 chess = { path = "../chess" }

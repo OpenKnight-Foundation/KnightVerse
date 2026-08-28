@@ -5,8 +5,8 @@ use actix_web::{
 };
 use db::DbPool;
 use dto::games::{
-    CompleteGameRequest, CompleteGameResponse, CreateGameRequest, GameStatus, ImportGameRequest,
-    ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
+    CompleteGameRequest, CompleteGameResponse, CreateGameRequest, ExportPgnQuery, GameStatus,
+    ImportGameRequest, ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
 };
 use error::error::ApiError;
 use security::jwt::Claims;
@@ -59,12 +59,12 @@ pub async fn create_game(
         Err(resp) => return resp,
     };
 
-    match GameService::create_game(db.get_ref(), creator_id, payload.0).await {
+    match GameService::create_game(pool.get_ref(), creator_id, payload.0).await {
         Ok(game_dto) => {
             // Track game creation metric
             increment_active_games();
             increment_game_events("created");
-            
+
             HttpResponse::Created().json(json!({
                 "message": "Game created successfully",
                 "data": { "game": game_dto }
@@ -365,12 +365,12 @@ pub async fn abandon_game(
 
     let game_id = id.into_inner();
 
-    match GameService::abandon_game(db.get_ref(), game_id, player_id).await {
+    match GameService::abandon_game(pool.get_ref(), game_id, player_id).await {
         Ok(_) => {
             // Track game abandonment metric
             decrement_active_games();
             increment_game_events("abandoned");
-            
+
             HttpResponse::Ok().json(json!({
                 "message": "Game abandoned successfully",
                 "data": {}
@@ -483,6 +483,56 @@ pub async fn import_game(
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/games/{id}/pgn  — READ → replica pool
+// ---------------------------------------------------------------------------
+#[utoipa::path(
+    get,
+    path = "/v1/games/{id}/pgn",
+    params(
+        ("id" = Uuid, Path, description = "Game ID in UUID format", format = "uuid"),
+        ("include_analysis" = Option<bool>, Query, description = "Include %clk and %eval annotations in the movetext")
+    ),
+    responses(
+        (status = 200, description = "PGN file for the game (text/plain, application/x-chess-pgn)"),
+        (status = 404, description = "Game not found", body = NotFoundResponse),
+        (status = 422, description = "Stored game history could not be formatted as valid PGN", body = InvalidCredentialsResponse)
+    ),
+    security(("jwt_auth" = [])),
+    tag = "Games"
+)]
+#[get("/{id}/pgn")]
+pub async fn export_game_pgn(
+    id: Path<Uuid>,
+    query: Query<ExportPgnQuery>,
+    pool: web::Data<DbPool>,
+) -> HttpResponse {
+    let game_id = id.into_inner();
+    let include_analysis = query.include_analysis.unwrap_or(false);
+
+    match GameService::export_pgn(pool.get_ref(), game_id, include_analysis).await {
+        Ok(pgn_text) => HttpResponse::Ok()
+            .content_type("application/x-chess-pgn; charset=utf-8")
+            .insert_header((
+                "Content-Disposition",
+                format!("attachment; filename=\"game-{}.pgn\"", game_id),
+            ))
+            .body(pgn_text),
+        Err(ApiError::NotFound(_)) => HttpResponse::NotFound().json(json!({
+            "message": "Game not found"
+        })),
+        Err(ApiError::BadRequest(msg)) => HttpResponse::UnprocessableEntity().json(json!({
+            "message": msg
+        })),
+        Err(e) => {
+            eprintln!("export_game_pgn error: {e}");
+            HttpResponse::InternalServerError().json(json!({
+                "message": "Failed to export PGN"
+            }))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PUT /v1/games/{id}/complete  — WRITE (transaction) → primary pool
 // ---------------------------------------------------------------------------
 #[utoipa::path(
@@ -570,7 +620,7 @@ pub async fn complete_game(
             // Track game completion metric
             decrement_active_games();
             increment_game_events("completed");
-            
+
             let white_change = white_new_rating - white_old_rating;
             let black_change = black_new_rating - black_old_rating;
 

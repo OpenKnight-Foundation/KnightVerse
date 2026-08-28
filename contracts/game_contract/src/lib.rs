@@ -361,6 +361,30 @@ impl GameContract {
             .set(&TOKEN_CONTRACT, &token_contract);
     }
 
+    /// Upgrade this contract's WASM. Restricted to the ADMIN_KEY holder.
+    ///
+    /// The caller must provide an ED25519 signature (from the backend signing
+    /// service) over `SHA256(wasm_hash)`.
+    pub fn upgrade(env: Env, wasm_hash: BytesN<32>, signature: BytesN<64>) {
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("Not initialized");
+
+        let admin_pubkey: BytesN<32> = admin_key_bytes
+            .try_into()
+            .expect("Admin public key must be 32 bytes");
+
+        let payload: Bytes = wasm_hash.clone().into();
+        let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload).into();
+        let digest_bytes: Bytes = digest_bytesn.into();
+        env.crypto()
+            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+
+        env.deployer().update_current_contract_wasm(wasm_hash);
+    }
+
     /// Add a token address to the whitelist.
     /// Authorised by the `admin` address — the contract admin once
     /// `initialize_puzzle_rewards` has been called, or any authorised caller

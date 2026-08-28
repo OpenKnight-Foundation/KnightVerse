@@ -16,7 +16,17 @@ from gpu_worker.batch import (
 )
 from gpu_worker.config import EngineBackend, GPUConfig, WorkerConfig
 from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
-from gpu_worker.elo_scaling import EngineParams, elo_to_engine_params
+from gpu_worker.elo_scaling import (
+    CandidateMove,
+    DynamicEloController,
+    DynamicScalingConfig,
+    DynamicScalingRegistry,
+    EngineParams,
+    GameMode,
+    ScalingDecision,
+    ScalingState,
+    elo_to_engine_params,
+)
 from gpu_worker.models import (
     AnalysisRequest,
     AnalysisResult,
@@ -45,17 +55,24 @@ __all__ = [
     "BotFarmEvent",
     "BotFarmFinding",
     "BotFarmReport",
+    "CandidateMove",
     "ConsensusResult",
+    "DynamicEloController",
+    "DynamicScalingConfig",
+    "DynamicScalingRegistry",
     "EloAnalysisRequest",
     "EloScalingMiddleware",
     "EnsembleEvaluator",
     "EngineBackend",
     "EngineParams",
     "FENTokenizer",
+    "GameMode",
     "LoRAModel",
     "LoRATrainingPipeline",
     "MotifDetection",
     "MoveGuardrail",
+    "ScalingDecision",
+    "ScalingState",
     "TacticalMotif",
     "TacticalPatternExtractor",
     "TensorEvaluationCache",

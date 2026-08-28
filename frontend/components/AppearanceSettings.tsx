@@ -9,6 +9,8 @@ import {
   calculateContrastRatio,
   getContrastEvaluation,
 } from "@/context/ThemeContext";
+import { useGamePreferences, PieceSet } from "@/context/GamePreferencesContext";
+import Image from "next/image";
 import {
   Palette,
   Check,
@@ -19,7 +21,31 @@ import {
   Cloud,
   Sparkles,
   Info,
+  ChevronDown,
 } from "lucide-react";
+
+// Import preview piece images
+import NeoWhiteKing from "./chess/chesspieces/neo/white-king.svg";
+import StauntonWhiteKing from "./chess/chesspieces/staunton/white-king.svg";
+import AlphaWhiteKing from "./chess/chesspieces/alpha/white-king.svg";
+import MedievalWhiteKing from "./chess/chesspieces/medieval/white-king.svg";
+import CyberpunkWhiteKing from "./chess/chesspieces/cyberpunk/white-king.svg";
+
+const PIECE_SET_PREVIEWS: Record<PieceSet, string> = {
+  neo: NeoWhiteKing,
+  staunton: StauntonWhiteKing,
+  alpha: AlphaWhiteKing,
+  medieval: MedievalWhiteKing,
+  cyberpunk: CyberpunkWhiteKing,
+};
+
+const PIECE_SETS: { id: PieceSet; label: string; description: string }[] = [
+  { id: "neo", label: "Standard Neo", description: "Modern minimalist vector pieces" },
+  { id: "staunton", label: "Staunton Classic", description: "Traditional tournament-style pieces" },
+  { id: "alpha", label: "Alpha", description: "Sleek geometric abstract design" },
+  { id: "medieval", label: "Medieval Knight", description: "Ornate historical fantasy pieces" },
+  { id: "cyberpunk", label: "Cyberpunk Glow", description: "Neon-lit futuristic aesthetic" },
+];
 
 // Sample pieces for interactive preview board (8x8 mini standard layout or demo layout)
 const PREVIEW_BOARD_SETUP: string[][] = [
@@ -58,6 +84,7 @@ export default function AppearanceSettings() {
     resetTheme,
     isSynced,
   } = useBoardTheme();
+  const { preferences, setPreference } = useGamePreferences();
 
   const [activeTab, setActiveTab] = useState<"presets" | "custom">("presets");
   const [previewSelectedSquare, setPreviewSelectedSquare] = useState<string>("6,4"); // e2
@@ -188,6 +215,72 @@ export default function AppearanceSettings() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mt-6">
         {/* Left Column: Palette Controls */}
         <div className="lg:col-span-7 flex flex-col space-y-6">
+          {/* Piece Set Selector */}
+          <div className="space-y-3 bg-gray-800/40 border border-gray-800 p-5 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-white">Chess Piece Set</label>
+              <div className="flex items-center space-x-2">
+                <div className="w-10 h-10 relative">
+                  <Image
+                    src={PIECE_SET_PREVIEWS[preferences.pieceSet]}
+                    alt="Current piece set preview"
+                    fill
+                    className="object-contain"
+                    sizes="40px"
+                  />
+                </div>
+                <div className="relative">
+                  <select
+                    value={preferences.pieceSet}
+                    onChange={(e) => setPreference("pieceSet", e.target.value as PieceSet)}
+                    className="appearance-none bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 pr-10 text-sm text-white cursor-pointer hover:border-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all duration-200"
+                    data-testid="piece-set-selector"
+                  >
+                    {PIECE_SETS.map((set) => (
+                      <option key={set.id} value={set.id}>
+                        {set.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">
+              {PIECE_SETS.find(set => set.id === preferences.pieceSet)?.description}
+            </p>
+            
+            {/* Piece set grid preview */}
+            <div className="grid grid-cols-5 gap-3 mt-4">
+              {PIECE_SETS.map((set) => (
+                <button
+                  key={set.id}
+                  type="button"
+                  onClick={() => setPreference("pieceSet", set.id)}
+                  className={`p-3 rounded-lg border transition-all duration-200 flex flex-col items-center space-y-2 ${
+                    preferences.pieceSet === set.id
+                      ? "bg-gray-900 border-teal-500 ring-2 ring-teal-500/30"
+                      : "bg-gray-900/50 border-gray-700 hover:border-gray-600"
+                  }`}
+                >
+                  <div className="w-8 h-8 relative">
+                    <Image
+                      src={PIECE_SET_PREVIEWS[set.id]}
+                      alt={set.label}
+                      fill
+                      className="object-contain"
+                      sizes="32px"
+                    />
+                  </div>
+                  <span className="text-[10px] text-gray-400 text-center leading-tight">{set.label}</span>
+                  {preferences.pieceSet === set.id && (
+                    <Check className="w-3 h-3 text-teal-400" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Studio Mode Tabs */}
           <div className="flex p-1 bg-gray-800/80 backdrop-blur-sm rounded-xl border border-gray-700/60">
             <button

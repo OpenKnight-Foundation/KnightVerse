@@ -100,6 +100,10 @@ class AsyncUciBridge:
         self._process: UciProcess | None = None
         self._command_lock = asyncio.Lock()
         self._supported_options: set[str] = set()
+        # Every MultiPV line from the most recent search, ordered best first.
+        # Populated by :meth:`go`; consumers use it to choose between the
+        # engine's candidate moves.
+        self.last_search_lines: list[UciInfo] = []
 
     async def start(self) -> None:
         """Spawn the engine process and complete the UCI handshake."""
@@ -181,12 +185,19 @@ class AsyncUciBridge:
 
         await self._send_command(" ".join(command))
         info = UciInfo()
+        lines: dict[int, UciInfo] = {}
+        self.last_search_lines = []
 
         async def matcher(line: str) -> UciBestMove | None:
             nonlocal info
             parsed_info = parse_info_line(line)
-            if parsed_info is not None and parsed_info.multipv == 1:
-                info = parsed_info
+            if parsed_info is not None:
+                # Keep the latest line per MultiPV index; ignore progress
+                # updates that carry no variation.
+                if parsed_info.principal_variation:
+                    lines[parsed_info.multipv] = parsed_info
+                if parsed_info.multipv == 1:
+                    info = parsed_info
                 return None
             best_move = parse_bestmove_line(line)
             return best_move
@@ -201,6 +212,7 @@ class AsyncUciBridge:
                     max_retries=0,  # We're handling retries at this level for search operations
                     initial_backoff=self.initial_backoff
                 )
+                self.last_search_lines = [lines[key] for key in sorted(lines)]
                 return best_move, info
             except UciBridgeError as e:
                 if attempt < self.max_retries:

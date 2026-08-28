@@ -100,4 +100,6 @@ pub enum ContractError {
     ReentrantCall = 50,
     /// Circuit breaker vote not found
     CircuitBreakerVoteNotFound = 51,
+    /// Upgrade of contract code failed (SC-21)
+    UpgradeFailed = 52,
 }

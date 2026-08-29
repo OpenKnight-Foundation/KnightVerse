@@ -4,6 +4,7 @@ members = [
     "game_contract",
     "emergency_circuit_breaker",
     "ai_nft",
+    "title_badge",
 ]
 
 [profile.release]

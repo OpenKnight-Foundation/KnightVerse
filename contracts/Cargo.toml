@@ -4,6 +4,8 @@ members = [
     "game_contract",
     "emergency_circuit_breaker",
     "ai_nft",
+    "referral_splitter",
+    "model_attestation",
 ]
 
 [profile.release]

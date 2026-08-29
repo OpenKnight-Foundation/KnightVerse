@@ -36,29 +36,39 @@ impl MatchmakingService {
     }
 
     // Helper method to verify Soroban escrow signature
-    async fn verify_escrow_signature(&self, signature: &str, wallet_address: &str, token: &str, amount: u64) -> Result<bool, String> {
+    async fn verify_escrow_signature(
+        &self,
+        signature: &str,
+        wallet_address: &str,
+        token: &str,
+        amount: u64,
+    ) -> Result<bool, String> {
         // In a real implementation, this would call Soroban RPC to verify the on-chain deposit
         // For now, we'll implement basic validation - in production, this would be a proper verification
         if signature.is_empty() {
             return Ok(false);
         }
-        
+
         // Mock verification - in production, replace with actual Soroban call
-        tracing::info!("Verifying escrow signature: {} for wallet: {} token: {} amount: {}", 
-            signature, wallet_address, token, amount);
-            
+        tracing::info!(
+            "Verifying escrow signature: {} for wallet: {} token: {} amount: {}",
+            signature,
+            wallet_address,
+            token,
+            amount
+        );
+
         // For testing purposes, any non-empty signature is considered valid
         Ok(true)
     }
 
-    async fn find_match_for_queue(&self, request: &MatchRequest) -> Result<Option<MatchmakingResponse>, String> {
+    async fn find_match_for_queue(
+        &self,
+        request: &MatchRequest,
+    ) -> Result<Option<MatchmakingResponse>, String> {
         match &request.queue_type {
-            QueueType::RatedFree => {
-                self.find_rated_free_match(request).await
-            }
-            QueueType::CasualUnrated => {
-                self.find_casual_unrated_match(request).await
-            }
+            QueueType::RatedFree => self.find_rated_free_match(request).await,
+            QueueType::CasualUnrated => self.find_casual_unrated_match(request).await,
             QueueType::RatedStaked { token, amount } => {
                 self.find_rated_staked_match(request, token, amount).await
             }
@@ -74,24 +84,25 @@ impl MatchmakingService {
         // Validate staked queue requirements
         if let QueueType::RatedStaked { token, amount } = &request.queue_type {
             // Verify we have stake info and escrow signature
-            let stake_info = request.stake_info.as_ref()
+            let stake_info = request
+                .stake_info
+                .as_ref()
                 .ok_or_else(|| "Missing stake information for staked queue".to_string())?;
-                
+
             if stake_info.token != *token || stake_info.amount != *amount {
                 return Err("Stake info mismatch with queue type".to_string());
             }
-            
-            let signature = stake_info.escrow_signature.as_ref()
+
+            let signature = stake_info
+                .escrow_signature
+                .as_ref()
                 .ok_or_else(|| "Missing escrow signature for staked queue".to_string())?;
-                
+
             // Verify the escrow signature on-chain
-            let is_valid = self.verify_escrow_signature(
-                signature, 
-                &request.player.wallet_address, 
-                token, 
-                *amount
-            ).await?;
-            
+            let is_valid = self
+                .verify_escrow_signature(signature, &request.player.wallet_address, token, *amount)
+                .await?;
+
             if !is_valid {
                 return Err("Invalid or unverified escrow deposit".to_string());
             }
@@ -131,7 +142,7 @@ impl MatchmakingService {
 
     async fn add_to_redis_queue(&self, request: &MatchRequest) -> Result<(), String> {
         let mut conn = self.get_redis_connection().await?;
-        let key = request.match_type.redis_key();
+        let key = request.queue_type.redis_key();
         let now = Utc::now();
         let score = now.timestamp() as f64;
         let value = request
@@ -237,8 +248,9 @@ impl MatchmakingService {
                     id: match_id,
                     player1: invite_request.player,
                     player2: accepting_player,
-                    match_type: MatchType::Private,
+                    queue_type: QueueType::Private,
                     created_at: Utc::now(),
+                    stake_info: None,
                     time_control: invite_request.time_control.clone(),
                 };
 
@@ -366,7 +378,7 @@ impl MatchmakingService {
                         request_id,
                         position: 1,
                         estimated_wait_time: DEFAULT_ESTIMATED_WAIT_TIME,
-                        match_type: MatchType::Private,
+                        queue_type: QueueType::Private,
                     }));
                 }
             }
@@ -491,7 +503,7 @@ impl MatchmakingService {
 
         // Pop the oldest player from queue (FIFO)
         let result: Vec<(String, f64)> = conn
-            .zpopmin(key, 1)
+            .zpopmin(&key, 1)
             .await
             .map_err(|e| format!("Redis ZPOPMIN failed: {}", e))?;
 
@@ -542,9 +554,9 @@ impl MatchmakingService {
         amount: &u64,
     ) -> Result<Option<MatchmakingResponse>, String> {
         let mut conn = self.get_redis_connection().await?;
-        let queue_type = QueueType::RatedStaked { 
-            token: token.to_string(), 
-            amount: *amount 
+        let queue_type = QueueType::RatedStaked {
+            token: token.to_string(),
+            amount: *amount,
         };
         let key = queue_type.redis_key();
         let player_elo = request.player.elo;
@@ -594,7 +606,7 @@ impl MatchmakingService {
         "#;
 
         let result: Option<String> = redis::Script::new(lua_script)
-            .key(key)
+            .key(&key)
             .arg(player_elo)
             .arg(search_range)
             .arg(token)
@@ -606,12 +618,18 @@ impl MatchmakingService {
         if let Some(opponent_json) = result {
             if let Ok(opponent_request) = MatchRequest::from_redis_value(&opponent_json) {
                 // Double-check that both players have valid escrow signatures
-                let opponent_stake = opponent_request.stake_info.as_ref()
+                let opponent_stake = opponent_request
+                    .stake_info
+                    .as_ref()
                     .ok_or_else(|| "Opponent missing stake info".to_string())?;
-                let player_stake = request.stake_info.as_ref()
+                let player_stake = request
+                    .stake_info
+                    .as_ref()
                     .ok_or_else(|| "Player missing stake info".to_string())?;
-                
-                if opponent_stake.escrow_signature.is_none() || player_stake.escrow_signature.is_none() {
+
+                if opponent_stake.escrow_signature.is_none()
+                    || player_stake.escrow_signature.is_none()
+                {
                     // Put the player back if one doesn't have a valid signature
                     let now = Utc::now();
                     let score = now.timestamp() as f64;
@@ -626,9 +644,9 @@ impl MatchmakingService {
                     id: match_id,
                     player1: opponent_request.player,
                     player2: request.player.clone(),
-                    queue_type: QueueType::RatedStaked { 
-                        token: token.to_string(), 
-                        amount: *amount 
+                    queue_type: QueueType::RatedStaked {
+                        token: token.to_string(),
+                        amount: *amount,
                     },
                     created_at: Utc::now(),
                     stake_info: Some(StakeInfo {
@@ -657,7 +675,9 @@ impl MatchmakingService {
         match queue_type {
             QueueType::RatedFree => Duration::from_secs((30 + position as u64 * 15).min(300)),
             QueueType::CasualUnrated => Duration::from_secs((15 + position as u64 * 10).min(180)),
-            QueueType::RatedStaked { .. } => Duration::from_secs((45 + position as u64 * 20).min(400)), // Staked matches might have longer wait times
+            QueueType::RatedStaked { .. } => {
+                Duration::from_secs((45 + position as u64 * 20).min(400))
+            } // Staked matches might have longer wait times
             QueueType::Private => DEFAULT_ESTIMATED_WAIT_TIME,
         }
     }
@@ -665,17 +685,18 @@ impl MatchmakingService {
     pub async fn expand_elo_ranges(&self) -> Result<(), String> {
         let mut conn = self.get_redis_connection().await?;
         let now = Utc::now();
-        
+
         // Expand ranges for rated free queue
         let rated_free_key = QueueType::RatedFree.redis_key();
-        self.expand_elo_ranges_for_queue(&mut conn, &rated_free_key, now).await?;
-        
+        self.expand_elo_ranges_for_queue(&mut conn, &rated_free_key, now)
+            .await?;
+
         // Also expand ranges for all staked queues (in a real implementation, you'd track active staked queues)
         // For simplicity, we'll assume we know the common ones - in production, track them separately
-        
+
         Ok(())
     }
-    
+
     async fn expand_elo_ranges_for_queue(
         &self,
         conn: &mut deadpool_redis::Connection,
@@ -690,10 +711,13 @@ impl MatchmakingService {
         for (member, score) in members {
             if let Ok(mut request) = MatchRequest::from_redis_value(&member) {
                 // Only expand elo ranges for rated queues (both free and staked)
-                if !matches!(request.queue_type, QueueType::RatedFree | QueueType::RatedStaked { .. }) {
+                if !matches!(
+                    request.queue_type,
+                    QueueType::RatedFree | QueueType::RatedStaked { .. }
+                ) {
                     continue;
                 }
-                
+
                 let wait_time = now.signed_duration_since(request.player.join_time);
                 let wait_seconds = wait_time.num_seconds().max(0) as u32;
                 let expansion_steps = wait_seconds / 5;

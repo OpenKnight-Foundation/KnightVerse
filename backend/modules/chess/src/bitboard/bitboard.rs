@@ -26,7 +26,6 @@ impl Bitboard {
         (self.0 & (1 << square)) != 0
     }
 
-    #[allow(clippy::should_implement_trait)]
     pub fn add(self, square: u64) -> Bitboard {
         Bitboard(self.0 | (1 << square))
     }

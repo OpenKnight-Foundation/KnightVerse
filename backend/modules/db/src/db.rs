@@ -93,8 +93,7 @@ pub mod db {
         /// Panics only when `DATABASE_URL` is missing.
         pub async fn from_env() -> Self {
             dotenv::dotenv().ok();
-            let primary_url =
-                std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+            let primary_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
             let replica_url = std::env::var("DATABASE_REPLICA_URL").ok();
 
             Self::connect(&primary_url, replica_url.as_deref()).await
@@ -112,28 +111,26 @@ pub mod db {
             info!("Connected to primary database");
 
             // Initialise primary pool metrics ceiling from the pool config.
-            let primary_max = Self::options(primary_url).get_max_connections() as i64;
+            let primary_max = Self::options(primary_url)
+                .get_max_connections()
+                .unwrap_or(20) as i64;
             POOL_MAX.with_label_values(&["primary"]).set(primary_max);
 
             let (replica, has_replica) = match replica_url {
-                Some(url) => {
-                    match Database::connect(Self::options(url)).await {
-                        Ok(conn) => {
-                            let replica_max =
-                                Self::options(url).get_max_connections() as i64;
-                            POOL_MAX.with_label_values(&["replica"]).set(replica_max);
-                            info!("Connected to replica database");
-                            (Arc::new(conn), true)
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Failed to connect to replica DB ({e}); falling back to primary"
-                            );
-                            POOL_MAX.with_label_values(&["replica"]).set(primary_max);
-                            (primary.clone(), false)
-                        }
+                Some(url) => match Database::connect(Self::options(url)).await {
+                    Ok(conn) => {
+                        let replica_max =
+                            Self::options(url).get_max_connections().unwrap_or(20) as i64;
+                        POOL_MAX.with_label_values(&["replica"]).set(replica_max);
+                        info!("Connected to replica database");
+                        (Arc::new(conn), true)
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to connect to replica DB ({e}); falling back to primary");
+                        POOL_MAX.with_label_values(&["replica"]).set(primary_max);
+                        (primary.clone(), false)
+                    }
+                },
                 None => {
                     info!("DATABASE_REPLICA_URL not set — operating in single-pool mode");
                     POOL_MAX.with_label_values(&["replica"]).set(primary_max);
@@ -197,16 +194,15 @@ pub mod db {
         fn record_pool_metrics(label: &str, conn: &DatabaseConnection) {
             // sea-orm exposes the underlying sqlx pool through get_postgres_connection_pool().
             // The sqlx pool tracks active/idle/max connections.
-            if let Some(pool) = conn.get_postgres_connection_pool() {
-                let size = pool.size() as i64;
-                let idle = pool.num_idle() as i64;
-                let max = pool.options().get_max_connections() as i64;
-                let active = size - idle;
+            let pool = conn.get_postgres_connection_pool();
+            let size = pool.size() as i64;
+            let idle = pool.num_idle() as i64;
+            let max = pool.options().get_max_connections() as i64;
+            let active = size - idle;
 
-                POOL_ACTIVE.with_label_values(&[label]).set(active.max(0));
-                POOL_IDLE.with_label_values(&[label]).set(idle);
-                POOL_MAX.with_label_values(&[label]).set(max);
-            }
+            POOL_ACTIVE.with_label_values(&[label]).set(active.max(0));
+            POOL_IDLE.with_label_values(&[label]).set(idle);
+            POOL_MAX.with_label_values(&[label]).set(max);
         }
 
         // ------------------------------------------------------------------
@@ -233,9 +229,7 @@ pub mod db {
         ///
         /// Intended for unit tests that need to inspect the transaction log on
         /// each mock connection after calling service methods.
-        pub fn into_connections(
-            self,
-        ) -> (Arc<DatabaseConnection>, Arc<DatabaseConnection>) {
+        pub fn into_connections(self) -> (Arc<DatabaseConnection>, Arc<DatabaseConnection>) {
             (self.primary, self.replica)
         }
 

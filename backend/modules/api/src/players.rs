@@ -1,6 +1,6 @@
 use actix_web::{
     delete, get, post, put,
-    web::{Json, Path},
+    web::{self, Json, Path},
     HttpMessage, HttpRequest, HttpResponse,
 };
 use db::DbPool;
@@ -143,7 +143,11 @@ pub async fn update_player(
     )
 )]
 #[delete("/{id}")]
-pub async fn delete_player(req: HttpRequest, pool: web::Data<DbPool>, id: Path<Uuid>) -> HttpResponse {
+pub async fn delete_player(
+    req: HttpRequest,
+    pool: web::Data<DbPool>,
+    id: Path<Uuid>,
+) -> HttpResponse {
     let path_uuid = id.into_inner();
 
     // IDOR check: the authenticated caller must own this profile.

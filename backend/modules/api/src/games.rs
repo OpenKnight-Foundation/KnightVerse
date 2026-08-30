@@ -1,3 +1,4 @@
+use crate::metrics::{decrement_active_games, increment_active_games, increment_game_events};
 use actix_web::{
     delete, get, post, put,
     web::{self, Json, Path, Query},
@@ -194,10 +195,7 @@ pub async fn make_move(
     tag = "Games"
 )]
 #[get("")]
-pub async fn list_games(
-    query: Query<ListGamesQuery>,
-    pool: web::Data<DbPool>,
-) -> HttpResponse {
+pub async fn list_games(query: Query<ListGamesQuery>, pool: web::Data<DbPool>) -> HttpResponse {
     let status_enum: Option<GameStatus> = query.status.as_deref().and_then(|s| match s {
         "waiting" => Some(GameStatus::Waiting),
         "in_progress" => Some(GameStatus::InProgress),

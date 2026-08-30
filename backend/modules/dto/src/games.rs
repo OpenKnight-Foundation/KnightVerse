@@ -123,6 +123,12 @@ pub fn validate_uuid(uuid: &Uuid) -> Result<(), ValidationError> {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct ExportPgnQuery {
+    #[schema(example = false)]
+    pub include_analysis: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct ListGamesQuery {
     #[schema(example = "waiting")]
     pub status: Option<String>,

@@ -5,6 +5,8 @@ members = [
     "emergency_circuit_breaker",
     "ai_nft",
     "title_badge",
+    "referral_splitter",
+    "model_attestation",
 ]
 
 [profile.release]

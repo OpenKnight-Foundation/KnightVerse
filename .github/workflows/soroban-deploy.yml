@@ -131,6 +131,11 @@ jobs:
       - name: Deploy contracts
         env:
           CONTRACT_NAME: ${{ github.event.inputs.contract_name }}
+          DEPLOYER_ADDRESS: ${{ secrets.DEPLOYER_ADDRESS }}
+          ORACLE_1_ADDRESS: ${{ secrets.ORACLE_1_ADDRESS }}
+          ORACLE_2_ADDRESS: ${{ secrets.ORACLE_2_ADDRESS }}
+          ORACLE_3_ADDRESS: ${{ secrets.ORACLE_3_ADDRESS }}
+          ORACLE_THRESHOLD: ${{ secrets.ORACLE_THRESHOLD || '2' }}
         run: |
           cd contracts
 
@@ -149,6 +154,17 @@ jobs:
               --network testnet)
             echo "Contract ID: $CONTRACT_ID"
             echo "${CONTRACT_NAME}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
+            if [ "${CONTRACT_NAME}" = "title_badge" ]; then
+              soroban contract invoke \
+                --id "${CONTRACT_ID}" \
+                --source testnet-deployer \
+                --network testnet \
+                -- \
+                initialize \
+                --admin "${DEPLOYER_ADDRESS}" \
+                --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
+                --threshold "${ORACLE_THRESHOLD}"
+            fi
           else
             for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
               if [ -f "$wasm_file" ]; then
@@ -160,6 +176,17 @@ jobs:
                   --network testnet)
                 echo "$contract_name deployed: $CONTRACT_ID"
                 echo "${contract_name}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
+                if [ "$contract_name" = "title_badge" ]; then
+                  soroban contract invoke \
+                    --id "${CONTRACT_ID}" \
+                    --source testnet-deployer \
+                    --network testnet \
+                    -- \
+                    initialize \
+                    --admin "${DEPLOYER_ADDRESS}" \
+                    --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
+                    --threshold "${ORACLE_THRESHOLD}"
+                fi
               fi
             done
           fi
@@ -232,6 +259,12 @@ jobs:
         run: cargo build --release --target wasm32-unknown-unknown
 
       - name: Deploy contracts
+        env:
+          DEPLOYER_ADDRESS: ${{ secrets.DEPLOYER_ADDRESS }}
+          ORACLE_1_ADDRESS: ${{ secrets.ORACLE_1_ADDRESS }}
+          ORACLE_2_ADDRESS: ${{ secrets.ORACLE_2_ADDRESS }}
+          ORACLE_3_ADDRESS: ${{ secrets.ORACLE_3_ADDRESS }}
+          ORACLE_THRESHOLD: ${{ secrets.ORACLE_THRESHOLD || '2' }}
         run: |
           cd contracts
           for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
@@ -243,6 +276,17 @@ jobs:
                 --source futurenet-deployer \
                 --network futurenet)
               echo "$contract_name deployed to futurenet: $CONTRACT_ID"
+              if [ "$contract_name" = "title_badge" ]; then
+                soroban contract invoke \
+                  --id "${CONTRACT_ID}" \
+                  --source futurenet-deployer \
+                  --network futurenet \
+                  -- \
+                  initialize \
+                  --admin "${DEPLOYER_ADDRESS}" \
+                  --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
+                  --threshold "${ORACLE_THRESHOLD}"
+              fi
             fi
           done
 

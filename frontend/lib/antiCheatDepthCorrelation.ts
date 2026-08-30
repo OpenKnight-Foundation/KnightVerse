@@ -61,7 +61,6 @@ function computeWED(profiles: MoveDepthProfile[]): number {
   for (const p of profiles) {
     for (const e of p.evals) {
       const w = depthWeights[e.depth] ?? 0.1;
-      const bestScore = e.score;
       // If played move is top-1, no loss; otherwise approximate 0.1 cp loss per rank drop
       const rank = e.topMoves.indexOf(p.played);
       const loss = rank < 0 ? 50 : rank * 10;

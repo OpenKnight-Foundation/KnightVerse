@@ -1,0 +1,26 @@
+[package]
+name = "gasless_relayer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = "21.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+overflow-checks = true

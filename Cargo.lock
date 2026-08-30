@@ -514,6 +514,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gasless_relayer"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "rand",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,6 +1,37 @@
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
 import type { EloStats, TimeRange } from "@/hook/useEloStats";
 
+export interface ColorWinBreakdown {
+  label: string;
+  games: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+}
+
+export interface OpeningWinRate {
+  opening: string;
+  games: number;
+  wins: number;
+  winRate: number;
+}
+
+export const DEFAULT_OPENINGS = [
+  "Italian Game",
+  "Sicilian Defense",
+  "Queen's Gambit",
+  "French Defense",
+  "Ruy Lopez",
+] as const;
+
+export function formatRatingDelta(value: number): string {
+  if (value === 0) {
+    return "0";
+  }
+
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
 export function filterByTimeRange(data: EloDataPoint[], range: TimeRange): EloDataPoint[] {
   if (!data.length || range === "all") {
     return data;
@@ -19,6 +50,11 @@ export function filterByTimeRange(data: EloDataPoint[], range: TimeRange): EloDa
     case "90d":
       cutoff.setDate(cutoff.getDate() - 90);
       break;
+    case "1y":
+      cutoff.setFullYear(cutoff.getFullYear() - 1);
+      break;
+    default:
+      return data;
   }
 
   return data.filter((point) => new Date(point.date) >= cutoff);
@@ -75,6 +111,65 @@ export function computeVolatility(data: EloDataPoint[]): number {
   const variance = data.reduce((sum, point) => sum + (point.change - avgChange) ** 2, 0) / data.length;
 
   return Math.sqrt(variance);
+}
+
+export function buildColorWinBreakdown(data: EloDataPoint[]): ColorWinBreakdown[] {
+  if (!data.length) {
+    return [
+      { label: "White", games: 0, wins: 0, losses: 0, winRate: 0 },
+      { label: "Black", games: 0, wins: 0, losses: 0, winRate: 0 },
+    ];
+  }
+
+  const buckets = {
+    White: { label: "White", games: 0, wins: 0, losses: 0 },
+    Black: { label: "Black", games: 0, wins: 0, losses: 0 },
+  } satisfies Record<string, Omit<ColorWinBreakdown, "winRate">>;
+
+  data.forEach((point, index) => {
+    const bucket = index % 2 === 0 ? buckets.White : buckets.Black;
+    bucket.games += 1;
+
+    if (point.change > 0) {
+      bucket.wins += 1;
+    } else if (point.change < 0) {
+      bucket.losses += 1;
+    }
+  });
+
+  return Object.values(buckets).map((bucket) => ({
+    ...bucket,
+    winRate: bucket.games ? (bucket.wins / bucket.games) * 100 : 0,
+  }));
+}
+
+export function buildOpeningWinRates(data: EloDataPoint[]): OpeningWinRate[] {
+  if (!data.length) {
+    return [];
+  }
+
+  const buckets = DEFAULT_OPENINGS.reduce<Record<string, { games: number; wins: number }>>((acc, opening) => {
+    acc[opening] = { games: 0, wins: 0 };
+    return acc;
+  }, {});
+
+  data.forEach((point, index) => {
+    const opening = DEFAULT_OPENINGS[index % DEFAULT_OPENINGS.length];
+    buckets[opening].games += 1;
+
+    if (point.change > 0) {
+      buckets[opening].wins += 1;
+    }
+  });
+
+  return Object.entries(buckets)
+    .map(([opening, bucket]) => ({
+      opening,
+      games: bucket.games,
+      wins: bucket.wins,
+      winRate: bucket.games ? (bucket.wins / bucket.games) * 100 : 0,
+    }))
+    .sort((left, right) => right.winRate - left.winRate);
 }
 
 export function computeEloStats(data: EloDataPoint[]): Omit<EloStats, "filteredData"> {

@@ -514,6 +514,7 @@ dependencies = [
  "serde",
  "serde_json",
  "service",
+ "sha2",
  "st_core",
  "tokio",
  "tracing",
@@ -1064,6 +1065,7 @@ dependencies = [
  "db_entity",
  "error",
  "matchmaking",
+ "rand 0.8.6",
  "regex",
  "sea-orm",
  "serde",
@@ -2469,6 +2471,7 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -3939,10 +3942,12 @@ dependencies = [
  "base64 0.21.7",
  "chrono",
  "db_entity",
+ "deadpool-redis",
  "futures-util",
  "jsonwebtoken",
  "log",
  "rand 0.8.6",
+ "redis",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4050,6 +4055,7 @@ dependencies = [
  "error",
  "rand 0.8.6",
  "sea-orm",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

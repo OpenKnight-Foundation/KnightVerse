@@ -5,6 +5,10 @@ members = [
     "emergency_circuit_breaker",
     "ai_nft",
     "gasless_relayer",
+    "title_badge",
+    "referral_splitter",
+    "model_attestation",
+    "sponsorship_escrow",
 ]
 
 [profile.release]

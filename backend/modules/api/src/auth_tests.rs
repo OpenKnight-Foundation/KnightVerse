@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod tests {
     use actix_web::{test, web, App};
-    use sea_orm::Database;
+    use sea_orm::{ConnectionTrait, Database};
     use std::sync::Arc;
     use uuid::Uuid;
 
-    use crate::auth::{login, logout, refresh, register};
+    use crate::auth::login;
     use db::DbPool;
-    use dto::auth::{LoginRequest, RefreshTokenRequest, RegisterRequest};
-    use security::{JwtService, TokenService};
+    use dto::auth::LoginRequest;
+    use security::{JwtService, TokenService, TokenServiceError};
 
     /// Build an in-memory SQLite DbPool for testing.
     ///
@@ -18,6 +18,23 @@ mod tests {
         let db = Database::connect("sqlite::memory:")
             .await
             .expect("Failed to connect to test database");
+
+        // The refresh_token table has a foreign key to `player`, which this
+        // lightweight harness doesn't create. SQLite doesn't enforce FKs
+        // unless explicitly enabled, but sqlx turns it on by default.
+        db.execute_unprepared("PRAGMA foreign_keys = OFF;")
+            .await
+            .expect("Failed to disable foreign key enforcement");
+
+        let schema = sea_orm::Schema::new(db.get_database_backend());
+        let stmt = schema
+            .create_table_from_entity(db_entity::refresh_token::Entity)
+            .if_not_exists()
+            .to_owned();
+        db.execute(db.get_database_backend().build(&stmt))
+            .await
+            .expect("Failed to create refresh_tokens table");
+
         let arc = Arc::new(db);
         DbPool::from_connections(arc.clone(), arc, false)
     }
@@ -82,21 +99,11 @@ mod tests {
     async fn test_token_generation_produces_unique_tokens() {
         let pool = setup_test_pool().await;
 
-        let token1 = TokenService::generate_refresh_token(
-            pool.primary(),
-            1,
-            Uuid::new_v4(),
-            7,
-        )
-        .await;
+        let token1 =
+            TokenService::generate_refresh_token(pool.primary(), 1, Uuid::new_v4(), 7).await;
 
-        let token2 = TokenService::generate_refresh_token(
-            pool.primary(),
-            1,
-            Uuid::new_v4(),
-            7,
-        )
-        .await;
+        let token2 =
+            TokenService::generate_refresh_token(pool.primary(), 1, Uuid::new_v4(), 7).await;
 
         // Both may fail because SQLite memory db has no schema, but if they
         // succeed they must differ.
@@ -112,6 +119,43 @@ mod tests {
         let hash1 = TokenService::hash_token(token);
         let hash2 = TokenService::hash_token(token);
         assert_eq!(hash1, hash2);
+    }
+
+    #[tokio::test]
+    async fn test_access_tokens_include_unique_jti() {
+        let jwt_service = JwtService::new("test_secret_key".to_string(), 3600);
+        let token = jwt_service
+            .generate_token(42, "alice", Uuid::new_v4())
+            .expect("token generation should work");
+        let claims = jwt_service
+            .validate_token(&token)
+            .expect("token should validate");
+
+        assert!(claims.jti.is_some(), "access token must carry a unique jti");
+        assert_ne!(claims.jti.as_deref(), Some(""), "jti should not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_reuse_invalidates_entire_family() {
+        let pool = setup_test_pool().await;
+
+        let family_id = Uuid::new_v4();
+        let first = TokenService::generate_refresh_token(pool.primary(), 7, family_id, 7)
+            .await
+            .expect("first token should be generated");
+        let second = TokenService::generate_refresh_token(pool.primary(), 7, family_id, 7)
+            .await
+            .expect("second token should be generated");
+
+        let _ = TokenService::verify_and_mark_used(pool.primary(), &first, 7)
+            .await
+            .expect("first token should validate");
+
+        let reuse = TokenService::verify_and_mark_used(pool.primary(), &first, 7).await;
+        assert!(matches!(reuse, Err(TokenServiceError::TokenReuseDetected)));
+
+        let revoked = TokenService::verify_and_mark_used(pool.primary(), &second, 7).await;
+        assert!(matches!(revoked, Err(TokenServiceError::TokenInvalid)));
     }
 
     // Placeholder tests — full implementation requires Postgres schema

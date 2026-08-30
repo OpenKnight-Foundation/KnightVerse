@@ -27,9 +27,7 @@ use chess::{RatingConfig, RatingService};
 use chrono::{DateTime, TimeZone, Utc};
 use db::DbPool;
 use db_entity::{game, prelude::Game};
-use dto::games::{
-    CreateGameRequest, GameDisplayDTO, GameResult, GameStatus, MakeMoveRequest,
-};
+use dto::games::{CreateGameRequest, GameDisplayDTO, GameResult, GameStatus, MakeMoveRequest};
 use error::error::ApiError;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
@@ -126,10 +124,7 @@ impl GameService {
     /// Fetch a single game by its UUID.
     ///
     /// Routes to the **replica** pool (SELECT).
-    pub async fn get_game(
-        pool: &DbPool,
-        game_id: Uuid,
-    ) -> Result<GameDisplayDTO, ApiError> {
+    pub async fn get_game(pool: &DbPool, game_id: Uuid) -> Result<GameDisplayDTO, ApiError> {
         Self::get_game_on(pool.replica(), game_id).await
     }
 
@@ -168,6 +163,53 @@ impl GameService {
         is_white: bool,
     ) -> Result<i32, ApiError> {
         Self::get_player_rating_for_game_on(pool.replica(), game_id, is_white).await
+    }
+
+    /// Export a game's move history as a spec-compliant PGN string.
+    ///
+    /// Routes to the **replica** pool (SELECT).
+    pub async fn export_pgn(
+        pool: &DbPool,
+        game_id: Uuid,
+        include_analysis: bool,
+    ) -> Result<String, ApiError> {
+        let model = game::Entity::find_by_id(game_id)
+            .one(pool.replica())
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        let moves: Vec<chess::pgn::MoveAnnotation> = model
+            .pgn
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|san| chess::pgn::MoveAnnotation {
+                        san: san.to_string(),
+                        ..Default::default()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let result = match model.result {
+            Some(db_entity::game::ResultSide::WhiteWins) => chess::pgn::GameResult::WhiteWins,
+            Some(db_entity::game::ResultSide::BlackWins) => chess::pgn::GameResult::BlackWins,
+            Some(db_entity::game::ResultSide::Draw) => chess::pgn::GameResult::Draw,
+            _ => chess::pgn::GameResult::Ongoing,
+        };
+
+        let headers = chess::pgn::ExportHeaders {
+            date: model.started_at.format("%Y.%m.%d").to_string(),
+            white: model.white_player.to_string(),
+            black: model.black_player.to_string(),
+            result,
+            ..Default::default()
+        };
+
+        chess::pgn::export_pgn(headers, moves, include_analysis)
+            .map_err(|e| ApiError::BadRequest(e.to_string()))
     }
 
     // =========================================================================
@@ -361,11 +403,7 @@ impl GameService {
         let now = Utc::now();
         let game_id = Uuid::new_v4();
 
-        let moves: Vec<String> = request
-            .moves
-            .iter()
-            .map(|m| m.to_string())
-            .collect();
+        let moves: Vec<String> = request.moves.iter().map(|m| m.to_string()).collect();
 
         let result = match request.headers.result {
             chess::PgnGameResult::WhiteWins => Some(db_entity::game::ResultSide::WhiteWins),
@@ -744,21 +782,15 @@ mod tests {
             .into_connection();
 
         let player_id = Uuid::new_v4();
-        let result = GameService::list_games_on(
-            &mock_db,
-            None,
-            None,
-            10,
-            Some(player_id),
-            None
-        ).await;
-        
+        let result =
+            GameService::list_games_on(&mock_db, None, None, 10, Some(player_id), None).await;
+
         // Get transaction log to verify SQL
         let transaction_log = db.into_transaction_log();
-        
+
         // We expect two queries (count + data)
         assert_eq!(transaction_log.len(), 2);
-        
+
         // Inspect the data query (index 1); index 0 is the COUNT query, which
         // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
         let log = &transaction_log[1];
@@ -804,7 +836,7 @@ mod tests {
             .append_query_results(vec![
                 // Second query result (main data)
                 vec![game::Model {
-                 id: Uuid::new_v4(),
+                    id: Uuid::new_v4(),
                     white_player: Uuid::new_v4(),
                     black_player: Uuid::new_v4(),
                     fen: "fen".to_string(),
@@ -817,18 +849,12 @@ mod tests {
                     updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
                     is_imported: false,
                     original_pgn: None,
-            }]])
+                }],
+            ])
             .into_connection();
-            
-        let _result = GameService::list_games(
-            &db,
-            Some(cursor),
-            None,
-            10,
-            None,
-            None
-        ).await;
-        
+
+        let _result = GameService::list_games(&db, Some(cursor), None, 10, None, None).await;
+
         let transaction_log = db.into_transaction_log();
         // Inspect the data query (index 1); index 0 is the COUNT query, which
         // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
@@ -843,7 +869,10 @@ mod tests {
         let _ = GameService::create_game_on(&mock_db, creator_id, request).await;
 
         let log = mock_db.into_transaction_log();
-        assert!(!log.is_empty(), "at least one query should have been issued");
+        assert!(
+            !log.is_empty(),
+            "at least one query should have been issued"
+        );
         let sql = format!("{:?}", &log[0]);
         assert!(
             sql.contains("INSERT") || sql.contains("insert"),

@@ -36,8 +36,7 @@ pub enum PgnError {
 }
 
 /// Represents the result of a chess game
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum GameResult {
     WhiteWins,
     BlackWins,
@@ -176,10 +175,16 @@ fn parse_moves(move_text: &str) -> Vec<String> {
     // `10...Nf6`), not just the spaced form (`1. e4`).
     let move_number_prefix = Regex::new(r"^\d+\.+").unwrap();
     let result_regex = Regex::new(r"^(1-0|0-1|1/2-1/2|\*)$").unwrap();
+    // Trailing NAG-style move-quality annotations glued directly onto the
+    // move (e.g. "Bb5!", "Qh5??", "e4!?") are standard, widely-produced PGN
+    // syntax, but aren't part of SAN itself — strip them so downstream SAN
+    // parsing sees a clean move token.
+    let annotation_suffix = Regex::new(r"[!?]{1,2}$").unwrap();
 
     tokens
         .into_iter()
         .map(|token| move_number_prefix.replace(token, "").into_owned())
+        .map(|token| annotation_suffix.replace(&token, "").into_owned())
         .filter(|token| !token.is_empty() && !result_regex.is_match(token))
         .collect()
 }
@@ -403,7 +408,11 @@ impl PgnBuilder {
                 ""
             };
 
-            out.push(format!("{}{}", San::from(&chess_move), suffix));
+            out.push(format!(
+                "{}{}",
+                San::from_move(&position, &chess_move),
+                suffix
+            ));
         }
 
         Ok(out)
@@ -755,13 +764,34 @@ mod tests {
         // Scholar's mate — bare SANs supplied with no +/# suffix; the
         // builder must recompute "Qxf7#" itself.
         let moves = vec![
-            MoveAnnotation { san: "e4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "e5".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Bc4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Nc6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Qh5".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Nf6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Qxf7".to_string(), ..Default::default() },
+            MoveAnnotation {
+                san: "e4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "e5".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Bc4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Nc6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Qh5".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Nf6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Qxf7".to_string(),
+                ..Default::default()
+            },
         ];
         let mut headers = sample_export_headers();
         headers.result = GameResult::WhiteWins;
@@ -773,10 +803,31 @@ mod tests {
     #[test]
     fn test_export_pgn_check_suffix_non_mating() {
         // A mid-game check that is not mate should get "+", never "#".
+        // 1.e4 c5 2.Nf3 d6 3.Bb5+ — the classic Rossolimo/Moscow check: by
+        // move 3 both c6 and d7 are vacated, so the bishop's diagonal to e8
+        // is open (unlike e.g. 1.e4 e6 2.Bb5, which stays blocked by the
+        // still-present d7 pawn).
         let moves = vec![
-            MoveAnnotation { san: "e4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "e6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Bb5".to_string(), ..Default::default() },
+            MoveAnnotation {
+                san: "e4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "c5".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Nf3".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "d6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Bb5".to_string(),
+                ..Default::default()
+            },
         ];
         let mut headers = sample_export_headers();
         headers.result = GameResult::Ongoing;

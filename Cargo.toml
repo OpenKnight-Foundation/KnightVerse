@@ -3,6 +3,7 @@ members = [
     "contracts/game_contract",
     "contracts/emergency_circuit_breaker",
     "contracts/ai_nft",
+    "contracts/gasless_relayer",
 ]
 resolver = "2"
 

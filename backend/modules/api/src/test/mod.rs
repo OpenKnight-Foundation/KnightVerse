@@ -1,7 +1,7 @@
 #[cfg(test)]
-mod rate_limit;
-#[cfg(test)]
 mod idempotency;
+#[cfg(test)]
+mod rate_limit;
 
 #[cfg(test)]
 mod tests {

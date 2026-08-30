@@ -1065,6 +1065,7 @@ dependencies = [
  "db_entity",
  "error",
  "matchmaking",
+ "rand 0.8.6",
  "regex",
  "sea-orm",
  "serde",

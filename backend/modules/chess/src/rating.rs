@@ -52,7 +52,8 @@ impl RatingService {
     /// * `Err(ApiError)` - If game not found, players not found, or database error
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
+    /// // Illustrative only — `db` and `game_id` come from the caller's context.
     /// let config = RatingConfig::default();
     /// let (white_rating, black_rating) = RatingService::update_ratings_after_game(
     ///     &db,

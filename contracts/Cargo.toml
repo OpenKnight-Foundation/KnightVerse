@@ -8,6 +8,7 @@ members = [
     "title_badge",
     "referral_splitter",
     "model_attestation",
+    "sponsorship_escrow",
 ]
 
 [profile.release]

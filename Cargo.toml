@@ -4,7 +4,9 @@ members = [
     "contracts/emergency_circuit_breaker",
     "contracts/ai_nft",
     "contracts/gasless_relayer",
+    "contracts/sponsorship_escrow",
 ]
+
 resolver = "2"
 
 [profile.release]

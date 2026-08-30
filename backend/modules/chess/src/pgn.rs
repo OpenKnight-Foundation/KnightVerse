@@ -36,8 +36,7 @@ pub enum PgnError {
 }
 
 /// Represents the result of a chess game
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum GameResult {
     WhiteWins,
     BlackWins,
@@ -403,7 +402,11 @@ impl PgnBuilder {
                 ""
             };
 
-            out.push(format!("{}{}", San::from(&chess_move), suffix));
+            out.push(format!(
+                "{}{}",
+                San::from_move(&position, &chess_move),
+                suffix
+            ));
         }
 
         Ok(out)
@@ -755,13 +758,34 @@ mod tests {
         // Scholar's mate — bare SANs supplied with no +/# suffix; the
         // builder must recompute "Qxf7#" itself.
         let moves = vec![
-            MoveAnnotation { san: "e4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "e5".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Bc4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Nc6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Qh5".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Nf6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Qxf7".to_string(), ..Default::default() },
+            MoveAnnotation {
+                san: "e4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "e5".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Bc4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Nc6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Qh5".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Nf6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Qxf7".to_string(),
+                ..Default::default()
+            },
         ];
         let mut headers = sample_export_headers();
         headers.result = GameResult::WhiteWins;
@@ -774,9 +798,18 @@ mod tests {
     fn test_export_pgn_check_suffix_non_mating() {
         // A mid-game check that is not mate should get "+", never "#".
         let moves = vec![
-            MoveAnnotation { san: "e4".to_string(), ..Default::default() },
-            MoveAnnotation { san: "e6".to_string(), ..Default::default() },
-            MoveAnnotation { san: "Bb5".to_string(), ..Default::default() },
+            MoveAnnotation {
+                san: "e4".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "e6".to_string(),
+                ..Default::default()
+            },
+            MoveAnnotation {
+                san: "Bb5".to_string(),
+                ..Default::default()
+            },
         ];
         let mut headers = sample_export_headers();
         headers.result = GameResult::Ongoing;

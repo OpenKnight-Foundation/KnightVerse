@@ -19,8 +19,6 @@ pub enum ContractError {
     GameFull = 7,
     NotPlayer = 8,
     GameAlreadyCompleted = 9,
-    DrawNotAvailable = 10,
-    ForfeitNotAllowed = 11,
     InvalidPercentage = 12,
     MismatchedLengths = 13,
     /// Invalid or already-used backend signature  (#199)
@@ -48,8 +46,6 @@ pub enum ContractError {
     ChallengeExpired = 25,
     /// SEP-10 challenge nonce already used (#529)
     ChallengeAlreadyUsed = 26,
-    /// Address has not completed SEP-10 verification (#529)
-    NotVerified = 27,
     /// Multi-sig: signer is not in the signers list (#535)
     NotASigner = 28,
     /// Multi-sig: no pending fee proposal to approve (#535)
@@ -100,6 +96,4 @@ pub enum ContractError {
     ReentrantCall = 50,
     /// Circuit breaker vote not found
     CircuitBreakerVoteNotFound = 51,
-    /// Upgrade of contract code failed (SC-21)
-    UpgradeFailed = 52,
 }

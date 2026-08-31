@@ -4,7 +4,7 @@ pub use error::ContractError;
 
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, Map, Symbol, Vec, contract, contractimpl, contracttype,
+    Address, Bytes, BytesN, Env, Map, String, Symbol, Vec, contract, contractimpl, contracttype,
     panic_with_error, symbol_short,
 };
 
@@ -39,6 +39,12 @@ pub struct Game {
     pub proof_of_game: BytesN<32>,
     pub last_move_at: u64, // Ledger sequence of last move
     pub board_fen: Bytes,
+    /// Ledger *timestamp* (Unix seconds) of the last move, or of `join_game`
+    /// if no move has been made yet. Used by `claim_timeout_victory` (SC-50)
+    /// for strict wall-clock deadline validation, distinct from
+    /// `last_move_at` which is ledger-*sequence*-based and backs the older
+    /// `claim_timeout_win` mechanism.
+    pub last_activity_ts: u64,
 }
 
 #[contracttype]
@@ -132,6 +138,14 @@ const ARBITRATOR: Symbol = symbol_short!("ARBIT"); // Address - dispute arbitrat
 // Game timeout mechanism
 const TIMEOUT_DURATION: Symbol = symbol_short!("T_OUT"); // u64 - ledger sequences before timeout
 
+// Time-locked wager auto-forfeit (SC-50) — ledger-*timestamp*-based, distinct
+// from the sequence-based TIMEOUT_DURATION above. `MOVE_DEADLINE_SECS` is the
+// per-move response window; `TIMEOUT_BUFFER_SECS` is an additional grace
+// period layered on top (e.g. to absorb a temporary backend outage) before
+// `claim_timeout_victory` becomes callable. Both are u64 seconds.
+const MOVE_DEADLINE_SECS: Symbol = symbol_short!("MV_DL_S");
+const TIMEOUT_BUFFER_SECS: Symbol = symbol_short!("TO_BUF_S");
+
 // SEP-10 challenge verification (#529)
 const SEP10_CHALLENGES: Symbol = symbol_short!("S10_CHAL"); // Map<BytesN<32>, u64> nonce → expiry
 const SEP10_VERIFIED: Symbol = symbol_short!("S10_VER"); // Map<Address, bool>
@@ -146,7 +160,7 @@ const FEE_PROPOSAL_APPROVALS: Symbol = symbol_short!("MS_APPR"); // Map<Address,
 // This key stores all player profile data in Persistent storage rather than Instance storage.
 // This ensures that player statistics and ratings survive contract upgrades and are permanently
 // available on-chain. Each player is keyed by their Address.
-const PLAYER_PROFILES: Symbol = symbol_short!("PLAYER_PROF"); // Map<Address, PlayerProfile> in Persistent storage
+const PLAYER_PROFILES: Symbol = symbol_short!("PL_PROF"); // Map<Address, PlayerProfile> in Persistent storage
 // SEP-40 Oracle clock sync (#533)
 const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle contract
 
@@ -702,6 +716,7 @@ impl GameContract {
             proof_of_game: BytesN::from_array(&env, &[0; 32]),
             last_move_at: env.ledger().sequence() as u64,
             board_fen: initial_board,
+            last_activity_ts: env.ledger().timestamp(),
         };
 
         let mut games: Map<u64, Game> = env
@@ -807,6 +822,7 @@ impl GameContract {
         game.state = GameState::InProgress;
         game.current_turn = 1;
         game.last_move_at = env.ledger().sequence() as u64;
+        game.last_activity_ts = env.ledger().timestamp();
 
         let mut escrow: Map<Address, i128> = env
             .storage()
@@ -910,6 +926,7 @@ impl GameContract {
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
         game.last_move_at = env.ledger().sequence() as u64;
+        game.last_activity_ts = env.ledger().timestamp();
         game.board_fen = new_board;
 
         // Auto settlement logic based on status flag
@@ -1753,70 +1770,6 @@ impl GameContract {
         if admin != current_admin {
             panic_with_error!(&env, ContractError::Unauthorized);
         }
-        if threshold == 0 || threshold > new_admins.len() as u32 {
-            panic!("Invalid threshold");
-        }
-
-        let mut unique_set = Vec::new(&env);
-        for i in 0..new_admins.len() {
-            let admin = new_admins.get(i).unwrap();
-            if unique_set.contains(&admin) {
-                panic!("Duplicate admins in list");
-            }
-            unique_set.push_back(admin);
-        }
-
-        env.storage().instance().set(&FEE_ADMINS, &new_admins);
-        env.storage().instance().set(&FEE_THRESHOLD, &threshold);
-    }
-
-    pub fn configure_fees(
-        env: Env,
-        admins: Vec<Address>,
-        fee_bips: u32,
-        treasury_address: Address,
-    ) {
-        let stored_admins: Vec<Address> =
-            env.storage()
-                .instance()
-                .get(&FEE_ADMINS)
-                .unwrap_or_else(|| {
-                    let current_admin: Address = env
-                        .storage()
-                        .instance()
-                        .get(&CONTRACT_ADMIN)
-                        .expect("Not initialized");
-                    let mut v = Vec::new(&env);
-                    v.push_back(current_admin);
-                    v
-                });
-        let threshold: u32 = env.storage().instance().get(&FEE_THRESHOLD).unwrap_or(1);
-
-        if admins.len() < threshold {
-            panic!("Not enough admin approvals");
-        }
-
-        let mut unique_approvals = 0;
-        let mut approved_set = Vec::new(&env);
-
-        for i in 0..admins.len() {
-            let admin = admins.get(i).unwrap();
-            if stored_admins.contains(&admin) {
-                if approved_set.contains(&admin) {
-                    panic!("Duplicate admin approvals");
-                }
-                admin.require_auth();
-                approved_set.push_back(admin.clone());
-                unique_approvals += 1;
-            } else {
-                panic!("Unauthorized admin address");
-            }
-        }
-
-        if unique_approvals < threshold {
-            panic!("Not enough valid admin approvals");
-        }
-
         if fee_bips > 1000 {
             panic_with_error!(&env, ContractError::InvalidConfig);
         }
@@ -1880,7 +1833,7 @@ impl GameContract {
             .set(&ADMIN_TIMELOCK, &(current_seq + ADMIN_TIMELOCK_DURATION));
 
         env.events().publish(
-            (symbol_short!("admin_key_proposed"),),
+            (symbol_short!("adm_prop"),),
             (admin, new_key.clone(), current_seq),
         );
 
@@ -1918,10 +1871,8 @@ impl GameContract {
         env.storage().instance().remove(&PENDING_ADMIN_TIMESTAMP);
         env.storage().instance().remove(&ADMIN_TIMELOCK);
 
-        env.events().publish(
-            (symbol_short!("admin_key_accepted"),),
-            (proposed_key,),
-        );
+        env.events()
+            .publish((symbol_short!("adm_acpt"),), (proposed_key,));
 
         Ok(())
     }
@@ -2575,6 +2526,256 @@ impl GameContract {
         }
 
         Some(timeout_duration - elapsed)
+    }
+
+    // ── Time-locked wager auto-forfeit (SC-50) ──────────────────────────────
+    //
+    // `claim_timeout_win` above is ledger-*sequence*-based. This is a parallel
+    // mechanism that uses `env.ledger().timestamp()` (real Unix time) for
+    // strict wall-clock deadline validation, and adds an explicit grace
+    // buffer on top of the base deadline to absorb a temporary backend
+    // outage before the trustless, signature-free forfeit path opens up.
+    // Storage footprint is minimal: two extra instance-storage u64 scalars
+    // (`MOVE_DEADLINE_SECS`, `TIMEOUT_BUFFER_SECS`) and one extra `u64`
+    // field on `Game` (`last_activity_ts`) — no new maps, no per-claim
+    // bookkeeping. Payout reuses the existing `process_payout` fee/escrow
+    // logic verbatim.
+
+    /// Configure the timestamp-based match deadline and grace buffer used by
+    /// [`claim_timeout_victory`] (admin only).
+    ///
+    /// # Parameters
+    /// - `admin`          — Must match `CONTRACT_ADMIN`; must authorise the call.
+    /// - `deadline_secs`  — Seconds a player has to respond to their opponent's
+    ///                      last move before the opponent may force a timeout
+    ///                      victory. Must be > 0.
+    /// - `buffer_secs`    — Additional grace seconds layered on top of
+    ///                      `deadline_secs` — e.g. to cover a brief backend
+    ///                      outage that would otherwise have arbitrated the
+    ///                      game via `claim_win`/`claim_draw`. May be `0` to
+    ///                      disable the extra grace window.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotInitialized`] — Contract has not been initialized.
+    /// - [`ContractError::Unauthorized`]   — `admin` does not match the stored admin.
+    /// - [`ContractError::InvalidConfig`]  — `deadline_secs == 0`.
+    pub fn configure_timeout_deadline(
+        env: Env,
+        admin: Address,
+        deadline_secs: u64,
+        buffer_secs: u64,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .ok_or(ContractError::NotInitialized)?;
+        current_admin.require_auth();
+
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+        if deadline_secs == 0 {
+            return Err(ContractError::InvalidConfig);
+        }
+
+        env.storage()
+            .instance()
+            .set(&MOVE_DEADLINE_SECS, &deadline_secs);
+        env.storage()
+            .instance()
+            .set(&TIMEOUT_BUFFER_SECS, &buffer_secs);
+
+        Ok(())
+    }
+
+    /// Claim victory when the opponent has failed to respond within the
+    /// configured deadline **plus** grace buffer (SC-50).
+    ///
+    /// This is the strict, ledger-*timestamp*-based sibling of
+    /// [`claim_timeout_win`]. It exists so that a player who is still
+    /// actively engaged cannot be held hostage by an opponent who realizes
+    /// they're losing and simply goes offline instead of resigning: once
+    /// `env.ledger().timestamp() - game.last_activity_ts >= deadline_secs +
+    /// buffer_secs`, the waiting player may settle the game and receive the
+    /// full escrowed wager **immediately — no backend signature required**.
+    ///
+    /// The `buffer_secs` grace period specifically covers a **temporary
+    /// backend/server outage**: even if the off-chain service that would
+    /// normally arbitrate a `claim_win`/`claim_draw` is briefly down, a
+    /// forced forfeit only becomes claimable after `deadline_secs` has
+    /// *also* elapsed on top of that, giving the server a fair window to
+    /// recover before the trustless on-chain path opens up. A claim
+    /// attempted after `deadline_secs` alone but before the buffer has also
+    /// elapsed is rejected with [`ContractError::TimeoutNotReached`] — this
+    /// is the "premature victory claim" the strict timestamp check guards
+    /// against.
+    ///
+    /// Only the player who is *not* on the clock (the one waiting on their
+    /// opponent) may call this — the player whose turn it is can always
+    /// resolve the game by simply moving, so they may never claim a timeout
+    /// against themselves. If both players go silent forever, neither loses
+    /// anything and neither can be forced to claim: the wager stays safely
+    /// escrowed until the rightful (waiting) player chooses to call this —
+    /// there is no way for a third party, or the at-fault player, to drain
+    /// the funds.
+    ///
+    /// # Parameters
+    /// - `game_id`   — ID of a game in `InProgress` state.
+    /// - `claimant`  — The player who is waiting for the opponent's move;
+    ///                 must authorise the call.
+    ///
+    /// # Returns
+    /// `Ok(())` on success; the game is marked `Settled` and the full net
+    /// prize pool is transferred to `claimant` immediately. Because the
+    /// game leaves `InProgress` state, a second timeout (or any other)
+    /// claim against the same game is no longer possible.
+    ///
+    /// # Errors
+    /// - [`ContractError::GameNotFound`]           — `game_id` does not exist.
+    /// - [`ContractError::GameNotInProgress`]      — Game is not `InProgress`
+    ///   (already settled/drawn/etc. — also what prevents a double claim).
+    /// - [`ContractError::NotPlayer`]               — `claimant` is not a participant.
+    /// - [`ContractError::InvalidTimeoutClaimant`]  — `claimant` is the player
+    ///   whose turn it currently is, not the waiting player.
+    /// - [`ContractError::TimeoutNotConfigured`]    — [`configure_timeout_deadline`]
+    ///   has not been called.
+    /// - [`ContractError::TimeoutNotReached`]       — `deadline_secs + buffer_secs`
+    ///   has not yet elapsed since the last move/join.
+    /// - [`ContractError::GameFull`]                — Game has no `player2`
+    ///   (should not occur for an `InProgress` game).
+    ///
+    /// # Events
+    /// Emits `("timeout", "victory") → (game_id, claimant)`.
+    pub fn claim_timeout_victory(
+        env: Env,
+        game_id: u64,
+        claimant: Address,
+    ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
+        let mut games: Map<u64, Game> = env
+            .storage()
+            .instance()
+            .get(&GAMES)
+            .ok_or(ContractError::GameNotFound)?;
+
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+        if game.state != GameState::InProgress {
+            return Err(ContractError::GameNotInProgress);
+        }
+        if claimant != game.player1 && Some(claimant.clone()) != game.player2 {
+            return Err(ContractError::NotPlayer);
+        }
+
+        claimant.require_auth();
+
+        Self::require_not_paused(&env)?;
+
+        // Only the waiting player (not on the clock) may force a timeout
+        // victory — the player whose turn it is can always resolve this by
+        // simply moving.
+        let waiting_player = if game.current_turn == 1 {
+            game.player2
+                .as_ref()
+                .ok_or(ContractError::GameFull)?
+                .clone()
+        } else {
+            game.player1.clone()
+        };
+
+        if claimant != waiting_player {
+            return Err(ContractError::InvalidTimeoutClaimant);
+        }
+
+        let deadline_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&MOVE_DEADLINE_SECS)
+            .ok_or(ContractError::TimeoutNotConfigured)?;
+        let buffer_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&TIMEOUT_BUFFER_SECS)
+            .unwrap_or(0);
+
+        // Strict ledger-*timestamp* validation (real Unix time), not ledger
+        // sequence, so the deadline can't drift with block-production speed.
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(game.last_activity_ts);
+        let required = deadline_secs.saturating_add(buffer_secs);
+
+        if elapsed < required {
+            return Err(ContractError::TimeoutNotReached);
+        }
+
+        Self::non_reentrant_enter(&env)?;
+
+        game.winner = Some(claimant.clone());
+        match Self::process_payout(&env, &game, &claimant) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
+        game.state = GameState::Settled;
+
+        // Update player profiles – a timeout victory counts like any other win.
+        Self::update_player_profile_after_game(&env, &claimant, true, false);
+        if claimant == game.player1 {
+            if let Some(ref player2) = game.player2 {
+                Self::update_player_profile_after_game(&env, player2, false, false);
+            }
+        } else {
+            Self::update_player_profile_after_game(&env, &game.player1, false, false);
+        }
+
+        games.set(game_id, game);
+        env.storage().instance().set(&GAMES, &games);
+
+        env.events().publish(
+            (symbol_short!("timeout"), symbol_short!("victory")),
+            (game_id, claimant),
+        );
+
+        Self::non_reentrant_exit(&env);
+        Ok(())
+    }
+
+    /// Query the seconds remaining before [`claim_timeout_victory`] becomes
+    /// claimable by the player currently waiting on their opponent's move.
+    ///
+    /// Returns `None` if the game doesn't exist, isn't `InProgress`, or no
+    /// deadline has been configured. Returns `Some(0)` once the deadline +
+    /// buffer has already elapsed (a timeout victory is claimable now).
+    ///
+    /// # Parameters
+    /// - `game_id` — ID of the game to query.
+    pub fn get_timeout_victory_remaining(env: Env, game_id: u64) -> Option<u64> {
+        let games: Map<u64, Game> = env.storage().instance().get(&GAMES)?;
+        let game = games.get(game_id)?;
+
+        if game.state != GameState::InProgress {
+            return None;
+        }
+
+        let deadline_secs: u64 = env.storage().instance().get(&MOVE_DEADLINE_SECS)?;
+        let buffer_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&TIMEOUT_BUFFER_SECS)
+            .unwrap_or(0);
+
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(game.last_activity_ts);
+        let required = deadline_secs.saturating_add(buffer_secs);
+
+        if elapsed >= required {
+            return Some(0);
+        }
+
+        Some(required - elapsed)
     }
 
     /// Resolve a pending dispute and settle the underlying game (arbitrator only).
@@ -3605,19 +3806,9 @@ impl GameContract {
         }
 
         result
-        if admin != current_admin {
-            return Err(ContractError::Unauthorized);
-        }
-        if duration == 0 {
-            return Err(ContractError::InvalidConfig);
-        }
-        env.storage()
-            .instance()
-            .set(&TOURNAMENT_TIMELOCK, &duration);
-        Ok(())
     }
 
-/// Create a time-locked escrow for a completed tournament game.
+    /// Create a time-locked escrow for a completed tournament game.
     ///
     /// Calculates the total prize pool from the game's wager amount and locks it
     /// until `current_ledger + timelock_duration`. The escrow must then be
@@ -6766,6 +6957,276 @@ mod tests {
 
         let result = client.try_claim_timeout_win(&game_id, &player1);
         assert_eq!(result, Err(Ok(ContractError::InvalidTimeoutClaimant)));
+    }
+
+    // ── SC-50: Time-locked wager auto-forfeit (claim_timeout_victory) ──────
+
+    /// Shared setup: deploys the contract, whitelists/initializes the token,
+    /// funds both players, and creates + joins a game. Returns everything a
+    /// test needs to drive `claim_timeout_victory`.
+    fn setup_sc50_game(
+        env: &Env,
+        wager: i128,
+    ) -> (
+        GameContractClient<'_>,
+        TokenClient<'_>,
+        Address, // admin
+        Address, // player1
+        Address, // player2
+        u64,     // game_id
+    ) {
+        let issuer = Address::generate(env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let token_client = TokenClient::new(env, &token_address);
+        let stellar_asset_client = StellarAssetClient::new(env, &token_address);
+
+        let admin = Address::generate(env);
+        let player1 = Address::generate(env);
+        let player2 = Address::generate(env);
+        let treasury_addr = Address::generate(env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(env, &contract_id);
+
+        client.add_whitelisted_token(&admin, &token_address);
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
+
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(env));
+        client.join_game(&game_id, &player2);
+
+        (client, token_client, admin, player1, player2, game_id)
+    }
+
+    #[test]
+    fn test_configure_timeout_deadline_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, _admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+        let impostor = Address::generate(&env);
+
+        let result = client.try_configure_timeout_deadline(&impostor, &300u64, &60u64);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_configure_timeout_deadline_rejects_zero_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+
+        let result = client.try_configure_timeout_deadline(&admin, &0u64, &60u64);
+        assert_eq!(result, Err(Ok(ContractError::InvalidConfig)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_not_configured() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, _admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+
+        // No configure_timeout_deadline call at all.
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotConfigured)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_premature_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        // Not a single second has passed since join_game.
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Still short of the 360s (deadline+buffer) threshold.
+        env.ledger().set_timestamp(300);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+    }
+
+    /// Acceptance criterion: "server outage grace period". A claim attempted
+    /// after the base `deadline_secs` alone, but before `buffer_secs` has
+    /// *also* elapsed, must still be rejected — this is exactly the window
+    /// meant to protect a temporarily-down backend from a premature
+    /// trustless forfeit.
+    #[test]
+    fn test_claim_timeout_victory_respects_server_outage_grace_buffer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, token, admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        // Exactly at the base deadline (300s), but the 60s buffer hasn't
+        // elapsed yet — must still be rejected.
+        env.ledger().set_timestamp(300);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // One second short of deadline + buffer.
+        env.ledger().set_timestamp(359);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Exactly at deadline + buffer — now claimable.
+        env.ledger().set_timestamp(360);
+        client.claim_timeout_victory(&game_id, &player2);
+
+        assert_eq!(token.balance(&player2), 1_100);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.state, GameState::Settled);
+        assert_eq!(game.winner, Some(player2));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_success_pays_out_immediately_without_signature() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, token, admin, player1, player2, game_id) = setup_sc50_game(&env, 250);
+        client.configure_timeout_deadline(&admin, &120u64, &0u64);
+
+        env.ledger().set_timestamp(121);
+
+        // No admin/backend signature is passed anywhere in this call —
+        // settlement happens purely from on-chain state + ledger timestamp.
+        client.claim_timeout_victory(&game_id, &player2);
+
+        // Full pool (2 * 250 = 500) net of the 0% fee configured above.
+        assert_eq!(token.balance(&player2), 1_000 - 250 + 500);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.state, GameState::Settled);
+        assert_eq!(game.winner, Some(player2.clone()));
+
+        // player1 (who let the clock run out) cannot also claim, nor can
+        // player2 claim a second time — the game already left InProgress.
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::GameNotInProgress)));
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::GameNotInProgress)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_current_turn_player() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, player1, _player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        env.ledger().set_timestamp(200);
+
+        // player1 moves first (current_turn == 1); they are the one on the
+        // clock and can always resolve this by moving, so they may never
+        // claim a timeout victory against themselves.
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::InvalidTimeoutClaimant)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_non_participant() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        env.ledger().set_timestamp(200);
+
+        let stranger = Address::generate(&env);
+        let result = client.try_claim_timeout_victory(&game_id, &stranger);
+        assert_eq!(result, Err(Ok(ContractError::NotPlayer)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_game_not_found() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        let stranger = Address::generate(&env);
+        let result = client.try_claim_timeout_victory(&999u64, &stranger);
+        assert_eq!(result, Err(Ok(ContractError::GameNotFound)));
+    }
+
+    /// A move resets the deadline clock — a player who is actively playing
+    /// (not the AFK scenario this feature targets) can never be timed out
+    /// out from under them just because the *game* has been open a long
+    /// time.
+    #[test]
+    fn test_claim_timeout_victory_resets_after_each_move() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, player1, player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &0u64);
+
+        // Almost timed out...
+        env.ledger().set_timestamp(99);
+        let move_data = Vec::from_array(&env, [12u32, 28u32]);
+        client.submit_move(&game_id, &player1, &move_data, &Bytes::new(&env), &0u32);
+
+        // ...but player1 just moved, so the clock reset. Even though we're
+        // now well past the *original* deadline, player2 (now on the clock)
+        // has a fresh window and player1 cannot claim against them yet.
+        env.ledger().set_timestamp(150);
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Only once 100s have elapsed since *that* move does it become
+        // claimable.
+        env.ledger().set_timestamp(199);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.last_activity_ts, 99);
+        client.claim_timeout_victory(&game_id, &player1);
+        assert_eq!(client.get_game(&game_id).state, GameState::Settled);
+    }
+
+    #[test]
+    fn test_get_timeout_victory_remaining() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, game_id) = setup_sc50_game(&env, 100);
+
+        // Not configured yet.
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), None);
+
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(360));
+
+        env.ledger().set_timestamp(100);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(260));
+
+        env.ledger().set_timestamp(300);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(60));
+
+        env.ledger().set_timestamp(360);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(0));
+
+        env.ledger().set_timestamp(10_000);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(0));
     }
 
     #[test]

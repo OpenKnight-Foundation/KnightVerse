@@ -33,8 +33,10 @@ fn seed_completed_game(
             moves: Vec::new(env),
             created_at: 0,
             winner: None,
+            proof_of_game: BytesN::from_array(env, &[0; 32]),
             last_move_at: 0,
             board_fen: Bytes::new(env),
+            last_activity_ts: 0,
         };
         let mut games: Map<u64, Game> = Map::new(env);
         games.set(game_id, game);

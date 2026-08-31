@@ -96,4 +96,6 @@ pub enum ContractError {
     ReentrantCall = 50,
     /// Circuit breaker vote not found
     CircuitBreakerVoteNotFound = 51,
+    /// Admin key rotation already has a pending proposal (#890)
+    AdminKeyAlreadyPending = 52,
 }

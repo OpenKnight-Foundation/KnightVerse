@@ -398,18 +398,14 @@ fn test_configure_fees_permissioned() {
 
     // Update fees as admin
     let new_treasury = Address::generate(&env);
-    let mut admins = Vec::new(&env);
-    admins.push_back(admin.clone());
-    client.configure_fees(&admins, &50, &new_treasury); // 5% fee
+    client.configure_fees(&admin, &50, &new_treasury); // 5% fee
 
     // Verify update
     // (In a real test we'd check storage or run a payout, but here we just ensure it doesn't panic)
 
     // Attempt update as someone else should panic
     let stranger = Address::generate(&env);
-    let mut stranger_admins = Vec::new(&env);
-    stranger_admins.push_back(stranger.clone());
-    let res = client.try_configure_fees(&stranger_admins, &100, &new_treasury);
+    let res = client.try_configure_fees(&stranger, &100, &new_treasury);
     assert!(res.is_err());
 }
 
@@ -718,7 +714,7 @@ fn setup_in_progress_game<'a>(
     stellar_asset_client.mint(&player1, &wager);
     stellar_asset_client.mint(&player2, &wager);
 
-    let game_id = client.create_game(&player1, &wager);
+    let game_id = client.create_game(&player1, &wager, &Bytes::new(env));
     client.join_game(&game_id, &player2);
 
     (client, player1, player2, game_id)
@@ -732,7 +728,7 @@ fn test_submit_move_normal() {
     let (client, player1, _player2, game_id) = setup_in_progress_game(&env, &contract_id);
 
     let move_data = Vec::from_array(&env, [1u32, 2u32, 3u32]);
-    client.submit_move(&game_id, &player1, &move_data);
+    client.submit_move(&game_id, &player1, &move_data, &Bytes::new(&env), &0u32);
 
     let game = client.get_game(&game_id);
     assert_eq!(game.moves.len(), 1);
@@ -747,7 +743,7 @@ fn test_submit_move_wrong_turn() {
     let (client, _player1, player2, game_id) = setup_in_progress_game(&env, &contract_id);
 
     let move_data = Vec::from_array(&env, [1u32, 2u32]);
-    let res = client.try_submit_move(&game_id, &player2, &move_data);
+    let res = client.try_submit_move(&game_id, &player2, &move_data, &Bytes::new(&env), &0u32);
     assert_eq!(res, Err(Ok(ContractError::NotYourTurn)));
 }
 
@@ -760,7 +756,7 @@ fn test_submit_move_not_a_player() {
 
     let outsider = Address::generate(&env);
     let move_data = Vec::from_array(&env, [1u32, 2u32]);
-    let res = client.try_submit_move(&game_id, &outsider, &move_data);
+    let res = client.try_submit_move(&game_id, &outsider, &move_data, &Bytes::new(&env), &0u32);
     assert_eq!(res, Err(Ok(ContractError::NotPlayer)));
 }
 
@@ -772,7 +768,7 @@ fn test_submit_move_empty_move_data() {
     let (client, player1, _player2, game_id) = setup_in_progress_game(&env, &contract_id);
 
     let empty_move: Vec<u32> = Vec::new(&env);
-    let res = client.try_submit_move(&game_id, &player1, &empty_move);
+    let res = client.try_submit_move(&game_id, &player1, &empty_move, &Bytes::new(&env), &0u32);
     assert_eq!(res, Err(Ok(ContractError::InvalidMove)));
 }
 
@@ -804,10 +800,10 @@ fn test_submit_move_game_not_in_progress() {
 
     let wager = 100;
     stellar_asset_client.mint(&player1, &wager);
-    let game_id = client.create_game(&player1, &wager);
+    let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
 
     let move_data = Vec::from_array(&env, [1u32, 2u32]);
-    let res = client.try_submit_move(&game_id, &player1, &move_data);
+    let res = client.try_submit_move(&game_id, &player1, &move_data, &Bytes::new(&env), &0u32);
     assert_eq!(res, Err(Ok(ContractError::GameNotInProgress)));
 }
 
@@ -818,10 +814,34 @@ fn test_submit_move_sequence_alternation() {
     let contract_id = env.register_contract(None, GameContract);
     let (client, player1, player2, game_id) = setup_in_progress_game(&env, &contract_id);
 
-    client.submit_move(&game_id, &player1, &Vec::from_array(&env, [1u32]));
-    client.submit_move(&game_id, &player2, &Vec::from_array(&env, [2u32]));
-    client.submit_move(&game_id, &player1, &Vec::from_array(&env, [3u32]));
-    client.submit_move(&game_id, &player2, &Vec::from_array(&env, [4u32]));
+    client.submit_move(
+        &game_id,
+        &player1,
+        &Vec::from_array(&env, [1u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
+    client.submit_move(
+        &game_id,
+        &player2,
+        &Vec::from_array(&env, [2u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
+    client.submit_move(
+        &game_id,
+        &player1,
+        &Vec::from_array(&env, [3u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
+    client.submit_move(
+        &game_id,
+        &player2,
+        &Vec::from_array(&env, [4u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
 
     let game = client.get_game(&game_id);
     assert_eq!(game.moves.len(), 4);
@@ -835,8 +855,20 @@ fn test_submit_move_player1_cannot_move_twice() {
     let contract_id = env.register_contract(None, GameContract);
     let (client, player1, _player2, game_id) = setup_in_progress_game(&env, &contract_id);
 
-    client.submit_move(&game_id, &player1, &Vec::from_array(&env, [1u32]));
-    let res = client.try_submit_move(&game_id, &player1, &Vec::from_array(&env, [2u32]));
+    client.submit_move(
+        &game_id,
+        &player1,
+        &Vec::from_array(&env, [1u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
+    let res = client.try_submit_move(
+        &game_id,
+        &player1,
+        &Vec::from_array(&env, [2u32]),
+        &Bytes::new(&env),
+        &0u32,
+    );
     assert_eq!(res, Err(Ok(ContractError::NotYourTurn)));
 }
 
@@ -1259,45 +1291,89 @@ fn fuzz_payout_even_split() {
             assert_eq!(v1 + v2, pool, "[iter {iter}] 50/50 total");
         });
     }
-    #[test]
-    fn test_reentrancy_guard_payout_tournament() {
-        let env = Env::default();
-        let contract_id = env.register_contract(None, GameContract);
-        let client = GameContractClient::new(&env, &contract_id);
-        let player1 = Address::generate(&env);
-        let player2 = Address::generate(&env);
-        let wager: i128 = 1000;
-        let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
-        let winner1 = Address::generate(&env);
-        let mut winners = Vec::new(&env);
-        winners.push_back(winner1.clone());
-        let mut percentages = Vec::new(&env);
-        percentages.push_back(100);
-        client.mock_all_auths().payout_tournament(&game_id, &winners, &percentages);
-        let games: Map<u64, Game> = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&GAMES).unwrap()
-        });
-        let game = games.get(game_id).unwrap();
-        assert_eq!(game.state, GameState::Settled);
-    }
+}
 
-    #[test]
-    fn test_reentrancy_guard_claim_win() {
-        let env = Env::default();
-        let contract_id = env.register_contract(None, GameContract);
-        let client = GameContractClient::new(&env, &contract_id);
-        let player1 = Address::generate(&env);
-        let player2 = Address::generate(&env);
-        let wager: i128 = 1000;
-        let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
-        let winner = Address::generate(&env);
-        client.mock_all_auths().claim_win(&game_id, &winner);
-        let games: Map<u64, Game> = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&GAMES).unwrap()
-        });
-        let game = games.get(game_id).unwrap();
-        assert_eq!(game.state, GameState::Settled);
-    }
+#[test]
+fn test_reentrancy_guard_payout_tournament() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, GameContract);
+    let client = GameContractClient::new(&env, &contract_id);
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let wager: i128 = 1000;
+    let game_id = seed_completed_game(&env, &contract_id, &player1, &player2, wager);
+    let winner1 = Address::generate(&env);
+    let mut winners = Vec::new(&env);
+    winners.push_back(winner1.clone());
+    let mut percentages = Vec::new(&env);
+    percentages.push_back(100);
+    client
+        .mock_all_auths()
+        .payout_tournament(&game_id, &winners, &percentages);
+    let games: Map<u64, Game> = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&GAMES).unwrap()
+    });
+    let game = games.get(game_id).unwrap();
+    assert_eq!(game.state, GameState::Settled);
+}
+
+/// Sign the `claim_win` payload: SHA256(game_id_le8 || winner_address_string_bytes),
+/// matching the contract's own construction in `claim_win`.
+fn sign_claim_win_payload(
+    env: &Env,
+    signing_key: &SigningKey,
+    game_id: u64,
+    winner: &Address,
+) -> BytesN<64> {
+    let mut payload = Bytes::new(env);
+    payload.append(&Bytes::from_slice(env, &game_id.to_le_bytes()));
+
+    let winner_str = winner.clone().to_string();
+    let str_len = winner_str.len() as usize;
+    let mut addr_buf = [0u8; 64];
+    winner_str.copy_into_slice(&mut addr_buf[..str_len]);
+    payload.append(&Bytes::from_slice(env, &addr_buf[..str_len]));
+
+    let digest: BytesN<32> = env.crypto().sha256(&payload).into();
+    let mut digest_raw = [0u8; 32];
+    digest.copy_into_slice(&mut digest_raw);
+    let sig = signing_key.sign(&digest_raw);
+    BytesN::from_array(env, &sig.to_bytes())
+}
+
+#[test]
+fn test_reentrancy_guard_claim_win() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GameContract);
+    let client = GameContractClient::new(&env, &contract_id);
+    let (admin, _treasury, signing_key) = init_contract_with_key(&env, &contract_id);
+
+    let issuer = Address::generate(&env);
+    let stellar_token = env.register_stellar_asset_contract_v2(issuer);
+    let token_address = stellar_token.address();
+    let stellar_asset_client = StellarAssetClient::new(&env, &token_address);
+    client.add_whitelisted_token(&admin, &token_address);
+    client.initialize_token(&admin, &token_address);
+
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let wager: i128 = 100;
+    stellar_asset_client.mint(&player1, &wager);
+    stellar_asset_client.mint(&player2, &wager);
+    let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
+    client.join_game(&game_id, &player2);
+
+    let signature = sign_claim_win_payload(&env, &signing_key, game_id, &player1);
+    client.claim_win(&game_id, &player1, &signature);
+
+    let game = client.get_game(&game_id);
+    assert_eq!(game.state, GameState::Settled);
+}
+
+#[cfg(test)]
+mod admin_key_rotation_tests {
+    use super::*;
 
     // ADMIN_KEY Rotation Timelock Tests (#890)
 
@@ -1309,7 +1385,13 @@ fn fuzz_payout_even_split() {
         let admin = Address::generate(&env);
         let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
         env.mock_all_auths();
-        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        client.initialize_puzzle_rewards(
+            &admin,
+            &admin_key,
+            &0i128,
+            &0u32,
+            &Address::generate(&env),
+        );
         let stranger = Address::generate(&env);
         let new_key = BytesN::from_array(&env, &[2u8; 32]);
         let res = client.try_propose_new_admin_key(&stranger, &new_key);
@@ -1324,7 +1406,13 @@ fn fuzz_payout_even_split() {
         let admin = Address::generate(&env);
         let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
         env.mock_all_auths();
-        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        client.initialize_puzzle_rewards(
+            &admin,
+            &admin_key,
+            &0i128,
+            &0u32,
+            &Address::generate(&env),
+        );
         let new_key = BytesN::from_array(&env, &[2u8; 32]);
         client.propose_new_admin_key(&admin, &new_key);
         env.as_contract(&contract_id, || {
@@ -1350,7 +1438,13 @@ fn fuzz_payout_even_split() {
         let admin = Address::generate(&env);
         let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
         env.mock_all_auths();
-        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        client.initialize_puzzle_rewards(
+            &admin,
+            &admin_key,
+            &0i128,
+            &0u32,
+            &Address::generate(&env),
+        );
         let new_key = BytesN::from_array(&env, &[2u8; 32]);
         client.propose_new_admin_key(&admin, &new_key);
         let res = client.try_accept_new_admin_key();
@@ -1365,7 +1459,13 @@ fn fuzz_payout_even_split() {
         let admin = Address::generate(&env);
         let admin_key = Bytes::from_slice(&env, &[0u8; 32]);
         env.mock_all_auths();
-        client.initialize_puzzle_rewards(&admin, &admin_key, &0i128, &0u32, &Address::generate(&env));
+        client.initialize_puzzle_rewards(
+            &admin,
+            &admin_key,
+            &0i128,
+            &0u32,
+            &Address::generate(&env),
+        );
         let key1 = BytesN::from_array(&env, &[2u8; 32]);
         let key2 = BytesN::from_array(&env, &[3u8; 32]);
         client.propose_new_admin_key(&admin, &key1);

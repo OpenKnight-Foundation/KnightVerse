@@ -263,11 +263,11 @@ impl PGNArchiver {
                     if arweave_cost > ipfs_cost {
                         transaction_id = arweave_tx;
                         gas_used = arweave_gas;
-                        cost_usd = arweave_cost;
+                        cost_usd = Some(arweave_cost);
                     } else {
                         transaction_id = ipfs_tx;
                         gas_used = ipfs_gas;
-                        cost_usd = ipfs_cost;
+                        cost_usd = Some(ipfs_cost);
                     }
                 }
             }
@@ -362,14 +362,12 @@ impl PGNArchiver {
         let url = format!("{}/tx", self.arweave_gateway);
         
         let mut form_data = HashMap::new();
-        form_data.insert("data", general_purpose::STANDARD.encode(&upload_data));
-        form_data.insert("content-type", "application/json".to_string());
+        form_data.insert("data".to_string(), general_purpose::STANDARD.encode(&upload_data));
+        form_data.insert("content-type".to_string(), "application/json".to_string());
         
-        if let Some(tags) = &metadata.tags {
-            for (i, tag) in tags.iter().enumerate() {
-                form_data.insert(format!("tag-{}-name", i), "xlmate-tag".to_string());
-                form_data.insert(format!("tag-{}-value", i), tag.clone());
-            }
+        for (i, tag) in metadata.tags.iter().enumerate() {
+            form_data.insert(format!("tag-{}-name", i), "xlmate-tag".to_string());
+            form_data.insert(format!("tag-{}-value", i), tag.clone());
         }
 
         let response = self.http_client
@@ -466,7 +464,7 @@ impl PGNArchiver {
         // Add annotations if present
         if let Some(annotations) = &pgn.annotations {
             for annotation in annotations {
-                pgn_string.push_str(&format!("\n{{{",));
+                pgn_string.push_str(&format!("\n{{",));
                 if let Some(evaluation) = annotation.evaluation {
                     pgn_string.push_str(&format!("[%eval {:.2}]", evaluation));
                 }

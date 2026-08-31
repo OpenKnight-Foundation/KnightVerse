@@ -147,6 +147,26 @@ fn parse_headers(pgn: &str) -> Result<(PgnHeaders, &str), PgnError> {
 }
 
 /// Parse move text into individual SAN moves
+/// Remove parenthesised PGN variations, including nested ones.
+///
+/// `regex`'s `\([^()]*\)` only matches the innermost parentheses, so on input
+/// like `(1. d4 (2. c4) Nf6)` it strips `(2. c4)` and leaves the outer `( ... )`
+/// (and its moves) behind. Tracking paren depth removes every level in one pass
+/// and tolerates unbalanced parens without panicking.
+fn strip_variations(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth: u32 = 0;
+    for c in s.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
 fn parse_moves(move_text: &str) -> Vec<String> {
     // Remove comments (both curly brace and semicolon style)
     let without_curly_comments = Regex::new(r"\{[^}]*\}")
@@ -161,10 +181,11 @@ fn parse_moves(move_text: &str) -> Vec<String> {
         .unwrap()
         .replace_all(&without_semicolon_comments, " ");
 
-    // Remove variations (recursive parentheses - simplified, only top-level)
-    let without_variations = Regex::new(r"\([^()]*\)")
-        .unwrap()
-        .replace_all(&without_nags, " ");
+    // Remove variations. These nest, e.g. `(1. d4 (2. c4) Nf6)`, so a single
+    // `\([^()]*\)` regex pass only strips the innermost `()` and leaves the
+    // outer parens (and their moves) behind. Walk the string tracking paren
+    // depth instead so every nesting level is removed.
+    let without_variations = strip_variations(&without_nags);
 
     // Split into tokens
     let tokens: Vec<&str> = without_variations.split_whitespace().collect();
@@ -642,6 +663,32 @@ mod tests {
 
         let parsed = parse_pgn(pgn).unwrap();
         assert_eq!(parsed.moves, vec!["Ba2", "Bb7", "Qe2"]);
+    }
+
+    #[test]
+    fn test_parse_nested_variations() {
+        // Variations nest. The old single-pass `\([^()]*\)` regex only stripped
+        // the innermost `()`, leaving the outer variation's parens and moves
+        // behind, which then failed SAN validation. The whole variation should
+        // be dropped and only the mainline kept.
+        let pgn = r#"[White "Player1"]
+[Black "Player2"]
+[Result "*"]
+
+1.e4 e5 (1...c5 2.Nf3 (2.Nc3 Nc6) d6) 2.Nf3 Nc6 *"#;
+
+        let parsed = parse_pgn(pgn).unwrap();
+        assert_eq!(parsed.moves, vec!["e4", "e5", "Nf3", "Nc6"]);
+        assert!(validate_game(&parsed).is_ok());
+    }
+
+    #[test]
+    fn test_strip_variations_handles_nesting_and_unbalanced() {
+        assert_eq!(strip_variations("a (b (c) d) e"), "a  e");
+        assert_eq!(strip_variations("x (1 (2 (3) 4) 5) y"), "x  y");
+        // An unclosed group swallows the rest; a stray close is just dropped.
+        assert_eq!(strip_variations("a (b c"), "a ");
+        assert_eq!(strip_variations("a ) b"), "a  b");
     }
 
     #[test]

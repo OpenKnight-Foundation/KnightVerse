@@ -21,6 +21,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "ai_nft"
 version = "0.1.0"
 dependencies = [
+ "emergency_circuit_breaker",
  "soroban-sdk",
 ]
 
@@ -484,6 +485,7 @@ name = "game_contract"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "emergency_circuit_breaker",
  "rand",
  "soroban-sdk",
 ]

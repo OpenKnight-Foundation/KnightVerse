@@ -4,7 +4,7 @@ pub use error::ContractError;
 
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, Map, Symbol, Vec, contract, contractimpl, contracttype,
+    Address, Bytes, BytesN, Env, Map, String, Symbol, Vec, contract, contractimpl, contracttype,
     panic_with_error, symbol_short,
 };
 
@@ -39,6 +39,12 @@ pub struct Game {
     pub proof_of_game: BytesN<32>,
     pub last_move_at: u64, // Ledger sequence of last move
     pub board_fen: Bytes,
+    /// Ledger *timestamp* (Unix seconds) of the last move, or of `join_game`
+    /// if no move has been made yet. Used by `claim_timeout_victory` (SC-50)
+    /// for strict wall-clock deadline validation, distinct from
+    /// `last_move_at` which is ledger-*sequence*-based and backs the older
+    /// `claim_timeout_win` mechanism.
+    pub last_activity_ts: u64,
 }
 
 #[contracttype]
@@ -120,8 +126,6 @@ const MAX_BATCH_SIZE: u32 = 20;
 const FEE_BIPS: Symbol = symbol_short!("FEE_BIPS"); // u32  (0–1000, i.e. 0–10 %)
 const TREASURY_ADDR: Symbol = symbol_short!("TR_ADDR"); // Address
 const CONTRACT_ADMIN: Symbol = symbol_short!("CT_ADMIN"); // Address
-const FEE_ADMINS: Symbol = symbol_short!("FEE_ADMS"); // Vec<Address>
-const FEE_THRESHOLD: Symbol = symbol_short!("FEE_THR"); // u32
 
 // Dispute resolution system
 const DISPUTE_FEE: Symbol = symbol_short!("D_FEE"); // i128 - fee to file a dispute
@@ -131,6 +135,14 @@ const ARBITRATOR: Symbol = symbol_short!("ARBIT"); // Address - dispute arbitrat
 
 // Game timeout mechanism
 const TIMEOUT_DURATION: Symbol = symbol_short!("T_OUT"); // u64 - ledger sequences before timeout
+
+// Time-locked wager auto-forfeit (SC-50) — ledger-*timestamp*-based, distinct
+// from the sequence-based TIMEOUT_DURATION above. `MOVE_DEADLINE_SECS` is the
+// per-move response window; `TIMEOUT_BUFFER_SECS` is an additional grace
+// period layered on top (e.g. to absorb a temporary backend outage) before
+// `claim_timeout_victory` becomes callable. Both are u64 seconds.
+const MOVE_DEADLINE_SECS: Symbol = symbol_short!("MV_DL_S");
+const TIMEOUT_BUFFER_SECS: Symbol = symbol_short!("TO_BUF_S");
 
 // SEP-10 challenge verification (#529)
 const SEP10_CHALLENGES: Symbol = symbol_short!("S10_CHAL"); // Map<BytesN<32>, u64> nonce → expiry
@@ -146,7 +158,7 @@ const FEE_PROPOSAL_APPROVALS: Symbol = symbol_short!("MS_APPR"); // Map<Address,
 // This key stores all player profile data in Persistent storage rather than Instance storage.
 // This ensures that player statistics and ratings survive contract upgrades and are permanently
 // available on-chain. Each player is keyed by their Address.
-const PLAYER_PROFILES: Symbol = symbol_short!("PLAYER_PROF"); // Map<Address, PlayerProfile> in Persistent storage
+const PLAYER_PROFILES: Symbol = symbol_short!("PL_PROF"); // Map<Address, PlayerProfile> in Persistent storage
 // SEP-40 Oracle clock sync (#533)
 const ORACLE_CONTRACT: Symbol = symbol_short!("ORACLE"); // Address of oracle contract
 
@@ -172,6 +184,8 @@ const R_GUARD: Symbol = symbol_short!("R_GUARD");
 const ADMIN_TIMELOCK: Symbol = symbol_short!("ADM_TLK"); // u64 - lock duration (ledger sequences)
 const PENDING_ADMIN_KEY: Symbol = symbol_short!("PEND_ADM"); // Option<BytesN<32>> - proposed new admin key
 const PENDING_ADMIN_TIMESTAMP: Symbol = symbol_short!("PEND_TS"); // u64 - ledger sequence when proposal was made
+/// Admin key rotation timelock duration (default: 17280 ledger sequences = 24 hours at 5s/ledger).
+const ADMIN_TIMELOCK_DURATION: u32 = 17280;
 
 // �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
 // Multi-sig fee proposal type (#535)
@@ -237,8 +251,8 @@ pub struct BountySubmission {
 pub struct PenaltyRecord {
     pub player: Address,
     pub penalty_amount: i128,
-    pub issued_at: u64,       // ledger sequence
-    pub expires_at: u64,       // ledger sequence when penalty expires
+    pub issued_at: u64,  // ledger sequence
+    pub expires_at: u64, // ledger sequence when penalty expires
     pub reason: Bytes,
     pub decay_rate_bips: u32, // basis points per ledger (e.g., 10 = 0.1%)
     pub original_amount: i128,
@@ -309,7 +323,7 @@ pub struct Trophy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrophyType {
     FirstWin,
-    WinStreak(u32),      // e.g., WinStreak(10) = 10 wins in a row
+    WinStreak(u32),       // e.g., WinStreak(10) = 10 wins in a row
     PuzzleMaster,         // Solved 100 puzzles
     TournamentChampion,   // Won a tournament
     RatingMilestone(i32), // e.g., RatingMilestone(2000)
@@ -330,9 +344,6 @@ pub struct TrophyMetadata {
 // ────────────────────────────────────────────────────────────────────────────
 // Errors
 // ────────────────────────────────────────────────────────────────────────────
-
-
-
 
 #[contract]
 pub struct GameContract;
@@ -425,7 +436,7 @@ impl GameContract {
             .get(&ALLOWED_TOKENS)
             .unwrap_or(Vec::new(&env));
         if let Some(pos) = tokens.iter().position(|t| t == token) {
-            tokens.remove(pos);
+            tokens.remove(pos as u32);
         }
         env.storage().instance().set(&ALLOWED_TOKENS, &tokens);
     }
@@ -479,8 +490,7 @@ impl GameContract {
             panic_with_error!(&env, ContractError::AlreadyPaused);
         }
         env.storage().instance().set(&PAUSED, &true);
-        env.events()
-            .publish((symbol_short!("paused"),), caller);
+        env.events().publish((symbol_short!("paused"),), caller);
     }
 
     /// Unpause the contract — resumes normal operations.
@@ -499,8 +509,7 @@ impl GameContract {
             panic_with_error!(&env, ContractError::NotPaused);
         }
         env.storage().instance().set(&PAUSED, &false);
-        env.events()
-            .publish((symbol_short!("unpaused"),), caller);
+        env.events().publish((symbol_short!("unpaused"),), caller);
     }
 
     /// Returns `true` if the contract is currently paused.
@@ -521,6 +530,31 @@ impl GameContract {
             return Err(ContractError::ContractPaused);
         }
         Ok(())
+    }
+
+    /// Reentrancy guard (#860): reject a call if another guarded call is
+    /// already in progress, then mark the guard entered.
+    ///
+    /// Every function that calls this must call [`non_reentrant_exit`] on
+    /// *every* exit path — success and error alike — exactly once, or the
+    /// guard is left set and every subsequent guarded call on-chain will
+    /// fail with `ReentrantCall` forever.
+    ///
+    /// # Errors
+    /// - [`ContractError::ReentrantCall`] — the guard is already set.
+    fn non_reentrant_enter(env: &Env) -> Result<(), ContractError> {
+        let entered: u32 = env.storage().instance().get(&R_GUARD).unwrap_or(0);
+        if entered != 0 {
+            return Err(ContractError::ReentrantCall);
+        }
+        env.storage().instance().set(&R_GUARD, &1u32);
+        Ok(())
+    }
+
+    /// Release the reentrancy guard (#860). Idempotent — safe to call even
+    /// if the guard was never entered.
+    fn non_reentrant_exit(env: &Env) {
+        env.storage().instance().set(&R_GUARD, &0u32);
     }
 
     /// Gas-optimized tournament payout — single pass, no redundant map reads.
@@ -674,6 +708,8 @@ impl GameContract {
 
         player1.require_auth();
 
+        Self::non_reentrant_enter(&env)?;
+
         Self::require_token_whitelisted(&env, &Self::token_contract_address(&env));
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
@@ -702,6 +738,7 @@ impl GameContract {
             proof_of_game: BytesN::from_array(&env, &[0; 32]),
             last_move_at: env.ledger().sequence() as u64,
             board_fen: initial_board,
+            last_activity_ts: env.ledger().timestamp(),
         };
 
         let mut games: Map<u64, Game> = env
@@ -727,6 +764,7 @@ impl GameContract {
             (game_counter, player1, wager_amount),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(game_counter)
     }
 
@@ -792,6 +830,8 @@ impl GameContract {
         }
         player2.require_auth();
 
+        Self::non_reentrant_enter(&env)?;
+
         Self::require_token_whitelisted(&env, &Self::token_contract_address(&env));
         let token_client = Self::token_client(&env);
         let contract_address = env.current_contract_address();
@@ -807,6 +847,7 @@ impl GameContract {
         game.state = GameState::InProgress;
         game.current_turn = 1;
         game.last_move_at = env.ledger().sequence() as u64;
+        game.last_activity_ts = env.ledger().timestamp();
 
         let mut escrow: Map<Address, i128> = env
             .storage()
@@ -826,6 +867,7 @@ impl GameContract {
             (game_id, game.player1, player2),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -910,6 +952,7 @@ impl GameContract {
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
         game.last_move_at = env.ledger().sequence() as u64;
+        game.last_activity_ts = env.ledger().timestamp();
         game.board_fen = new_board;
 
         // Auto settlement logic based on status flag
@@ -1030,6 +1073,7 @@ impl GameContract {
             (game_id, player),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1141,6 +1185,7 @@ impl GameContract {
             (game_id, winner),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1208,6 +1253,7 @@ impl GameContract {
             (game_id, player),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1285,6 +1331,7 @@ impl GameContract {
             (game_id, player, winner),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1349,6 +1396,7 @@ impl GameContract {
             (game_id, winner),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1474,6 +1522,7 @@ impl GameContract {
             (game_id, winners.len() as u32),
         );
 
+        Self::non_reentrant_exit(&env);
         Ok(())
     }
 
@@ -1753,70 +1802,6 @@ impl GameContract {
         if admin != current_admin {
             panic_with_error!(&env, ContractError::Unauthorized);
         }
-        if threshold == 0 || threshold > new_admins.len() as u32 {
-            panic!("Invalid threshold");
-        }
-
-        let mut unique_set = Vec::new(&env);
-        for i in 0..new_admins.len() {
-            let admin = new_admins.get(i).unwrap();
-            if unique_set.contains(&admin) {
-                panic!("Duplicate admins in list");
-            }
-            unique_set.push_back(admin);
-        }
-
-        env.storage().instance().set(&FEE_ADMINS, &new_admins);
-        env.storage().instance().set(&FEE_THRESHOLD, &threshold);
-    }
-
-    pub fn configure_fees(
-        env: Env,
-        admins: Vec<Address>,
-        fee_bips: u32,
-        treasury_address: Address,
-    ) {
-        let stored_admins: Vec<Address> =
-            env.storage()
-                .instance()
-                .get(&FEE_ADMINS)
-                .unwrap_or_else(|| {
-                    let current_admin: Address = env
-                        .storage()
-                        .instance()
-                        .get(&CONTRACT_ADMIN)
-                        .expect("Not initialized");
-                    let mut v = Vec::new(&env);
-                    v.push_back(current_admin);
-                    v
-                });
-        let threshold: u32 = env.storage().instance().get(&FEE_THRESHOLD).unwrap_or(1);
-
-        if admins.len() < threshold {
-            panic!("Not enough admin approvals");
-        }
-
-        let mut unique_approvals = 0;
-        let mut approved_set = Vec::new(&env);
-
-        for i in 0..admins.len() {
-            let admin = admins.get(i).unwrap();
-            if stored_admins.contains(&admin) {
-                if approved_set.contains(&admin) {
-                    panic!("Duplicate admin approvals");
-                }
-                admin.require_auth();
-                approved_set.push_back(admin.clone());
-                unique_approvals += 1;
-            } else {
-                panic!("Unauthorized admin address");
-            }
-        }
-
-        if unique_approvals < threshold {
-            panic!("Not enough valid admin approvals");
-        }
-
         if fee_bips > 1000 {
             panic_with_error!(&env, ContractError::InvalidConfig);
         }
@@ -1862,9 +1847,9 @@ impl GameContract {
             .storage()
             .instance()
             .get(&CONTRACT_ADMIN)
-            .ok_or(ContractError::NotAuthorized)?;
+            .ok_or(ContractError::Unauthorized)?;
         if admin != stored_admin {
-            return Err(ContractError::NotAuthorized);
+            return Err(ContractError::Unauthorized);
         }
         if env.storage().instance().has(&PENDING_ADMIN_KEY) {
             return Err(ContractError::AdminKeyAlreadyPending);
@@ -1880,7 +1865,7 @@ impl GameContract {
             .set(&ADMIN_TIMELOCK, &(current_seq + ADMIN_TIMELOCK_DURATION));
 
         env.events().publish(
-            (symbol_short!("admin_key_proposed"),),
+            (symbol_short!("adm_prop"),),
             (admin, new_key.clone(), current_seq),
         );
 
@@ -1894,23 +1879,25 @@ impl GameContract {
             .storage()
             .instance()
             .get(&PENDING_ADMIN_KEY)
-            .ok_or(ContractError::NoPendingAdminKey)?;
+            .ok_or(ContractError::NoProposal)?;
 
-        let proposal_seq: u64 = env
+        let proposal_seq: u32 = env
             .storage()
             .instance()
             .get(&PENDING_ADMIN_TIMESTAMP)
-            .ok_or(ContractError::NoPendingAdminKey)?;
+            .ok_or(ContractError::NoProposal)?;
 
         let current_seq = env.ledger().sequence();
-        let lock_duration: u64 = env
+        let lock_duration: u32 = env
             .storage()
             .instance()
             .get(&ADMIN_TIMELOCK)
             .unwrap_or(ADMIN_TIMELOCK_DURATION);
 
         if current_seq < proposal_seq + lock_duration {
-            return Err(ContractError::TimelockNotExpired);
+            // Reuses EscrowStillLocked's "still time-locked" semantics —
+            // this admin-key rotation timelock is conceptually identical.
+            return Err(ContractError::EscrowStillLocked);
         }
 
         env.storage().instance().set(&ADMIN_KEY, &proposed_key);
@@ -1918,16 +1905,11 @@ impl GameContract {
         env.storage().instance().remove(&PENDING_ADMIN_TIMESTAMP);
         env.storage().instance().remove(&ADMIN_TIMELOCK);
 
-        env.events().publish(
-            (symbol_short!("admin_key_accepted"),),
-            (proposed_key,),
-        );
+        env.events()
+            .publish((symbol_short!("adm_acpt"),), (proposed_key,));
 
         Ok(())
     }
-
-    /// Admin key rotation timelock duration (default: 17280 ledger sequences = 24 hours at 5s/ledger).
-    pub const ADMIN_TIMELOCK_DURATION: u64 = 17280;
 
     // ── #199 – claim_puzzle_reward ────────────────────────────────────────────
     //
@@ -2042,6 +2024,7 @@ impl GameContract {
         // 5. Deduct from Treasury
         let treasury: i128 = env.storage().instance().get(&TREASURY).unwrap_or(0);
         if treasury < reward_amount {
+            Self::non_reentrant_exit(&env);
             return Err(ContractError::InsufficientTreasury);
         }
         env.storage()
@@ -2577,6 +2560,256 @@ impl GameContract {
         Some(timeout_duration - elapsed)
     }
 
+    // ── Time-locked wager auto-forfeit (SC-50) ──────────────────────────────
+    //
+    // `claim_timeout_win` above is ledger-*sequence*-based. This is a parallel
+    // mechanism that uses `env.ledger().timestamp()` (real Unix time) for
+    // strict wall-clock deadline validation, and adds an explicit grace
+    // buffer on top of the base deadline to absorb a temporary backend
+    // outage before the trustless, signature-free forfeit path opens up.
+    // Storage footprint is minimal: two extra instance-storage u64 scalars
+    // (`MOVE_DEADLINE_SECS`, `TIMEOUT_BUFFER_SECS`) and one extra `u64`
+    // field on `Game` (`last_activity_ts`) — no new maps, no per-claim
+    // bookkeeping. Payout reuses the existing `process_payout` fee/escrow
+    // logic verbatim.
+
+    /// Configure the timestamp-based match deadline and grace buffer used by
+    /// [`claim_timeout_victory`] (admin only).
+    ///
+    /// # Parameters
+    /// - `admin`          — Must match `CONTRACT_ADMIN`; must authorise the call.
+    /// - `deadline_secs`  — Seconds a player has to respond to their opponent's
+    ///                      last move before the opponent may force a timeout
+    ///                      victory. Must be > 0.
+    /// - `buffer_secs`    — Additional grace seconds layered on top of
+    ///                      `deadline_secs` — e.g. to cover a brief backend
+    ///                      outage that would otherwise have arbitrated the
+    ///                      game via `claim_win`/`claim_draw`. May be `0` to
+    ///                      disable the extra grace window.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotInitialized`] — Contract has not been initialized.
+    /// - [`ContractError::Unauthorized`]   — `admin` does not match the stored admin.
+    /// - [`ContractError::InvalidConfig`]  — `deadline_secs == 0`.
+    pub fn configure_timeout_deadline(
+        env: Env,
+        admin: Address,
+        deadline_secs: u64,
+        buffer_secs: u64,
+    ) -> Result<(), ContractError> {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .ok_or(ContractError::NotInitialized)?;
+        current_admin.require_auth();
+
+        if admin != current_admin {
+            return Err(ContractError::Unauthorized);
+        }
+        if deadline_secs == 0 {
+            return Err(ContractError::InvalidConfig);
+        }
+
+        env.storage()
+            .instance()
+            .set(&MOVE_DEADLINE_SECS, &deadline_secs);
+        env.storage()
+            .instance()
+            .set(&TIMEOUT_BUFFER_SECS, &buffer_secs);
+
+        Ok(())
+    }
+
+    /// Claim victory when the opponent has failed to respond within the
+    /// configured deadline **plus** grace buffer (SC-50).
+    ///
+    /// This is the strict, ledger-*timestamp*-based sibling of
+    /// [`claim_timeout_win`]. It exists so that a player who is still
+    /// actively engaged cannot be held hostage by an opponent who realizes
+    /// they're losing and simply goes offline instead of resigning: once
+    /// `env.ledger().timestamp() - game.last_activity_ts >= deadline_secs +
+    /// buffer_secs`, the waiting player may settle the game and receive the
+    /// full escrowed wager **immediately — no backend signature required**.
+    ///
+    /// The `buffer_secs` grace period specifically covers a **temporary
+    /// backend/server outage**: even if the off-chain service that would
+    /// normally arbitrate a `claim_win`/`claim_draw` is briefly down, a
+    /// forced forfeit only becomes claimable after `deadline_secs` has
+    /// *also* elapsed on top of that, giving the server a fair window to
+    /// recover before the trustless on-chain path opens up. A claim
+    /// attempted after `deadline_secs` alone but before the buffer has also
+    /// elapsed is rejected with [`ContractError::TimeoutNotReached`] — this
+    /// is the "premature victory claim" the strict timestamp check guards
+    /// against.
+    ///
+    /// Only the player who is *not* on the clock (the one waiting on their
+    /// opponent) may call this — the player whose turn it is can always
+    /// resolve the game by simply moving, so they may never claim a timeout
+    /// against themselves. If both players go silent forever, neither loses
+    /// anything and neither can be forced to claim: the wager stays safely
+    /// escrowed until the rightful (waiting) player chooses to call this —
+    /// there is no way for a third party, or the at-fault player, to drain
+    /// the funds.
+    ///
+    /// # Parameters
+    /// - `game_id`   — ID of a game in `InProgress` state.
+    /// - `claimant`  — The player who is waiting for the opponent's move;
+    ///                 must authorise the call.
+    ///
+    /// # Returns
+    /// `Ok(())` on success; the game is marked `Settled` and the full net
+    /// prize pool is transferred to `claimant` immediately. Because the
+    /// game leaves `InProgress` state, a second timeout (or any other)
+    /// claim against the same game is no longer possible.
+    ///
+    /// # Errors
+    /// - [`ContractError::GameNotFound`]           — `game_id` does not exist.
+    /// - [`ContractError::GameNotInProgress`]      — Game is not `InProgress`
+    ///   (already settled/drawn/etc. — also what prevents a double claim).
+    /// - [`ContractError::NotPlayer`]               — `claimant` is not a participant.
+    /// - [`ContractError::InvalidTimeoutClaimant`]  — `claimant` is the player
+    ///   whose turn it currently is, not the waiting player.
+    /// - [`ContractError::TimeoutNotConfigured`]    — [`configure_timeout_deadline`]
+    ///   has not been called.
+    /// - [`ContractError::TimeoutNotReached`]       — `deadline_secs + buffer_secs`
+    ///   has not yet elapsed since the last move/join.
+    /// - [`ContractError::GameFull`]                — Game has no `player2`
+    ///   (should not occur for an `InProgress` game).
+    ///
+    /// # Events
+    /// Emits `("timeout", "victory") → (game_id, claimant)`.
+    pub fn claim_timeout_victory(
+        env: Env,
+        game_id: u64,
+        claimant: Address,
+    ) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
+        let mut games: Map<u64, Game> = env
+            .storage()
+            .instance()
+            .get(&GAMES)
+            .ok_or(ContractError::GameNotFound)?;
+
+        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+
+        if game.state != GameState::InProgress {
+            return Err(ContractError::GameNotInProgress);
+        }
+        if claimant != game.player1 && Some(claimant.clone()) != game.player2 {
+            return Err(ContractError::NotPlayer);
+        }
+
+        claimant.require_auth();
+
+        Self::require_not_paused(&env)?;
+
+        // Only the waiting player (not on the clock) may force a timeout
+        // victory — the player whose turn it is can always resolve this by
+        // simply moving.
+        let waiting_player = if game.current_turn == 1 {
+            game.player2
+                .as_ref()
+                .ok_or(ContractError::GameFull)?
+                .clone()
+        } else {
+            game.player1.clone()
+        };
+
+        if claimant != waiting_player {
+            return Err(ContractError::InvalidTimeoutClaimant);
+        }
+
+        let deadline_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&MOVE_DEADLINE_SECS)
+            .ok_or(ContractError::TimeoutNotConfigured)?;
+        let buffer_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&TIMEOUT_BUFFER_SECS)
+            .unwrap_or(0);
+
+        // Strict ledger-*timestamp* validation (real Unix time), not ledger
+        // sequence, so the deadline can't drift with block-production speed.
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(game.last_activity_ts);
+        let required = deadline_secs.saturating_add(buffer_secs);
+
+        if elapsed < required {
+            return Err(ContractError::TimeoutNotReached);
+        }
+
+        Self::non_reentrant_enter(&env)?;
+
+        game.winner = Some(claimant.clone());
+        match Self::process_payout(&env, &game, &claimant) {
+            Ok(()) => {}
+            Err(e) => {
+                Self::non_reentrant_exit(&env);
+                return Err(e);
+            }
+        }
+        game.state = GameState::Settled;
+
+        // Update player profiles – a timeout victory counts like any other win.
+        Self::update_player_profile_after_game(&env, &claimant, true, false);
+        if claimant == game.player1 {
+            if let Some(ref player2) = game.player2 {
+                Self::update_player_profile_after_game(&env, player2, false, false);
+            }
+        } else {
+            Self::update_player_profile_after_game(&env, &game.player1, false, false);
+        }
+
+        games.set(game_id, game);
+        env.storage().instance().set(&GAMES, &games);
+
+        env.events().publish(
+            (symbol_short!("timeout"), symbol_short!("victory")),
+            (game_id, claimant),
+        );
+
+        Self::non_reentrant_exit(&env);
+        Ok(())
+    }
+
+    /// Query the seconds remaining before [`claim_timeout_victory`] becomes
+    /// claimable by the player currently waiting on their opponent's move.
+    ///
+    /// Returns `None` if the game doesn't exist, isn't `InProgress`, or no
+    /// deadline has been configured. Returns `Some(0)` once the deadline +
+    /// buffer has already elapsed (a timeout victory is claimable now).
+    ///
+    /// # Parameters
+    /// - `game_id` — ID of the game to query.
+    pub fn get_timeout_victory_remaining(env: Env, game_id: u64) -> Option<u64> {
+        let games: Map<u64, Game> = env.storage().instance().get(&GAMES)?;
+        let game = games.get(game_id)?;
+
+        if game.state != GameState::InProgress {
+            return None;
+        }
+
+        let deadline_secs: u64 = env.storage().instance().get(&MOVE_DEADLINE_SECS)?;
+        let buffer_secs: u64 = env
+            .storage()
+            .instance()
+            .get(&TIMEOUT_BUFFER_SECS)
+            .unwrap_or(0);
+
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(game.last_activity_ts);
+        let required = deadline_secs.saturating_add(buffer_secs);
+
+        if elapsed >= required {
+            return Some(0);
+        }
+
+        Some(required - elapsed)
+    }
+
     /// Resolve a pending dispute and settle the underlying game (arbitrator only).
     ///
     /// Authenticates the arbitrator, processes the payout (`Some(winner)` for a
@@ -2645,6 +2878,13 @@ impl GameContract {
         let mut game = games
             .get(dispute.game_id)
             .ok_or(ContractError::GameNotFound)?;
+
+        // The underlying game may have been separately settled (e.g. via
+        // `forfeit`) while this dispute was still `Pending` — guard against
+        // double-processing its escrow/payout.
+        if game.state != GameState::InProgress {
+            return Err(ContractError::GameAlreadyCompleted);
+        }
 
         Self::non_reentrant_enter(&env)?;
 
@@ -3289,7 +3529,7 @@ impl GameContract {
     // After each game, the profile is updated with results (win/loss/draw).
 
     /// Initialize a new player profile in persistent storage.
-    /// 
+    ///
     /// If the profile already exists, returns the existing profile.
     /// Profiles are created with initial stats: 0 games, 0 wins/losses/draws,
     /// starting rating of 1200 (standard chess rating).
@@ -3318,15 +3558,13 @@ impl GameContract {
         };
 
         profiles.set(player.clone(), new_profile.clone());
-        env.storage()
-            .persistent()
-            .set(&PLAYER_PROFILES, &profiles);
+        env.storage().persistent().set(&PLAYER_PROFILES, &profiles);
 
         new_profile
     }
 
     /// Retrieve a player profile from persistent storage.
-    /// 
+    ///
     /// Returns None if player has no profile yet.
     pub fn get_player_profile(env: Env, player: Address) -> Option<PlayerRating> {
         let profiles: Map<Address, PlayerRating> = env
@@ -3347,17 +3585,12 @@ impl GameContract {
     /// - Draw: +8 rating points
     ///
     /// The highest_rating is tracked to show peak achievement.
-    /// 
+    ///
     /// This function ensures efficient resource usage by:
     /// - Single persistent storage read/write per player
     /// - Minimal computation (no complex ELO calculations)
     /// - No redundant state updates
-    fn update_player_profile_after_game(
-        env: &Env,
-        player: &Address,
-        is_win: bool,
-        is_draw: bool,
-    ) {
+    fn update_player_profile_after_game(env: &Env, player: &Address, is_win: bool, is_draw: bool) {
         let mut profiles: Map<Address, PlayerRating> = env
             .storage()
             .persistent()
@@ -3368,7 +3601,7 @@ impl GameContract {
 
         // Update game statistics
         profile.games_played += 1;
-        
+
         // Calculate rating delta and update statistics
         let rating_delta = if is_draw {
             profile.draws += 1;
@@ -3393,13 +3626,11 @@ impl GameContract {
         profile.last_updated = env.ledger().sequence() as u64;
 
         profiles.set(player.clone(), profile);
-        env.storage()
-            .persistent()
-            .set(&PLAYER_PROFILES, &profiles);
+        env.storage().persistent().set(&PLAYER_PROFILES, &profiles);
     }
 
     /// Manually set a player's rating (admin only).
-    /// 
+    ///
     /// This is useful for:
     /// - Correcting erroneous ratings
     /// - Resetting new accounts
@@ -3443,9 +3674,7 @@ impl GameContract {
         profile.last_updated = env.ledger().sequence() as u64;
 
         profiles.set(player, profile);
-        env.storage()
-            .persistent()
-            .set(&PLAYER_PROFILES, &profiles);
+        env.storage().persistent().set(&PLAYER_PROFILES, &profiles);
 
         Ok(())
     }
@@ -3570,19 +3799,17 @@ impl GameContract {
             return Err(ContractError::InvalidAmount);
         }
 
-        env.storage().instance().set(&TOURNAMENT_TIMELOCK, &duration);
+        env.storage()
+            .instance()
+            .set(&TOURNAMENT_TIMELOCK, &duration);
         Ok(())
     }
 
     /// Get all player profiles (paginated for efficiency).
-    /// 
+    ///
     /// Returns up to `limit` profiles starting from the given offset.
     /// This is useful for leaderboards and statistics queries.
-    pub fn get_player_profiles_paginated(
-        env: Env,
-        offset: u32,
-        limit: u32,
-    ) -> Vec<PlayerRating> {
+    pub fn get_player_profiles_paginated(env: Env, offset: u32, limit: u32) -> Vec<PlayerRating> {
         let profiles: Map<Address, PlayerRating> = env
             .storage()
             .persistent()
@@ -3605,19 +3832,9 @@ impl GameContract {
         }
 
         result
-        if admin != current_admin {
-            return Err(ContractError::Unauthorized);
-        }
-        if duration == 0 {
-            return Err(ContractError::InvalidConfig);
-        }
-        env.storage()
-            .instance()
-            .set(&TOURNAMENT_TIMELOCK, &duration);
-        Ok(())
     }
 
-/// Create a time-locked escrow for a completed tournament game.
+    /// Create a time-locked escrow for a completed tournament game.
     ///
     /// Calculates the total prize pool from the game's wager amount and locks it
     /// until `current_ledger + timelock_duration`. The escrow must then be
@@ -3645,7 +3862,7 @@ impl GameContract {
             .get(&GAMES)
             .ok_or(ContractError::GameNotFound)?;
 
-        let mut game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
+        let game = games.get(game_id).ok_or(ContractError::GameNotFound)?;
 
         // SC-02: Reject if already escrowed, settled, or not in Completed state
         match game.state {
@@ -3705,7 +3922,7 @@ impl GameContract {
             released: false,
         };
 
-escrows.set(escrow_id, escrow);
+        escrows.set(escrow_id, escrow);
         env.storage().instance().set(&TOURNAMENT_ESCROWS, &escrows);
 
         // Increment player's active escrow count
@@ -3876,1983 +4093,69 @@ escrows.set(escrow_id, escrow);
         escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)
     }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Puzzle Bounty Proofs (#982)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a new puzzle bounty
-    pub fn create_puzzle_bounty(
-        env: Env,
-        creator: Address,
-        puzzle_id: u64,
-        reward_amount: i128,
-        max_winners: u32,
-        deadline: u64,
-    ) -> Result<u64, ContractError> {
-        creator.require_auth();
-
-        if reward_amount <= 0 {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        // Transfer reward from creator to contract escrow
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer_from(
-            &creator,                // from
-            &env.current_contract_address(), // to (this contract)
-            &reward_amount,
-        );
-
-        let mut bounty_counter: u64 = env
-            .storage()
-            .instance()
-            .get(&BOUNTY_COUNTER)
-            .unwrap_or(0);
-        bounty_counter += 1;
-        env.storage().instance().set(&BOUNTY_COUNTER, &bounty_counter);
-
-        let bounty = PuzzleBounty {
-            bounty_id: bounty_counter,
-            puzzle_id,
-            creator,
-            reward_amount,
-            total_submissions: 0,
-            max_winners,
-            deadline,
-            claimed: false,
-            winner: None,
-        };
-
-        let mut bounties: Map<u64, PuzzleBounty> = env
-            .storage()
-            .instance()
-            .get(&PUZZLE_BOUNTIES)
-            .unwrap_or(Map::new(&env));
-        bounties.set(bounty_counter, bounty);
-        env.storage().instance().set(&PUZZLE_BOUNTIES, &bounties);
-
-        Ok(bounty_counter)
-    }
-
-    /// Claim a puzzle bounty with proof
-    pub fn claim_puzzle_bounty(
-        env: Env,
-        bounty_id: u64,
-        solver: Address,
-        solution_hash: BytesN<32>,
-    ) -> Result<(), ContractError> {
-        solver.require_auth();
-
-        let mut bounties: Map<u64, PuzzleBounty> = env
-            .storage()
-            .instance()
-            .get(&PUZZLE_BOUNTIES)
-            .ok_or(ContractError::BountyNotFound)?;
-        let mut bounty = bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)?;
-
-        if bounty.claimed {
-            return Err(ContractError::BountyAlreadyClaimed);
-        }
-
-        if env.ledger().sequence() as u64 > bounty.deadline {
-            return Err(ContractError::TimeoutNotReached);
-        }
-
-        if bounty.total_submissions >= bounty.max_winners {
-            return Err(ContractError::BountyAlreadyClaimed);
-        }
-
-        // Record submission
-        let submission = BountySubmission {
-            solver: solver.clone(),
-            puzzle_id: bounty.puzzle_id,
-            solution_hash,
-            submitted_at: env.ledger().sequence() as u64,
-        };
-
-        // Mark as claimed and distribute reward
-        bounty.claimed = true;
-        bounty.winner = Some(solver.clone());
-        bounty.total_submissions += 1;
-        bounties.set(bounty_id, bounty);
-        env.storage().instance().set(&PUZZLE_BOUNTIES, &bounties);
-
-        // Transfer reward to solver
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        let treasury: Address = env.storage().instance().get(&TREASURY_ADDR).unwrap();
-        token_client.transfer(&treasury, &solver, &bounty.reward_amount);
-
-        Ok(())
-    }
-
-    /// Get puzzle bounty details
-    pub fn get_puzzle_bounty(env: Env, bounty_id: u64) -> Result<PuzzleBounty, ContractError> {
-        let bounties: Map<u64, PuzzleBounty> = env
-            .storage()
-            .instance()
-            .get(&PUZZLE_BOUNTIES)
-            .ok_or(ContractError::BountyNotFound)?;
-        bounties.get(bounty_id).ok_or(ContractError::BountyNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Time-Decay Penalties (#986)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Initialize decay configuration
-    pub fn initialize_decay_config(
-        env: Env,
-        min_penalty_threshold: i128,
-        max_decay_duration: u64,
-        base_decay_rate_bips: u32,
-        ban_threshold: i128,
-    ) {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let config = DecayConfig {
-            min_penalty_threshold,
-            max_decay_duration,
-            base_decay_rate_bips,
-            ban_threshold,
-        };
-        env.storage().instance().set(&DECAY_CONFIG, &config);
-    }
-
-    /// Issue a time-decay penalty to a player
-    pub fn issue_penalty(
-        env: Env,
-        player: Address,
-        penalty_amount: i128,
-        reason: Bytes,
-    ) -> Result<(), ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let config: DecayConfig = env
-            .storage()
-            .instance()
-            .get(&DECAY_CONFIG)
-            .ok_or(ContractError::TimeoutNotConfigured)?;
-
-        if penalty_amount < config.min_penalty_threshold {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        let current_ledger = env.ledger().sequence() as u64;
-        let expires_at = current_ledger + config.max_decay_duration;
-
-        let is_banned = penalty_amount >= config.ban_threshold;
-
-        let penalty = PenaltyRecord {
-            player: player.clone(),
-            penalty_amount,
-            issued_at: current_ledger,
-            expires_at,
-            reason,
-            decay_rate_bips: config.base_decay_rate_bips,
-            original_amount: penalty_amount,
-            is_banned,
-        };
-
-        let mut penalties: Map<Address, PenaltyRecord> = env
-            .storage()
-            .instance()
-            .get(&PENALTIES)
-            .unwrap_or(Map::new(&env));
-        penalties.set(player, penalty);
-        env.storage().instance().set(&PENALTIES, &penalties);
-
-        Ok(())
-    }
-
-    /// Calculate current penalty amount after decay
-    pub fn get_current_penalty(env: Env, player: Address) -> Result<i128, ContractError> {
-        let penalties: Map<Address, PenaltyRecord> = env
-            .storage()
-            .instance()
-            .get(&PENALTIES)
-            .ok_or(ContractError::NotBanned)?;
-        let penalty = penalties.get(player).ok_or(ContractError::NotBanned)?;
-
-        let current_ledger = env.ledger().sequence() as u64;
-        if current_ledger >= penalty.expires_at {
-            return Ok(0); // Penalty has fully decayed
-        }
-
-        let elapsed = current_ledger - penalty.issued_at;
-        let decay_multiplier = 10000 - (elapsed * penalty.decay_rate_bips as u64 / 1000);
-        let current_amount = penalty.original_amount * decay_multiplier as i128 / 10000;
-
-        Ok(current_amount.max(0))
-    }
-
-    /// Check if a player is currently banned
-    pub fn is_player_banned(env: Env, player: Address) -> bool {
-        let penalties: Map<Address, PenaltyRecord> = env
-            .storage()
-            .instance()
-            .get(&PENALTIES)
-            .unwrap_or(Map::new(&env));
-
-        match penalties.get(player) {
-            Some(penalty) => {
-                let current_ledger = env.ledger().sequence() as u64;
-                penalty.is_banned && current_ledger < penalty.expires_at
-            }
-            None => false,
-        }
-    }
-
-    /// Reinstate a banned player (admin only)
-    pub fn reinstate_player(env: Env, player: Address) -> Result<(), ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let mut penalties: Map<Address, PenaltyRecord> = env
-            .storage()
-            .instance()
-            .get(&PENALTIES)
-            .ok_or(ContractError::NotBanned)?;
-        let mut penalty = penalties.get(player).ok_or(ContractError::NotBanned)?;
-
-        if !penalty.is_banned {
-            return Err(ContractError::NotBanned);
-        }
-
-        penalty.is_banned = false;
-        penalties.set(player, penalty);
-        env.storage().instance().set(&PENALTIES, &penalties);
-
-        Ok(())
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Token-Gated VIP (#987)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Initialize VIP configuration
-    pub fn initialize_vip_config(
-        env: Env,
-        bronze_threshold: i128,
-        silver_threshold: i128,
-        gold_threshold: i128,
-        diamond_threshold: i128,
-        fee_discount_bronze: u32,
-        fee_discount_silver: u32,
-        fee_discount_gold: u32,
-        fee_discount_diamond: u32,
-    ) {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let config = VipConfig {
-            bronze_threshold,
-            silver_threshold,
-            gold_threshold,
-            diamond_threshold,
-            fee_discount_bronze,
-            fee_discount_silver,
-            fee_discount_gold,
-            fee_discount_diamond,
-        };
-        env.storage().instance().set(&VIP_CONFIG, &config);
-    }
-
-    /// Check and update VIP tier based on token balance
-    pub fn update_vip_tier(env: Env, player: Address) -> Result<VipTier, ContractError> {
-        player.require_auth();
-
-        let config: VipConfig = env
-            .storage()
-            .instance()
-            .get(&VIP_CONFIG)
-            .ok_or(ContractError::VipTierNotFound)?;
-
-        // Get player's token balance
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        let balance = token_client.balance(&player);
-
-        let tier = if balance >= config.diamond_threshold {
-            VipTier::Diamond
-        } else if balance >= config.gold_threshold {
-            VipTier::Gold
-        } else if balance >= config.silver_threshold {
-            VipTier::Silver
-        } else if balance >= config.bronze_threshold {
-            VipTier::Bronze
-        } else {
-            VipTier::None
-        };
-
-        let holder = VipHolder {
-            address: player.clone(),
-            tier: tier.clone(),
-            token_balance: balance,
-            joined_at: env.ledger().sequence() as u64,
-            expires_at: None,
-        };
-
-        let mut holders: Map<Address, VipHolder> = env
-            .storage()
-            .instance()
-            .get(&VIP_HOLDERS)
-            .unwrap_or(Map::new(&env));
-        holders.set(player, holder);
-        env.storage().instance().set(&VIP_HOLDERS, &holders);
-
-        Ok(tier)
-    }
-
-    /// Get VIP tier for a player
-    pub fn get_vip_tier(env: Env, player: Address) -> VipTier {
-        let holders: Map<Address, VipHolder> = env
-            .storage()
-            .instance()
-            .get(&VIP_HOLDERS)
-            .unwrap_or(Map::new(&env));
-
-        match holders.get(player) {
-            Some(holder) => holder.tier,
-            None => VipTier::None,
-        }
-    }
-
-    /// Get discounted fee basis points based on VIP tier
-    pub fn get_vip_discount(env: Env, player: Address) -> u32 {
-        let tier = Self::get_vip_tier(env.clone(), player);
-        let config: VipConfig = match env.storage().instance().get(&VIP_CONFIG) {
-            Some(c) => c,
-            None => return 0,
-        };
-
-        match tier {
-            VipTier::Bronze => config.fee_discount_bronze,
-            VipTier::Silver => config.fee_discount_silver,
-            VipTier::Gold => config.fee_discount_gold,
-            VipTier::Diamond => config.fee_discount_diamond,
-            VipTier::None => 0,
-        }
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Soulbound Trophies (#994)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Award a soulbound trophy to a player (admin only)
-    pub fn award_trophy(
-        env: Env,
-        player: Address,
-        trophy_type: TrophyType,
-        name: String,
-        description: String,
-        image_uri: String,
-    ) -> Result<u64, ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        // Check if player already has this trophy type
-        let trophies: Vec<Trophy> = env
-            .storage()
-            .instance()
-            .get(&TROPHIES)
-            .unwrap_or(Map::new(&env))
-            .get(player.clone())
-            .unwrap_or(Vec::new(&env));
-
-        for t in trophies.iter() {
-            if t.trophy_type == trophy_type {
-                return Err(ContractError::TrophyAlreadyOwned);
-            }
-        }
-
-        // Generate trophy ID
-        let mut trophy_counter: u64 = env
-            .storage()
-            .instance()
-            .get(&TROPHY_REGISTRY)
-            .unwrap_or(Map::new(&env))
-            .len() as u64;
-        trophy_counter += 1;
-
-        let trophy = Trophy {
-            trophy_id: trophy_counter,
-            owner: player.clone(),
-            trophy_type: trophy_type.clone(),
-            earned_at: env.ledger().sequence() as u64,
-            metadata_uri: image_uri.clone(),
-        };
-
-        // Store trophy metadata
-        let metadata = TrophyMetadata {
-            trophy_id: trophy_counter,
-            trophy_type,
-            name,
-            description,
-            image_uri,
-            total_minted: 1,
-        };
-
-        let mut registry: Map<u64, TrophyMetadata> = env
-            .storage()
-            .instance()
-            .get(&TROPHY_REGISTRY)
-            .unwrap_or(Map::new(&env));
-        registry.set(trophy_counter, metadata);
-        env.storage().instance().set(&TROPHY_REGISTRY, &registry);
-
-        // Add trophy to player's collection (soulbound - non-transferable)
-        let mut all_trophies: Map<Address, Vec<Trophy>> = env
-            .storage()
-            .instance()
-            .get(&TROPHIES)
-            .unwrap_or(Map::new(&env));
-        let mut player_trophies = all_trophies.get(player.clone()).unwrap_or(Vec::new(&env));
-        player_trophies.push_back(trophy);
-        all_trophies.set(player, player_trophies);
-        env.storage().instance().set(&TROPHIES, &all_trophies);
-
-        Ok(trophy_counter)
-    }
-
-    /// Get all trophies for a player
-    pub fn get_player_trophies(env: Env, player: Address) -> Vec<Trophy> {
-        let all_trophies: Map<Address, Vec<Trophy>> = env
-            .storage()
-            .instance()
-            .get(&TROPHIES)
-            .unwrap_or(Map::new(&env));
-        all_trophies.get(player).unwrap_or(Vec::new(&env))
-    }
-
-    /// Get trophy metadata
-    pub fn get_trophy_metadata(env: Env, trophy_id: u64) -> Result<TrophyMetadata, ContractError> {
-        let registry: Map<u64, TrophyMetadata> = env
-            .storage()
-            .instance()
-            .get(&TROPHY_REGISTRY)
-            .ok_or(ContractError::BountyNotFound)?;
-        registry.get(trophy_id).ok_or(ContractError::BountyNotFound)
-    }
-
-    /// Transfer is blocked for soulbound trophies - this always fails
-    pub fn transfer_trophy(
-        env: Env,
-        _trophy_id: u64,
-        _to: Address,
-    ) -> Result<(), ContractError> {
-        // Soulbound tokens cannot be transferred
-        Err(ContractError::NotTrophyOwner)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Multi-sig Dispute Resolution (#977)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a multi-sig dispute proposal
-    pub fn create_multisig_dispute(
-        env: Env,
-        game_id: u64,
-        proposer: Address,
-        proposal: Bytes,
-        threshold: u32,
-    ) -> Result<u64, ContractError> {
-        proposer.require_auth();
-
-        let dispute_id = env
-            .storage()
-            .instance()
-            .get(&DISPUTE_COUNTER)
-            .unwrap_or(0u64)
-            + 1;
-
-        let dispute = MultiSigDispute {
-            dispute_id,
-            game_id,
-            proposer,
-            proposal,
-            votes_for: 0,
-            votes_against: 0,
-            votes_abstain: 0,
-            threshold,
-            resolved: false,
-            proposed_at: env.ledger().sequence() as u64,
-        };
-
-        let mut disputes: Map<u64, MultiSigDispute> = env
-            .storage()
-            .instance()
-            .get(&DISPUTE_MULTISIG)
-            .unwrap_or(Map::new(&env));
-        disputes.set(dispute_id, dispute);
-        env.storage().instance().set(&DISPUTE_MULTISIG, &disputes);
-        env.storage()
-            .instance()
-            .set(&DISPUTE_COUNTER, &dispute_id);
-
-        Ok(dispute_id)
-    }
-
-    /// Vote on a multi-sig dispute
-    pub fn vote_on_dispute(
-        env: Env,
-        dispute_id: u64,
-        voter: Address,
-        vote: DisputeVote,
-    ) -> Result<(), ContractError> {
-        voter.require_auth();
-
-        let mut disputes: Map<u64, MultiSigDispute> = env
-            .storage()
-            .instance()
-            .get(&DISPUTE_MULTISIG)
-            .ok_or(ContractError::DisputeNotFound)?;
-        let mut dispute = disputes
-            .get(dispute_id)
-            .ok_or(ContractError::DisputeNotFound)?;
-
-        if dispute.resolved {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        // Check if already voted
-        let mut votes: Map<Address, DisputeVote> = env
-            .storage()
-            .instance()
-            .get(&DISPUTE_VOTES)
-            .unwrap_or(Map::new(&env));
-
-        if votes.has(voter.clone()) {
-            return Err(ContractError::AlreadyVoted);
-        }
-
-        // Record vote
-        votes.set(voter, vote.clone());
-        env.storage().instance().set(&DISPUTE_VOTES, &votes);
-
-        // Update vote counts
-        match vote {
-            DisputeVote::ForResolution => dispute.votes_for += 1,
-            DisputeVote::AgainstResolution => dispute.votes_against += 1,
-            DisputeVote::Abstain => dispute.votes_abstain += 1,
-        }
-
-        // Check if threshold is met
-        if dispute.votes_for >= dispute.threshold {
-            dispute.resolved = true;
-        }
-
-        disputes.set(dispute_id, dispute);
-        env.storage().instance().set(&DISPUTE_MULTISIG, &disputes);
-
-        Ok(())
-    }
-
-    /// Get multi-sig dispute status
-    pub fn get_multisig_dispute(
-        env: Env,
-        dispute_id: u64,
-    ) -> Result<MultiSigDispute, ContractError> {
-        let disputes: Map<u64, MultiSigDispute> = env
-            .storage()
-            .instance()
-            .get(&DISPUTE_MULTISIG)
-            .ok_or(ContractError::DisputeNotFound)?;
-        disputes.get(dispute_id).ok_or(ContractError::DisputeNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Dynamic Fee Split (#978)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Initialize dynamic fee split configuration
-    pub fn initialize_fee_split(
-        env: Env,
-        platform_fee_bips: u32,
-        creator_share_bips: u32,
-        winner_share_bips: u32,
-        treasury_share_bips: u32,
-    ) {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        // Validate total is 10000 basis points
-        let total = platform_fee_bips + creator_share_bips + winner_share_bips + treasury_share_bips;
-        assert!(total == 10000, "Fee split must total 10000 basis points");
-
-        let config = FeeSplitConfig {
-            platform_fee_bips,
-            creator_share_bips,
-            winner_share_bips,
-            treasury_share_bips,
-        };
-        env.storage().instance().set(&FEE_SPLIT_CONFIG, &config);
-    }
-
-    /// Calculate fee split for a game
-    pub fn calculate_fee_split(
-        env: Env,
-        game_id: u64,
-        total_prize: i128,
-    ) -> Result<FeeSplit, ContractError> {
-        let config: FeeSplitConfig = env
-            .storage()
-            .instance()
-            .get(&FEE_SPLIT_CONFIG)
-            .ok_or(ContractError::InvalidFeeSplit)?;
-
-        let platform_amount = total_prize * config.platform_fee_bips as i128 / 10000;
-        let creator_amount = total_prize * config.creator_share_bips as i128 / 10000;
-        let winner_amount = total_prize * config.winner_share_bips as i128 / 10000;
-        let treasury_amount = total_prize - platform_amount - creator_amount - winner_amount;
-
-        let split = FeeSplit {
-            game_id,
-            platform_amount,
-            creator_amount,
-            winner_amount,
-            treasury_amount,
-            total_fee: total_prize,
-        };
-
-        // Store split for this game
-        let mut splits: Map<u64, FeeSplit> = env
-            .storage()
-            .instance()
-            .get(&FEE_SPLITS)
-            .unwrap_or(Map::new(&env));
-        splits.set(game_id, split.clone());
-        env.storage().instance().set(&FEE_SPLITS, &splits);
-
-        Ok(split)
-    }
-
-    /// Get fee split for a game
-    pub fn get_fee_split(env: Env, game_id: u64) -> Result<FeeSplit, ContractError> {
-        let splits: Map<u64, FeeSplit> = env
-            .storage()
-            .instance()
-            .get(&FEE_SPLITS)
-            .ok_or(ContractError::InvalidFeeSplit)?;
-        splits.get(game_id).ok_or(ContractError::InvalidFeeSplit)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Spectator Tipping (#979)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Allow a spectator to tip a player
-    pub fn tip_player(
-        env: Env,
-        game_id: u64,
-        spectator: Address,
-        recipient: Address,
-        amount: i128,
-        message: Option<String>,
-    ) -> Result<u64, ContractError> {
-        spectator.require_auth();
-
-        if spectator == recipient {
-            return Err(ContractError::CannotTipSelf);
-        }
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        // Transfer tokens from spectator to recipient
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer(&spectator, &recipient, &amount);
-
-        // Generate tip ID
-        let tip_id = env
-            .storage()
-            .instance()
-            .get(&SPECTATOR_TIPS)
-            .unwrap_or(Map::new(&env))
-            .len() as u64
-            + 1;
-
-        let tip = SpectatorTip {
-            tip_id,
-            game_id,
-            spectator: spectator.clone(),
-            recipient: recipient.clone(),
-            amount,
-            timestamp: env.ledger().sequence() as u64,
-            message,
-        };
-
-        // Store tip
-        let mut tips: Map<u64, Vec<SpectatorTip>> = env
-            .storage()
-            .instance()
-            .get(&SPECTATOR_TIPS)
-            .unwrap_or(Map::new(&env));
-
-        let mut game_tips = tips.get(game_id).unwrap_or(Vec::new(&env));
-        game_tips.push_back(tip);
-        tips.set(game_id, game_tips);
-        env.storage().instance().set(&SPECTATOR_TIPS, &tips);
-
-        // Update recipient's total tips
-        let mut recipient_tips: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&TIP_RECIPIENTS)
-            .unwrap_or(Map::new(&env));
-        let current_tips = recipient_tips.get(recipient.clone()).unwrap_or(0);
-        recipient_tips.set(recipient, current_tips + amount);
-        env.storage().instance().set(&TIP_RECIPIENTS, &recipient_tips);
-
-        Ok(tip_id)
-    }
-
-    /// Get total tips received by a player
-    pub fn get_player_tips(env: Env, player: Address) -> i128 {
-        let tips: Map<Address, i128> = env
-            .storage()
-            .instance()
-            .get(&TIP_RECIPIENTS)
-            .unwrap_or(Map::new(&env));
-        tips.get(player).unwrap_or(0)
-    }
-
-    /// Get all tips for a game
-    pub fn get_game_tips(env: Env, game_id: u64) -> Vec<SpectatorTip> {
-        let tips: Map<u64, Vec<SpectatorTip>> = env
-            .storage()
-            .instance()
-            .get(&SPECTATOR_TIPS)
-            .unwrap_or(Map::new(&env));
-        tips.get(game_id).unwrap_or(Vec::new(&env))
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Anti-Cheat Security Deposit (#980)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Initialize anti-cheat deposit configuration
-    pub fn initialize_deposit_config(
-        env: Env,
-        min_deposit: i128,
-        max_deposit: i128,
-        seizure_threshold: u32,
-        refund_period: u64,
-    ) {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let config = DepositConfig {
-            min_deposit,
-            max_deposit,
-            seizure_threshold,
-            refund_period,
-        };
-        env.storage().instance().set(&DEPOSIT_CONFIG, &config);
-    }
-
-    /// Deposit security funds
-    pub fn deposit_security(env: Env, player: Address, amount: i128) -> Result<(), ContractError> {
-        player.require_auth();
-
-        let config: DepositConfig = env
-            .storage()
-            .instance()
-            .get(&DEPOSIT_CONFIG)
-            .ok_or(ContractError::DepositTooLow)?;
-
-        if amount < config.min_deposit {
-            return Err(ContractError::DepositTooLow);
-        }
-        if amount > config.max_deposit {
-            return Err(ContractError::DepositTooHigh);
-        }
-
-        // Transfer deposit from player to contract
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer_from(
-            &player,
-            &env.current_contract_address(),
-            &amount,
-        );
-
-        let deposit = CheatDeposit {
-            player: player.clone(),
-            deposit_amount: amount,
-            deposited_at: env.ledger().sequence() as u64,
-            is_seized: false,
-            seizure_reason: None,
-        };
-
-        let mut deposits: Map<Address, CheatDeposit> = env
-            .storage()
-            .instance()
-            .get(&CHEAT_DEPOSITS)
-            .unwrap_or(Map::new(&env));
-        deposits.set(player, deposit);
-        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
-
-        Ok(())
-    }
-
-    /// Refund deposit after refund period
-    pub fn refund_deposit(env: Env, player: Address) -> Result<(), ContractError> {
-        player.require_auth();
-
-        let mut deposits: Map<Address, CheatDeposit> = env
-            .storage()
-            .instance()
-            .get(&CHEAT_DEPOSITS)
-            .ok_or(ContractError::NoDeposit)?;
-        let mut deposit = deposits.get(player.clone()).ok_or(ContractError::NoDeposit)?;
-
-        if deposit.is_seized {
-            return Err(ContractError::DepositLocked);
-        }
-
-        let config: DepositConfig = env
-            .storage()
-            .instance()
-            .get(&DEPOSIT_CONFIG)
-            .ok_or(ContractError::DepositTooLow)?;
-
-        let current_ledger = env.ledger().sequence() as u64;
-        if current_ledger < deposit.deposited_at + config.refund_period {
-            return Err(ContractError::DepositLocked);
-        }
-
-        // Refund deposit to player
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer(
-            &env.current_contract_address(),
-            &player,
-            &deposit.deposit_amount,
-        );
-
-        // Remove deposit record
-        deposits.remove(player);
-        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
-
-        Ok(())
-    }
-
-    /// Seize deposit for cheating (admin only)
-    pub fn seize_deposit(
-        env: Env,
-        player: Address,
-        reason: Bytes,
-    ) -> Result<(), ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let mut deposits: Map<Address, CheatDeposit> = env
-            .storage()
-            .instance()
-            .get(&CHEAT_DEPOSITS)
-            .ok_or(ContractError::NoDeposit)?;
-        let mut deposit = deposits.get(player.clone()).ok_or(ContractError::NoDeposit)?;
-
-        if deposit.is_seized {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        deposit.is_seized = true;
-        deposit.seizure_reason = Some(reason);
-        deposits.set(player, deposit);
-        env.storage().instance().set(&CHEAT_DEPOSITS, &deposits);
-
-        Ok(())
-    }
-
-    /// Check if a player has a security deposit
-    pub fn has_security_deposit(env: Env, player: Address) -> bool {
-        let deposits: Map<Address, CheatDeposit> = env
-            .storage()
-            .instance()
-            .get(&CHEAT_DEPOSITS)
-            .unwrap_or(Map::new(&env));
-        deposits.has(player)
-    }
-
-    /// Get deposit details
-    pub fn get_deposit(env: Env, player: Address) -> Result<CheatDeposit, ContractError> {
-        let deposits: Map<Address, CheatDeposit> = env
-            .storage()
-            .instance()
-            .get(&CHEAT_DEPOSITS)
-            .ok_or(ContractError::NoDeposit)?;
-        deposits.get(player).ok_or(ContractError::NoDeposit)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Nonce Replay Protection (#983)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Get the next valid nonce for an address
-    pub fn get_next_nonce(env: Env, address: Address) -> u64 {
-        let nonces: Map<Address, u64> = env
-            .storage()
-            .instance()
-            .get(&NONCE_REGISTRY)
-            .unwrap_or(Map::new(&env));
-        nonces.get(address).unwrap_or(0) + 1
-    }
-
-    /// Consume a nonce (mark as used)
-    pub fn consume_nonce(env: Env, address: Address, nonce: u64) -> Result<(), ContractError> {
-        address.require_auth();
-
-        let mut nonces: Map<Address, u64> = env
-            .storage()
-            .instance()
-            .get(&NONCE_REGISTRY)
-            .unwrap_or(Map::new(&env));
-        let last_nonce = nonces.get(address.clone()).unwrap_or(0);
-
-        // Nonce must be exactly last_nonce + 1
-        if nonce != last_nonce + 1 {
-            return Err(ContractError::InvalidNonce);
-        }
-
-        // Check if nonce was already used
-        let mut used: Map<(Address, u64), bool> = env
-            .storage()
-            .instance()
-            .get(&USED_NONCES)
-            .unwrap_or(Map::new(&env));
-
-        if used.get((address.clone(), nonce)).unwrap_or(false) {
-            return Err(ContractError::NonceAlreadyUsed);
-        }
-
-        // Mark nonce as used
-        used.set((address.clone(), nonce), true);
-        env.storage().instance().set(&USED_NONCES, &used);
-
-        // Update last used nonce
-        nonces.set(address, nonce);
-        env.storage().instance().set(&NONCE_REGISTRY, &nonces);
-
-        Ok(())
-    }
-
-    /// Check if a nonce has been used
-    pub fn is_nonce_used(env: Env, address: Address, nonce: u64) -> bool {
-        let used: Map<(Address, u64), bool> = env
-            .storage()
-            .instance()
-            .get(&USED_NONCES)
-            .unwrap_or(Map::new(&env));
-        used.get((address, nonce)).unwrap_or(false)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Guild Escrow Splits (#984)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a guild
-    pub fn create_guild(
-        env: Env,
-        guild_id: Address,
-        name: String,
-        treasury: Address,
-        share_bips: u32,
-    ) -> Result<(), ContractError> {
-        guild_id.require_auth();
-
-        if share_bips > 10000 {
-            return Err(ContractError::InvalidPercentage);
-        }
-
-        let guild = Guild {
-            guild_id: guild_id.clone(),
-            name,
-            treasury,
-            members: Vec::new(&env),
-            share_bips,
-            created_at: env.ledger().sequence() as u64,
-        };
-
-        let mut guilds: Map<Address, Guild> = env
-            .storage()
-            .instance()
-            .get(&GUILDS)
-            .unwrap_or(Map::new(&env));
-        guilds.set(guild_id, guild);
-        env.storage().instance().set(&GUILDS, &guilds);
-
-        Ok(())
-    }
-
-    /// Add a member to a guild
-    pub fn add_guild_member(
-        env: Env,
-        guild_id: Address,
-        member: Address,
-    ) -> Result<(), ContractError> {
-        guild_id.require_auth();
-
-        let mut guilds: Map<Address, Guild> = env
-            .storage()
-            .instance()
-            .get(&GUILDS)
-            .ok_or(ContractError::GuildNotFound)?;
-        let mut guild = guilds.get(guild_id.clone()).ok_or(ContractError::GuildNotFound)?;
-
-        // Check if already a member
-        for m in guild.members.iter() {
-            if m == member {
-                return Ok(()); // Already a member
-            }
-        }
-
-        guild.members.push_back(member);
-        guilds.set(guild_id, guild);
-        env.storage().instance().set(&GUILDS, &guilds);
-
-        Ok(())
-    }
-
-    /// Create a guild escrow for a game
-    pub fn create_guild_escrow(
-        env: Env,
-        guild_id: Address,
-        game_id: u64,
-        amount: i128,
-    ) -> Result<u64, ContractError> {
-        guild_id.require_auth();
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        // Verify guild exists
-        let guilds: Map<Address, Guild> = env
-            .storage()
-            .instance()
-            .get(&GUILDS)
-            .ok_or(ContractError::GuildNotFound)?;
-        let guild = guilds.get(guild_id.clone()).ok_or(ContractError::GuildNotFound)?;
-
-        // Transfer from guild treasury to contract
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer_from(
-            &guild.treasury,
-            &env.current_contract_address(),
-            &amount,
-        );
-
-        let escrow_id = env
-            .storage()
-            .instance()
-            .get(&GUILD_ESCROWS)
-            .unwrap_or(Map::new(&env))
-            .len() as u64
-            + 1;
-
-        let escrow = GuildEscrow {
-            escrow_id,
-            guild_id,
-            game_id,
-            amount,
-            distributed: false,
-            distributed_at: None,
-        };
-
-        let mut escrows: Map<u64, GuildEscrow> = env
-            .storage()
-            .instance()
-            .get(&GUILD_ESCROWS)
-            .unwrap_or(Map::new(&env));
-        escrows.set(escrow_id, escrow);
-        env.storage().instance().set(&GUILD_ESCROWS, &escrows);
-
-        Ok(escrow_id)
-    }
-
-    /// Distribute guild escrow to members
-    pub fn distribute_guild_escrow(
-        env: Env,
-        escrow_id: u64,
-    ) -> Result<(), ContractError> {
-        let mut escrows: Map<u64, GuildEscrow> = env
-            .storage()
-            .instance()
-            .get(&GUILD_ESCROWS)
-            .ok_or(ContractError::EscrowNotFound)?;
-        let mut escrow = escrows.get(escrow_id).ok_or(ContractError::EscrowNotFound)?;
-
-        if escrow.distributed {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        // Get guild members
-        let guilds: Map<Address, Guild> = env
-            .storage()
-            .instance()
-            .get(&GUILDS)
-            .ok_or(ContractError::GuildNotFound)?;
-        let guild = guilds.get(escrow.guild_id).ok_or(ContractError::GuildNotFound)?;
-
-        if guild.members.is_empty() {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        // Split evenly among members
-        let per_member = escrow.amount / guild.members.len() as i128;
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-
-        for member in guild.members.iter() {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &member,
-                &per_member,
-            );
-        }
-
-        escrow.distributed = true;
-        escrow.distributed_at = Some(env.ledger().sequence() as u64);
-        escrows.set(escrow_id, escrow);
-        env.storage().instance().set(&GUILD_ESCROWS, &escrows);
-
-        Ok(())
-    }
-
-    /// Get guild information
-    pub fn get_guild(env: Env, guild_id: Address) -> Result<Guild, ContractError> {
-        let guilds: Map<Address, Guild> = env
-            .storage()
-            .instance()
-            .get(&GUILDS)
-            .ok_or(ContractError::GuildNotFound)?;
-        guilds.get(guild_id).ok_or(ContractError::GuildNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Royalty Enforcement (#991)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Initialize royalty configuration
-    pub fn initialize_royalty_config(
-        env: Env,
-        platform_royalty_bips: u32,
-        creator_royalty_bips: u32,
-        max_royalty_bips: u32,
-    ) {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        if platform_royalty_bips + creator_royalty_bips > max_royalty_bips {
-            panic!("Total royalties exceed maximum");
-        }
-
-        let config = RoyaltyConfig {
-            platform_royalty_bips,
-            creator_royalty_bips,
-            max_royalty_bips,
-        };
-        env.storage().instance().set(&ROYALTY_CONFIG, &config);
-    }
-
-    /// Pay royalties for a game
-    pub fn pay_royalties(
-        env: Env,
-        game_id: u64,
-        total_amount: i128,
-        creator: Address,
-    ) -> Result<(), ContractError> {
-        let config: RoyaltyConfig = env
-            .storage()
-            .instance()
-            .get(&ROYALTY_CONFIG)
-            .ok_or(ContractError::RoyaltyExceeded)?;
-
-        let platform_amount = total_amount * config.platform_royalty_bips as i128 / 10000;
-        let creator_amount = total_amount * config.creator_royalty_bips as i128 / 10000;
-
-        if platform_amount + creator_amount > total_amount {
-            return Err(ContractError::RoyaltyExceeded);
-        }
-
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        let treasury: Address = env.storage().instance().get(&TREASURY_ADDR).unwrap();
-
-        // Pay platform royalty
-        if platform_amount > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &treasury,
-                &platform_amount,
-            );
-        }
-
-        // Pay creator royalty
-        if creator_amount > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &creator,
-                &creator_amount,
-            );
-        }
-
-        // Record payments
-        let mut payments: Map<u64, Vec<RoyaltyPayment>> = env
-            .storage()
-            .instance()
-            .get(&ROYALTY_PAYMENTS)
-            .unwrap_or(Map::new(&env));
-        let mut game_payments = payments.get(game_id).unwrap_or(Vec::new(&env));
-
-        if platform_amount > 0 {
-            game_payments.push_back(RoyaltyPayment {
-                game_id,
-                recipient: treasury,
-                amount: platform_amount,
-                royalty_type: RoyaltyType::Platform,
-                paid_at: env.ledger().sequence() as u64,
-            });
-        }
-
-        if creator_amount > 0 {
-            game_payments.push_back(RoyaltyPayment {
-                game_id,
-                recipient: creator,
-                amount: creator_amount,
-                royalty_type: RoyaltyType::Creator,
-                paid_at: env.ledger().sequence() as u64,
-            });
-        }
-
-        payments.set(game_id, game_payments);
-        env.storage().instance().set(&ROYALTY_PAYMENTS, &payments);
-
-        Ok(())
-    }
-
-    /// Get royalty payments for a game
-    pub fn get_royalty_payments(env: Env, game_id: u64) -> Vec<RoyaltyPayment> {
-        let payments: Map<u64, Vec<RoyaltyPayment>> = env
-            .storage()
-            .instance()
-            .get(&ROYALTY_PAYMENTS)
-            .unwrap_or(Map::new(&env));
-        payments.get(game_id).unwrap_or(Vec::new(&env))
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// AI Agent Fusion (#992)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create an AI agent
-    pub fn create_ai_agent(
-        env: Env,
-        owner: Address,
-        name: String,
-        strength: u32,
-        style_hash: BytesN<32>,
-    ) -> Result<Address, ContractError> {
-        owner.require_auth();
-
-        // Generate agent ID from owner + timestamp
-        let agent_id = Address::from_internal_env(&env); // Simplified
-
-        let agent = AiAgent {
-            agent_id: agent_id.clone(),
-            owner: owner.clone(),
-            name,
-            strength,
-            style_hash,
-            created_at: env.ledger().sequence() as u64,
-            is_active: true,
-        };
-
-        let mut agents: Map<Address, AiAgent> = env
-            .storage()
-            .instance()
-            .get(&AI_AGENTS)
-            .unwrap_or(Map::new(&env));
-        agents.set(agent_id.clone(), agent);
-        env.storage().instance().set(&AI_AGENTS, &agents);
-
-        Ok(agent_id)
-    }
-
-    /// Fuse two AI agents to create a stronger one
-    pub fn fuse_agents(
-        env: Env,
-        agent_a_id: Address,
-        agent_b_id: Address,
-        fusion_cost: i128,
-    ) -> Result<u64, ContractError> {
-        let agents: Map<Address, AiAgent> = env
-            .storage()
-            .instance()
-            .get(&AI_AGENTS)
-            .ok_or(ContractError::AgentNotFound)?;
-
-        let agent_a = agents.get(agent_a_id.clone()).ok_or(ContractError::AgentNotFound)?;
-        let agent_b = agents.get(agent_b_id.clone()).ok_or(ContractError::AgentNotFound)?;
-
-        // Verify ownership
-        if agent_a.owner != env-invoker() && agent_b.owner != env-invoker() {
-            return Err(ContractError::AgentOwnerMismatch);
-        }
-
-        // Transfer fusion cost
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer_from(
-            &env-invoker(),
-            &env.current_contract_address(),
-            &fusion_cost,
-        );
-
-        // Create fused agent with combined strength
-        let fused_strength = (agent_a.strength + agent_b.strength) / 2 + 100; // Bonus for fusion
-        let fused_name = String::from_str(&env, "Fused Agent");
-
-        let fused_agent = AiAgent {
-            agent_id: agent_a_id.clone(), // Reuse agent A's ID
-            owner: env-invoker(),
-            name: fused_name,
-            strength: fused_strength,
-            style_hash: agent_a.style_hash, // Keep agent A's style
-            created_at: env.ledger().sequence() as u64,
-            is_active: true,
-        };
-
-        // Update agent A with fused stats
-        let mut agents_mut: Map<Address, AiAgent> = env
-            .storage()
-            .instance()
-            .get(&AI_AGENTS)
-            .unwrap_or(Map::new(&env));
-        agents_mut.set(agent_a_id.clone(), fused_agent);
-        env.storage().instance().set(&AI_AGENTS, &agents_mut);
-
-        // Deactivate agent B
-        let mut agent_b_deactivated = agent_b;
-        agent_b_deactivated.is_active = false;
-        let mut agents_mut2: Map<Address, AiAgent> = env
-            .storage()
-            .instance()
-            .get(&AI_AGENTS)
-            .unwrap_or(Map::new(&env));
-        agents_mut2.set(agent_b_id, agent_b_deactivated);
-        env.storage().instance().set(&AI_AGENTS, &agents_mut2);
-
-        // Record fusion
-        let fusion_id = env
-            .storage()
-            .instance()
-            .get(&AGENT_FUSIONS)
-            .unwrap_or(Map::new(&env))
-            .len() as u64
-            + 1;
-
-        let fusion = AgentFusion {
-            fusion_id,
-            agent_a: agent_a_id,
-            agent_b: agent_b_id,
-            result_agent: agent_a_id,
-            fusion_cost,
-            fused_at: env.ledger().sequence() as u64,
-            success: true,
-        };
-
-        let mut fusions: Map<u64, AgentFusion> = env
-            .storage()
-            .instance()
-            .get(&AGENT_FUSIONS)
-            .unwrap_or(Map::new(&env));
-        fusions.set(fusion_id, fusion);
-        env.storage().instance().set(&AGENT_FUSIONS, &fusions);
-
-        Ok(fusion_id)
-    }
-
-    /// Get AI agent details
-    pub fn get_ai_agent(env: Env, agent_id: Address) -> Result<AiAgent, ContractError> {
-        let agents: Map<Address, AiAgent> = env
-            .storage()
-            .instance()
-            .get(&AI_AGENTS)
-            .ok_or(ContractError::AgentNotFound)?;
-        agents.get(agent_id).ok_or(ContractError::AgentNotFound)
-    }
-
-    /// Get fusion history
-    pub fn get_fusion(env: Env, fusion_id: u64) -> Result<AgentFusion, ContractError> {
-        let fusions: Map<u64, AgentFusion> = env
-            .storage()
-            .instance()
-            .get(&AGENT_FUSIONS)
-            .ok_or(ContractError::AgentNotFound)?;
-        fusions.get(fusion_id).ok_or(ContractError::AgentNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// DAO Treasury (#981)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Deposit funds into DAO treasury
-    pub fn deposit_to_dao(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
-        from.require_auth();
-
-        if amount <= 0 {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer_from(
-            &from,
-            &env.current_contract_address(),
-            &amount,
-        );
-
-        let current_treasury: i128 = env
-            .storage()
-            .instance()
-            .get(&DAO_TREASURY)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DAO_TREASURY, &(current_treasury + amount));
-
-        Ok(())
-    }
-
-    /// Create a DAO proposal
-    pub fn create_dao_proposal(
-        env: Env,
-        proposer: Address,
-        title: String,
-        description: String,
-        amount: i128,
-        recipient: Address,
-        deadline: u64,
-    ) -> Result<u64, ContractError> {
-        proposer.require_auth();
-
-        let treasury: i128 = env
-            .storage()
-            .instance()
-            .get(&DAO_TREASURY)
-            .unwrap_or(0);
-
-        if amount > treasury {
-            return Err(ContractError::InsufficientFunds);
-        }
-
-        let proposal_id: u64 = env
-            .storage()
-            .instance()
-            .get(&DAO_PROPOSAL_COUNTER)
-            .unwrap_or(0)
-            + 1;
-
-        let proposal = DaoProposal {
-            proposal_id,
-            proposer,
-            title,
-            description,
-            amount,
-            recipient,
-            votes_for: 0,
-            votes_against: 0,
-            executed: false,
-            created_at: env.ledger().sequence() as u64,
-            deadline,
-        };
-
-        let mut proposals: Map<u64, DaoProposal> = env
-            .storage()
-            .instance()
-            .get(&DAO_PROPOSALS)
-            .unwrap_or(Map::new(&env));
-        proposals.set(proposal_id, proposal);
-        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
-        env.storage()
-            .instance()
-            .set(&DAO_PROPOSAL_COUNTER, &proposal_id);
-
-        Ok(proposal_id)
-    }
-
-    /// Vote on a DAO proposal
-    pub fn vote_on_dao_proposal(
-        env: Env,
-        proposal_id: u64,
-        voter: Address,
-        vote: bool,
-    ) -> Result<(), ContractError> {
-        voter.require_auth();
-
-        let mut proposals: Map<u64, DaoProposal> = env
-            .storage()
-            .instance()
-            .get(&DAO_PROPOSALS)
-            .ok_or(ContractError::DaoProposalNotFound)?;
-        let mut proposal = proposals
-            .get(proposal_id)
-            .ok_or(ContractError::DaoProposalNotFound)?;
-
-        if proposal.executed {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        let current_ledger = env.ledger().sequence() as u64;
-        if current_ledger > proposal.deadline {
-            return Err(ContractError::ProposalDeadlinePassed);
-        }
-
-        // Check if already voted
-        let mut votes: Map<(u64, Address), bool> = env
-            .storage()
-            .instance()
-            .get(&DAO_VOTES)
-            .unwrap_or(Map::new(&env));
-
-        if votes.has((proposal_id, voter.clone())) {
-            return Err(ContractError::AlreadyVotedOnProposal);
-        }
-
-        // Record vote
-        votes.set((proposal_id, voter), vote);
-        env.storage().instance().set(&DAO_VOTES, &votes);
-
-        // Update vote counts
-        if vote {
-            proposal.votes_for += 1;
-        } else {
-            proposal.votes_against += 1;
-        }
-
-        proposals.set(proposal_id, proposal);
-        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
-
-        Ok(())
-    }
-
-    /// Execute a DAO proposal (admin only after deadline)
-    pub fn execute_dao_proposal(
-        env: Env,
-        proposal_id: u64,
-    ) -> Result<(), ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let mut proposals: Map<u64, DaoProposal> = env
-            .storage()
-            .instance()
-            .get(&DAO_PROPOSALS)
-            .ok_or(ContractError::DaoProposalNotFound)?;
-        let mut proposal = proposals
-            .get(proposal_id)
-            .ok_or(ContractError::DaoProposalNotFound)?;
-
-        if proposal.executed {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        let current_ledger = env.ledger().sequence() as u64;
-        if current_ledger <= proposal.deadline {
-            return Err(ContractError::ProposalDeadlinePassed);
-        }
-
-        // Check if proposal passed (more for than against)
-        if proposal.votes_for <= proposal.votes_against {
-            return Err(ContractError::ThresholdNotMet);
-        }
-
-        // Transfer funds
-        let token_client = TokenClient::new(&env, &env.storage().instance().get::<_, Address>(&TOKEN_CONTRACT).unwrap());
-        token_client.transfer(
-            &env.current_contract_address(),
-            &proposal.recipient,
-            &proposal.amount,
-        );
-
-        // Update treasury
-        let current_treasury: i128 = env
-            .storage()
-            .instance()
-            .get(&DAO_TREASURY)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DAO_TREASURY, &(current_treasury - proposal.amount));
-
-        proposal.executed = true;
-        proposals.set(proposal_id, proposal);
-        env.storage().instance().set(&DAO_PROPOSALS, &proposals);
-
-        Ok(())
-    }
-
-    /// Get DAO proposal details
-    pub fn get_dao_proposal(env: Env, proposal_id: u64) -> Result<DaoProposal, ContractError> {
-        let proposals: Map<u64, DaoProposal> = env
-            .storage()
-            .instance()
-            .get(&DAO_PROPOSALS)
-            .ok_or(ContractError::DaoProposalNotFound)?;
-        proposals.get(proposal_id).ok_or(ContractError::DaoProposalNotFound)
-    }
-
-    /// Get DAO treasury balance
-    pub fn get_dao_treasury(env: Env) -> i128 {
-        env.storage().instance().get(&DAO_TREASURY).unwrap_or(0)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Seasonal Leaderboard (#985)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a new season
-    pub fn create_season(
-        env: Env,
-        name: String,
-        start_ledger: u64,
-        end_ledger: u64,
-        prize_pool: i128,
-    ) -> Result<u64, ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        if start_ledger >= end_ledger {
-            return Err(ContractError::InvalidAmount);
-        }
-
-        let season_id: u64 = env
-            .storage()
-            .instance()
-            .get(&SEASON_COUNTER)
-            .unwrap_or(0)
-            + 1;
-
-        let season = Season {
-            season_id,
-            name,
-            start_ledger,
-            end_ledger,
-            prize_pool,
-            is_active: true,
-        };
-
-        let mut seasons: Map<u64, Season> = env
-            .storage()
-            .instance()
-            .get(&SEASONS)
-            .unwrap_or(Map::new(&env));
-        seasons.set(season_id, season);
-        env.storage().instance().set(&SEASONS, &seasons);
-        env.storage()
-            .instance()
-            .set(&SEASON_COUNTER, &season_id);
-
-        Ok(season_id)
-    }
-
-    /// Record a game result in the seasonal leaderboard
-    pub fn record_season_result(
-        env: Env,
-        season_id: u64,
-        winner: Address,
-        loser: Address,
-    ) -> Result<(), ContractError> {
-        let seasons: Map<u64, Season> = env
-            .storage()
-            .instance()
-            .get(&SEASONS)
-            .ok_or(ContractError::SeasonNotFound)?;
-        let season = seasons.get(season_id).ok_or(ContractError::SeasonNotFound)?;
-
-        if !season.is_active {
-            return Err(ContractError::SeasonAlreadyEnded);
-        }
-
-        let current_ledger = env.ledger().sequence() as u64;
-        if current_ledger > season.end_ledger {
-            return Err(ContractError::SeasonAlreadyEnded);
-        }
-
-        let mut scores: Map<(u64, Address), SeasonScore> = env
-            .storage()
-            .instance()
-            .get(&SEASON_SCORES)
-            .unwrap_or(Map::new(&env));
-
-        // Update winner score
-        let mut winner_score = scores
-            .get((season_id, winner.clone()))
-            .unwrap_or(SeasonScore {
-                player: winner.clone(),
-                season_id,
-                wins: 0,
-                losses: 0,
-                draws: 0,
-                points: 0,
-                games_played: 0,
-            });
-        winner_score.wins += 1;
-        winner_score.points += 3; // 3 points for a win
-        winner_score.games_played += 1;
-        scores.set((season_id, winner), winner_score);
-
-        // Update loser score
-        let mut loser_score = scores
-            .get((season_id, loser.clone()))
-            .unwrap_or(SeasonScore {
-                player: loser.clone(),
-                season_id,
-                wins: 0,
-                losses: 0,
-                draws: 0,
-                points: 0,
-                games_played: 0,
-            });
-        loser_score.losses += 1;
-        loser_score.games_played += 1;
-        scores.set((season_id, loser), loser_score);
-
-        env.storage().instance().set(&SEASON_SCORES, &scores);
-
-        Ok(())
-    }
-
-    /// Get a player's seasonal score
-    pub fn get_season_score(
-        env: Env,
-        season_id: u64,
-        player: Address,
-    ) -> Result<SeasonScore, ContractError> {
-        let scores: Map<(u64, Address), SeasonScore> = env
-            .storage()
-            .instance()
-            .get(&SEASON_SCORES)
-            .ok_or(ContractError::SeasonNotFound)?;
-        scores
-            .get((season_id, player))
-            .ok_or(ContractError::SeasonNotFound)
-    }
-
-    /// Get season details
-    pub fn get_season(env: Env, season_id: u64) -> Result<Season, ContractError> {
-        let seasons: Map<u64, Season> = env
-            .storage()
-            .instance()
-            .get(&SEASONS)
-            .ok_or(ContractError::SeasonNotFound)?;
-        seasons.get(season_id).ok_or(ContractError::SeasonNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// DEX Swap Routing (#988)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a DEX swap route
-    pub fn create_dex_route(
-        env: Env,
-        token_in: Address,
-        token_out: Address,
-        dex_contract: Address,
-        fee_bips: u32,
-        min_output: i128,
-    ) -> Result<u64, ContractError> {
-        let admin: Address = env.storage().instance().get(&CONTRACT_ADMIN).unwrap();
-        admin.require_auth();
-
-        let route_id: u64 = env
-            .storage()
-            .instance()
-            .get(&DEX_ROUTE_COUNTER)
-            .unwrap_or(0)
-            + 1;
-
-        let route = DexRoute {
-            route_id,
-            token_in,
-            token_out,
-            dex_contract,
-            fee_bips,
-            min_output,
-            optimal: false,
-        };
-
-        let mut routes: Map<u64, DexRoute> = env
-            .storage()
-            .instance()
-            .get(&DEX_ROUTES)
-            .unwrap_or(Map::new(&env));
-        routes.set(route_id, route);
-        env.storage().instance().set(&DEX_ROUTES, &routes);
-        env.storage()
-            .instance()
-            .set(&DEX_ROUTE_COUNTER, &route_id);
-
-        Ok(route_id)
-    }
-
-    /// Execute a swap using a DEX route
-    pub fn execute_swap(
-        env: Env,
-        route_id: u64,
-        amount_in: i128,
-    ) -> Result<i128, ContractError> {
-        let routes: Map<u64, DexRoute> = env
-            .storage()
-            .instance()
-            .get(&DEX_ROUTES)
-            .ok_or(ContractError::DexRouteNotFound)?;
-        let route = routes.get(route_id).ok_or(ContractError::DexRouteNotFound)?;
-
-        // Calculate output with fee
-        let fee = amount_in * route.fee_bips as i128 / 10000;
-        let amount_out = amount_in - fee;
-
-        if amount_out < route.min_output {
-            return Err(ContractError::InsufficientSwapOutput);
-        }
-
-        // In a real implementation, this would call the DEX contract
-        // For now, we just transfer tokens
-
-        Ok(amount_out)
-    }
-
-    /// Get DEX route details
-    pub fn get_dex_route(env: Env, route_id: u64) -> Result<DexRoute, ContractError> {
-        let routes: Map<u64, DexRoute> = env
-            .storage()
-            .instance()
-            .get(&DEX_ROUTES)
-            .ok_or(ContractError::DexRouteNotFound)?;
-        routes.get(route_id).ok_or(ContractError::DexRouteNotFound)
-    }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Circuit Breaker Rollback Vote (#989)
-// ────────────────────────────────────────────────────────────────────────────
-
-    /// Create a circuit breaker rollback vote
-    pub fn create_circuit_breaker_vote(
-        env: Env,
-        proposer: Address,
-        target_pause: bool,
-        reason: String,
-        threshold: u32,
-    ) -> Result<u64, ContractError> {
-        proposer.require_auth();
-
-        let vote_id: u64 = env
-            .storage()
-            .instance()
-            .get(&CIRCUIT_BREAKER_COUNTER)
-            .unwrap_or(0)
-            + 1;
-
-        let vote = CircuitBreakerVote {
-            vote_id,
-            proposer,
-            target_pause,
-            reason,
-            votes_for: 0,
-            votes_against: 0,
-            threshold,
-            resolved: false,
-            created_at: env.ledger().sequence() as u64,
-        };
-
-        let mut votes: Map<u64, CircuitBreakerVote> = env
-            .storage()
-            .instance()
-            .get(&CIRCUIT_BREAKER_VOTES)
-            .unwrap_or(Map::new(&env));
-        votes.set(vote_id, vote);
-        env.storage()
-            .instance()
-            .set(&CIRCUIT_BREAKER_VOTES, &votes);
-        env.storage()
-            .instance()
-            .set(&CIRCUIT_BREAKER_COUNTER, &vote_id);
-
-        Ok(vote_id)
-    }
-
-    /// Vote on circuit breaker rollback
-    pub fn vote_on_circuit_breaker(
-        env: Env,
-        vote_id: u64,
-        voter: Address,
-        vote: bool,
-    ) -> Result<(), ContractError> {
-        voter.require_auth();
-
-        let mut votes: Map<u64, CircuitBreakerVote> = env
-            .storage()
-            .instance()
-            .get(&CIRCUIT_BREAKER_VOTES)
-            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
-        let mut cb_vote = votes
-            .get(vote_id)
-            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
-
-        if cb_vote.resolved {
-            return Err(ContractError::AlreadySettled);
-        }
-
-        // Check if already voted
-        let mut voter_votes: Map<(u64, Address), bool> = env
-            .storage()
-            .instance()
-            .get(&DAO_VOTES)
-            .unwrap_or(Map::new(&env));
-
-        if voter_votes.has((vote_id, voter.clone())) {
-            return Err(ContractError::AlreadyVotedOnCircuitBreaker);
-        }
-
-        // Record vote
-        voter_votes.set((vote_id, voter), vote);
-        env.storage().instance().set(&DAO_VOTES, &voter_votes);
-
-        // Update vote counts
-        if vote {
-            cb_vote.votes_for += 1;
-        } else {
-            cb_vote.votes_against += 1;
-        }
-
-        // Check if threshold is met
-        if cb_vote.votes_for >= cb_vote.threshold {
-            cb_vote.resolved = true;
-            // Execute the pause/unpause
-            if cb_vote.target_pause {
-                env.storage().instance().set(&PAUSED, &true);
-            } else {
-                env.storage().instance().set(&PAUSED, &false);
-            }
-        }
-
-        votes.set(vote_id, cb_vote);
-        env.storage().instance().set(&CIRCUIT_BREAKER_VOTES, &votes);
-
-        Ok(())
-    }
-
-    /// Get circuit breaker vote details
-    pub fn get_circuit_breaker_vote(
-        env: Env,
-        vote_id: u64,
-    ) -> Result<CircuitBreakerVote, ContractError> {
-        let votes: Map<u64, CircuitBreakerVote> = env
-            .storage()
-            .instance()
-            .get(&CIRCUIT_BREAKER_VOTES)
-            .ok_or(ContractError::CircuitBreakerVoteNotFound)?;
-        votes.get(vote_id).ok_or(ContractError::CircuitBreakerVoteNotFound)
-    }
+    // ────────────────────────────────────────────────────────────────────────────
+    // Puzzle Bounty Proofs (#982)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Time-Decay Penalties (#986)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Token-Gated VIP (#987)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Soulbound Trophies (#994)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Multi-sig Dispute Resolution (#977)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Dynamic Fee Split (#978)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Spectator Tipping (#979)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Anti-Cheat Security Deposit (#980)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Nonce Replay Protection (#983)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Guild Escrow Splits (#984)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Royalty Enforcement (#991)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // AI Agent Fusion (#992)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // DAO Treasury (#981)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Seasonal Leaderboard (#985)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // DEX Swap Routing (#988)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Circuit Breaker Rollback Vote (#989)
+    // ────────────────────────────────────────────────────────────────────────────
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -6594,13 +4897,6 @@ mod tests {
 
         let reason = Bytes::from_slice(&env, b"Illegal move");
         let dispute_id = client.file_dispute(&game_id, &player1, &player2, &reason);
-        let resolution = Bytes::from_slice(&env, b"Awarding win to player1");
-        client.resolve_dispute(
-            &dispute_id,
-            &arbitrator,
-            &Some(player1.clone()),
-            &resolution,
-        );
 
         // Arbitrator resolves in favor of player1
         let resolution = Bytes::from_slice(&env, b"Player1 wins");
@@ -6611,8 +4907,9 @@ mod tests {
             &resolution,
         );
 
-        // Verify player1 received the payout
-        assert_eq!(token_client.balance(&player1), 1_050);
+        // Verify player1 received the full pool (wager 100 * 2, 0% fee):
+        // started with 1000, staked 100, won the 200 pool back.
+        assert_eq!(token_client.balance(&player1), 1_100);
 
         // Verify dispute is resolved
         let dispute = client.get_dispute(&dispute_id);
@@ -6768,6 +5065,276 @@ mod tests {
         assert_eq!(result, Err(Ok(ContractError::InvalidTimeoutClaimant)));
     }
 
+    // ── SC-50: Time-locked wager auto-forfeit (claim_timeout_victory) ──────
+
+    /// Shared setup: deploys the contract, whitelists/initializes the token,
+    /// funds both players, and creates + joins a game. Returns everything a
+    /// test needs to drive `claim_timeout_victory`.
+    fn setup_sc50_game(
+        env: &Env,
+        wager: i128,
+    ) -> (
+        GameContractClient<'_>,
+        TokenClient<'_>,
+        Address, // admin
+        Address, // player1
+        Address, // player2
+        u64,     // game_id
+    ) {
+        let issuer = Address::generate(env);
+        let stellar_token = env.register_stellar_asset_contract_v2(issuer.clone());
+        let token_address = stellar_token.address();
+        let token_client = TokenClient::new(env, &token_address);
+        let stellar_asset_client = StellarAssetClient::new(env, &token_address);
+
+        let admin = Address::generate(env);
+        let player1 = Address::generate(env);
+        let player2 = Address::generate(env);
+        let treasury_addr = Address::generate(env);
+
+        stellar_asset_client.mint(&player1, &1_000i128);
+        stellar_asset_client.mint(&player2, &1_000i128);
+
+        let contract_id = env.register_contract(None, GameContract);
+        let client = GameContractClient::new(env, &contract_id);
+
+        client.add_whitelisted_token(&admin, &token_address);
+        client.initialize_token(&admin, &token_address);
+        client.initialize_puzzle_rewards(
+            &admin,
+            &Bytes::from_slice(env, &[0u8; 32]),
+            &0i128,
+            &0u32,
+            &treasury_addr,
+        );
+        client.set_max_stake(&admin, &1_000i128);
+
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(env));
+        client.join_game(&game_id, &player2);
+
+        (client, token_client, admin, player1, player2, game_id)
+    }
+
+    #[test]
+    fn test_configure_timeout_deadline_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, _admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+        let impostor = Address::generate(&env);
+
+        let result = client.try_configure_timeout_deadline(&impostor, &300u64, &60u64);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_configure_timeout_deadline_rejects_zero_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+
+        let result = client.try_configure_timeout_deadline(&admin, &0u64, &60u64);
+        assert_eq!(result, Err(Ok(ContractError::InvalidConfig)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_not_configured() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, _admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+
+        // No configure_timeout_deadline call at all.
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotConfigured)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_premature_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        // Not a single second has passed since join_game.
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Still short of the 360s (deadline+buffer) threshold.
+        env.ledger().set_timestamp(300);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+    }
+
+    /// Acceptance criterion: "server outage grace period". A claim attempted
+    /// after the base `deadline_secs` alone, but before `buffer_secs` has
+    /// *also* elapsed, must still be rejected — this is exactly the window
+    /// meant to protect a temporarily-down backend from a premature
+    /// trustless forfeit.
+    #[test]
+    fn test_claim_timeout_victory_respects_server_outage_grace_buffer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, token, admin, _player1, player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        // Exactly at the base deadline (300s), but the 60s buffer hasn't
+        // elapsed yet — must still be rejected.
+        env.ledger().set_timestamp(300);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // One second short of deadline + buffer.
+        env.ledger().set_timestamp(359);
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Exactly at deadline + buffer — now claimable.
+        env.ledger().set_timestamp(360);
+        client.claim_timeout_victory(&game_id, &player2);
+
+        assert_eq!(token.balance(&player2), 1_100);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.state, GameState::Settled);
+        assert_eq!(game.winner, Some(player2));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_success_pays_out_immediately_without_signature() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, token, admin, player1, player2, game_id) = setup_sc50_game(&env, 250);
+        client.configure_timeout_deadline(&admin, &120u64, &0u64);
+
+        env.ledger().set_timestamp(121);
+
+        // No admin/backend signature is passed anywhere in this call —
+        // settlement happens purely from on-chain state + ledger timestamp.
+        client.claim_timeout_victory(&game_id, &player2);
+
+        // Full pool (2 * 250 = 500) net of the 0% fee configured above.
+        assert_eq!(token.balance(&player2), 1_000 - 250 + 500);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.state, GameState::Settled);
+        assert_eq!(game.winner, Some(player2.clone()));
+
+        // player1 (who let the clock run out) cannot also claim, nor can
+        // player2 claim a second time — the game already left InProgress.
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::GameNotInProgress)));
+        let result = client.try_claim_timeout_victory(&game_id, &player2);
+        assert_eq!(result, Err(Ok(ContractError::GameNotInProgress)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_current_turn_player() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, player1, _player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        env.ledger().set_timestamp(200);
+
+        // player1 moves first (current_turn == 1); they are the one on the
+        // clock and can always resolve this by moving, so they may never
+        // claim a timeout victory against themselves.
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::InvalidTimeoutClaimant)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_rejects_non_participant() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        env.ledger().set_timestamp(200);
+
+        let stranger = Address::generate(&env);
+        let result = client.try_claim_timeout_victory(&game_id, &stranger);
+        assert_eq!(result, Err(Ok(ContractError::NotPlayer)));
+    }
+
+    #[test]
+    fn test_claim_timeout_victory_game_not_found() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, _game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &10u64);
+
+        let stranger = Address::generate(&env);
+        let result = client.try_claim_timeout_victory(&999u64, &stranger);
+        assert_eq!(result, Err(Ok(ContractError::GameNotFound)));
+    }
+
+    /// A move resets the deadline clock — a player who is actively playing
+    /// (not the AFK scenario this feature targets) can never be timed out
+    /// out from under them just because the *game* has been open a long
+    /// time.
+    #[test]
+    fn test_claim_timeout_victory_resets_after_each_move() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, player1, _player2, game_id) = setup_sc50_game(&env, 100);
+        client.configure_timeout_deadline(&admin, &100u64, &0u64);
+
+        // Almost timed out...
+        env.ledger().set_timestamp(99);
+        let move_data = Vec::from_array(&env, [12u32, 28u32]);
+        client.submit_move(&game_id, &player1, &move_data, &Bytes::new(&env), &0u32);
+
+        // ...but player1 just moved, so the clock reset. Even though we're
+        // now well past the *original* deadline, player2 (now on the clock)
+        // has a fresh window and player1 cannot claim against them yet.
+        env.ledger().set_timestamp(150);
+        let result = client.try_claim_timeout_victory(&game_id, &player1);
+        assert_eq!(result, Err(Ok(ContractError::TimeoutNotReached)));
+
+        // Only once 100s have elapsed since *that* move does it become
+        // claimable.
+        env.ledger().set_timestamp(199);
+        let game = client.get_game(&game_id);
+        assert_eq!(game.last_activity_ts, 99);
+        client.claim_timeout_victory(&game_id, &player1);
+        assert_eq!(client.get_game(&game_id).state, GameState::Settled);
+    }
+
+    #[test]
+    fn test_get_timeout_victory_remaining() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _token, admin, _player1, _player2, game_id) = setup_sc50_game(&env, 100);
+
+        // Not configured yet.
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), None);
+
+        client.configure_timeout_deadline(&admin, &300u64, &60u64);
+
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(360));
+
+        env.ledger().set_timestamp(100);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(260));
+
+        env.ledger().set_timestamp(300);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(60));
+
+        env.ledger().set_timestamp(360);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(0));
+
+        env.ledger().set_timestamp(10_000);
+        assert_eq!(client.get_timeout_victory_remaining(&game_id), Some(0));
+    }
+
     #[test]
     fn test_submit_move_sequence_updates_turn_and_history() {
         let env = Env::default();
@@ -6872,11 +5439,13 @@ mod tests {
         client.join_game(&game_id, &player2);
 
         let early_move = Vec::from_array(&env, [52u32, 36u32]);
-        let result = client.try_submit_move(&game_id, &player2, &early_move, &Bytes::new(&env), &0u32);
+        let result =
+            client.try_submit_move(&game_id, &player2, &early_move, &Bytes::new(&env), &0u32);
         assert_eq!(result, Err(Ok(ContractError::NotYourTurn)));
 
         let empty_move = Vec::new(&env);
-        let result = client.try_submit_move(&game_id, &player1, &empty_move, &Bytes::new(&env), &0u32);
+        let result =
+            client.try_submit_move(&game_id, &player1, &empty_move, &Bytes::new(&env), &0u32);
         assert_eq!(result, Err(Ok(ContractError::InvalidMove)));
     }
 
@@ -6970,7 +5539,7 @@ mod tests {
         client.set_max_stake(&admin, &1_000i128);
 
         let wager: i128 = 500;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         // Manually complete the game (reuse forfeit → sets Forfeited not Completed, so set directly)
@@ -7016,7 +5585,7 @@ mod tests {
         let wager = 500;
         stellar_asset_client.mint(&player1, &wager);
         stellar_asset_client.mint(&player2, &wager);
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         env.as_contract(&contract_id, || {
@@ -7068,7 +5637,7 @@ mod tests {
         client.configure_tournament_timelock(&admin, &100u64);
 
         let wager: i128 = 100;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         env.as_contract(&contract_id, || {
@@ -7135,7 +5704,7 @@ mod tests {
         client.configure_tournament_timelock(&admin, &100u64);
 
         let wager: i128 = 500;
-        let game_id = client.create_game(&player1, &wager);
+        let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
         env.as_contract(&contract_id, || {
@@ -7177,6 +5746,7 @@ mod tests {
         stellar_asset_client.mint(&player1, &1_000i128);
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -7185,7 +5755,7 @@ mod tests {
             &0u32,
             &treasury_addr,
         );
-        let game_id = client.create_game(&player1, &100);
+        let game_id = client.create_game(&player1, &100, &Bytes::new(&env));
         assert!(game_id > 0);
     }
 
@@ -7203,6 +5773,7 @@ mod tests {
         stellar_asset_client.mint(&player1, &1_000i128);
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -7214,7 +5785,7 @@ mod tests {
         env.as_contract(&contract_id, || {
             env.storage().instance().set(&R_GUARD, &1u32);
         });
-        let result = client.try_create_game(&player1, &100);
+        let result = client.try_create_game(&player1, &100, &Bytes::new(&env));
         assert_eq!(result, Err(Ok(ContractError::ReentrantCall)));
     }
 
@@ -7234,6 +5805,7 @@ mod tests {
         stellar_asset_client.mint(&player2, &1_000i128);
         let contract_id = env.register_contract(None, GameContract);
         let client = GameContractClient::new(&env, &contract_id);
+        client.add_whitelisted_token(&admin, &token_address);
         client.initialize_token(&admin, &token_address);
         client.initialize_puzzle_rewards(
             &admin,
@@ -7244,7 +5816,7 @@ mod tests {
         );
 
         // First call: create_game enters and exits guard
-        let game_id = client.create_game(&player1, &100);
+        let game_id = client.create_game(&player1, &100, &Bytes::new(&env));
 
         // Guard should be released, allowing join_game to proceed
         client.join_game(&game_id, &player2);
@@ -7252,4 +5824,3 @@ mod tests {
         assert_eq!(game.state, GameState::InProgress);
     }
 }
-

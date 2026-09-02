@@ -320,8 +320,12 @@ mod tests {
 
         let (primary_conn, replica_conn) = pool.into_connections();
 
-        let replica_log = replica_conn.into_transaction_log();
-        let primary_log = primary_conn.into_transaction_log();
+        let replica_log = std::sync::Arc::try_unwrap(replica_conn)
+            .expect("pool holds the only replica reference")
+            .into_transaction_log();
+        let primary_log = std::sync::Arc::try_unwrap(primary_conn)
+            .expect("pool holds the only primary reference")
+            .into_transaction_log();
 
         assert!(!replica_log.is_empty(), "replica should have been queried");
         assert!(primary_log.is_empty(), "primary should NOT have been queried for a read");
@@ -368,8 +372,12 @@ mod tests {
 
         let (primary_conn, replica_conn) = pool.into_connections();
 
-        let primary_log = primary_conn.into_transaction_log();
-        let replica_log = replica_conn.into_transaction_log();
+        let primary_log = std::sync::Arc::try_unwrap(primary_conn)
+            .expect("pool holds the only primary reference")
+            .into_transaction_log();
+        let replica_log = std::sync::Arc::try_unwrap(replica_conn)
+            .expect("pool holds the only replica reference")
+            .into_transaction_log();
 
         assert!(!primary_log.is_empty(), "primary should have received the INSERT");
         // replica_log has the two uniqueness-check SELECTs

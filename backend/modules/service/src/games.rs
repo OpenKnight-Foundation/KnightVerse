@@ -782,39 +782,30 @@ mod tests {
             .into_connection();
 
         let player_id = Uuid::new_v4();
-        let result =
-            GameService::list_games_on(&mock_db, None, None, 10, Some(player_id), None).await;
+        let (games, _cursor, _total) =
+            GameService::list_games_on(&db, None, None, 10, Some(player_id), None)
+                .await
+                .expect("list_games_on should succeed against the mock");
 
-        // Get transaction log to verify SQL
-        let transaction_log = db.into_transaction_log();
-
-        // We expect two queries (count + data)
-        assert_eq!(transaction_log.len(), 2);
-
-        // Inspect the data query (index 1); index 0 is the COUNT query, which
-        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
-        let log = &transaction_log[1];
-        let log_str = format!("{:?}", log);
-        println!("Log: {}", log_str);
-
-        let (games, _cursor, _total) = result;
         assert_eq!(games.len(), 1);
 
-        // Inspect generated SQL to verify player filter and sort direction
-        let log = mock_db.into_transaction_log();
+        // Index 0 is the COUNT query; index 1 is the data query, which carries
+        // the ORDER BY / LIMIT and the keyset cursor predicate.
+        let log = db.into_transaction_log();
         assert_eq!(log.len(), 2, "expected count + data queries");
 
         let count_sql = format!("{:?}", &log[0]);
         assert!(
-            count_sql.contains(r#"\"game\".\"white_player\" = $1"#)
-                || count_sql.contains("white_player"),
-            "count query should filter by player"
+            count_sql.contains("white_player"),
+            "count query should filter by player, got: {}",
+            count_sql
         );
 
         let data_sql = format!("{:?}", &log[1]);
         assert!(
             data_sql.contains("DESC"),
-            "data query should sort DESC for keyset pagination"
+            "data query should sort DESC for keyset pagination, got: {}",
+            data_sql
         );
     }
 
@@ -824,51 +815,20 @@ mod tests {
     async fn create_game_issues_insert() {
         let mock_game = make_mock_game();
         let creator_id = mock_game.white_player;
-        let mock_game_clone = mock_game.clone();
 
         let db = MockDatabase::new(DbBackend::Postgres)
-            .append_query_results(vec![
-                // First query result (count) — empty set; typed so `T: IntoMockRow`
-                // can be inferred. count() on no rows resolves to 0 and execution
-                // continues to the data query below.
-                Vec::<game::Model>::new(),
-            ])
-            .append_query_results(vec![
-                // Second query result (main data)
-                vec![game::Model {
-                    id: Uuid::new_v4(),
-                    white_player: Uuid::new_v4(),
-                    black_player: Uuid::new_v4(),
-                    fen: "fen".to_string(),
-                    pgn: serde_json::json!({}),
-                    result: None,
-                    variant: db_entity::game::GameVariant::Standard,
-                    started_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                    duration_sec: 600,
-                    created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                    updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
-                    is_imported: false,
-                    original_pgn: None,
-                }],
-            ])
+            .append_query_results(vec![vec![mock_game]])
             .into_connection();
-
-        let _result = GameService::list_games(&db, Some(cursor), None, 10, None, None).await;
-
-        let transaction_log = db.into_transaction_log();
-        // Inspect the data query (index 1); index 0 is the COUNT query, which
-        // carries neither the ORDER BY / LIMIT nor the keyset cursor predicate.
-        let log = &transaction_log[1];
-        let log_str = format!("{:?}", log);
-        println!("Log with cursor: {}", log_str);
 
         let request = CreateGameRequest {
             time_control: 600,
-            variant: None,
+            increment: 0,
+            player_color: None,
+            opponent_id: None,
         };
-        let _ = GameService::create_game_on(&mock_db, creator_id, request).await;
+        let _ = GameService::create_game_on(&db, creator_id, request).await;
 
-        let log = mock_db.into_transaction_log();
+        let log = db.into_transaction_log();
         assert!(
             !log.is_empty(),
             "at least one query should have been issued"
@@ -916,15 +876,23 @@ mod tests {
         // WRITE — should route to primary
         let request = CreateGameRequest {
             time_control: 300,
-            variant: None,
+            increment: 0,
+            player_color: None,
+            opponent_id: None,
         };
         let _create_result = GameService::create_game(&pool, game.white_player, request).await;
 
-        // Inspect both pools' transaction logs
+        // Inspect both pools' transaction logs. into_transaction_log consumes the
+        // connection, and into_connections leaves the pool as the only owner, so
+        // unwrapping the Arcs always succeeds here.
         let (primary_conn, replica_conn) = pool.into_connections();
 
-        let replica_log = replica_conn.into_transaction_log();
-        let primary_log = primary_conn.into_transaction_log();
+        let replica_log = std::sync::Arc::try_unwrap(replica_conn)
+            .expect("pool holds the only replica reference")
+            .into_transaction_log();
+        let primary_log = std::sync::Arc::try_unwrap(primary_conn)
+            .expect("pool holds the only primary reference")
+            .into_transaction_log();
 
         assert!(
             !replica_log.is_empty(),

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use async_trait::async_trait;
-use redis::Client as RedisClient;
+use redis::{AsyncCommands, Client as RedisClient};
 use futures_util::StreamExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +121,7 @@ pub struct RealTimeMoveValidator {
     cache_ttl_seconds: u64,
     max_batch_size: usize,
     rate_limit_per_minute: u32,
-    position_cache: HashMap<String, ValidationCache>,
+    position_cache: Mutex<HashMap<String, ValidationCache>>,
 }
 
 impl RealTimeMoveValidator {
@@ -133,7 +134,7 @@ impl RealTimeMoveValidator {
             cache_ttl_seconds: 300, // 5 minutes
             max_batch_size: 100,
             rate_limit_per_minute: 60,
-            position_cache: HashMap::new(),
+            position_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -151,7 +152,7 @@ impl RealTimeMoveValidator {
             cache_ttl_seconds,
             max_batch_size,
             rate_limit_per_minute,
-            position_cache: HashMap::new(),
+            position_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -179,7 +180,8 @@ impl RealTimeMoveValidator {
     async fn get_cached_validation(&self, fen: &str, move_san: &str) -> Option<ValidationCache> {
         let cache_key = format!("{}:{}", fen, move_san);
         
-        if let Some(cached) = self.position_cache.get(&cache_key) {
+        let cached_opt = self.position_cache.lock().unwrap().get(&cache_key).cloned();
+        if let Some(cached) = cached_opt {
             let now = Utc::now();
             let age = (now - cached.cached_at).num_seconds() as u64;
             
@@ -187,7 +189,7 @@ impl RealTimeMoveValidator {
                 return Some(cached.clone());
             } else {
                 // Remove expired cache entry
-                self.position_cache.remove(&cache_key);
+                self.position_cache.lock().unwrap().remove(&cache_key);
             }
         }
 
@@ -200,7 +202,7 @@ impl RealTimeMoveValidator {
                     
                     if age < cached.ttl_seconds {
                         // Update local cache
-                        self.position_cache.insert(cache_key, cached.clone());
+                        self.position_cache.lock().unwrap().insert(cache_key, cached.clone());
                         return Some(cached);
                     }
                 }
@@ -214,7 +216,7 @@ impl RealTimeMoveValidator {
         let cache_key = format!("{}:{}", fen, move_san);
         
         // Update local cache
-        self.position_cache.insert(cache_key.clone(), validation.clone());
+        self.position_cache.lock().unwrap().insert(cache_key.clone(), validation.clone());
         
         // Update Redis cache
         if let Ok(mut conn) = self.redis_client.get_async_connection().await {
@@ -250,6 +252,12 @@ impl RealTimeMoveValidator {
             None
         };
 
+        // Compute this before moving from_square/to_square into the struct.
+        let is_castling = (from_square.chars().nth(1) == Some('1')
+            && to_square.chars().nth(1) == Some('1'))
+            || (from_square.chars().nth(1) == Some('8')
+                && to_square.chars().nth(1) == Some('8'));
+
         Ok(ProcessedMove {
             from_square,
             to_square,
@@ -257,8 +265,7 @@ impl RealTimeMoveValidator {
             is_capture: false,      // Will be determined by position
             is_check: false,        // Will be determined by position
             is_checkmate: false,    // Will be determined by position
-            is_castling: from_square.chars().nth(1) == Some('1') && to_square.chars().nth(1) == Some('1') ||
-                           from_square.chars().nth(1) == Some('8') && to_square.chars().nth(1) == Some('8'),
+            is_castling,
             is_en_passant: false,   // Will be determined by position
             promotion_piece,
             san: uci.to_string(),

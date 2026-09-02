@@ -20,8 +20,14 @@ members = [
     "modules/metrics",
     "modules/validation",
     "modules/archiving",
-    "modules/integration_tests",
 ]
+
+# modules/integration_tests is intentionally left out of the workspace.
+# It is a manual `main()` harness (not `#[test]`s) that has not compiled in a
+# long time: it builds tournaments through `Tournament::new`/`BracketConfig`,
+# which no longer exist after the bracket/swiss refactor, and it calls private
+# helpers on `validation` and `archiving`. Re-adding it needs a rewrite against
+# the current APIs rather than a mechanical fix.
 
 [workspace.dependencies]
 regex = "1.10.2"

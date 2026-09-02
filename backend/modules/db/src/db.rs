@@ -192,6 +192,14 @@ pub mod db {
         }
 
         fn record_pool_metrics(label: &str, conn: &DatabaseConnection) {
+            // get_postgres_connection_pool() panics on anything that isn't a live
+            // Postgres pool, so skip connections that can't report pool stats
+            // (mocks in tests, and any future non-Postgres backend). Recording
+            // metrics should never be able to bring the process down.
+            if !matches!(conn, DatabaseConnection::SqlxPostgresPoolConnection(_)) {
+                return;
+            }
+
             // sea-orm exposes the underlying sqlx pool through get_postgres_connection_pool().
             // The sqlx pool tracks active/idle/max connections.
             let pool = conn.get_postgres_connection_pool();

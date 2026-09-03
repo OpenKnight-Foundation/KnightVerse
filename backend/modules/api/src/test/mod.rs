@@ -6,16 +6,32 @@ mod rate_limit;
 #[cfg(test)]
 mod tests {
     use actix_web::{dev::Service, http::StatusCode, test, web, App};
+    use db::DbPool;
     use dto::players::{InvalidPlayer, NewPlayer};
+    use sea_orm::{DbBackend, MockDatabase};
+    use std::sync::Arc;
 
     use crate::players::add_player;
+
+    /// `add_player` extracts a `web::Data<DbPool>`, so the test app has to
+    /// register one or actix fails the extractor and returns 500 before the
+    /// handler runs. These tests set `TEST_NO_DB`, which makes the service layer
+    /// return a dummy player, so the pool is never actually queried.
+    fn test_pool() -> DbPool {
+        let conn = Arc::new(MockDatabase::new(DbBackend::Postgres).into_connection());
+        DbPool::from_connections(conn.clone(), conn, false)
+    }
 
     #[actix_web::test]
     async fn test_index_post_no_body() {
         std::env::set_var("TEST_NO_DB", "1");
         let app =
-            test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
-                .await;
+            test::init_service(
+                App::new()
+                    .app_data(web::Data::new(test_pool()))
+                    .service(web::scope("/v1/players").service(add_player)),
+            )
+            .await;
         let req = test::TestRequest::post().uri("/v1/players").to_request();
         let res = app.call(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
@@ -25,8 +41,12 @@ mod tests {
     async fn test_index_post_with_body() {
         std::env::set_var("TEST_NO_DB", "1");
         let app =
-            test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
-                .await;
+            test::init_service(
+                App::new()
+                    .app_data(web::Data::new(test_pool()))
+                    .service(web::scope("/v1/players").service(add_player)),
+            )
+            .await;
         let req = test::TestRequest::post()
             .uri("/v1/players")
             .set_json(NewPlayer::test_player())
@@ -67,8 +87,12 @@ mod tests {
     async fn test_index_post_with_invalid_username() {
         std::env::set_var("TEST_NO_DB", "1");
         let app =
-            test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
-                .await;
+            test::init_service(
+                App::new()
+                    .app_data(web::Data::new(test_pool()))
+                    .service(web::scope("/v1/players").service(add_player)),
+            )
+            .await;
         let req = test::TestRequest::post()
             .uri("/v1/players")
             .set_json(NewPlayer::invalid_player(InvalidPlayer::Username))
@@ -98,8 +122,12 @@ mod tests {
     async fn test_index_post_with_invalid_email() {
         std::env::set_var("TEST_NO_DB", "1");
         let app =
-            test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
-                .await;
+            test::init_service(
+                App::new()
+                    .app_data(web::Data::new(test_pool()))
+                    .service(web::scope("/v1/players").service(add_player)),
+            )
+            .await;
         let req = test::TestRequest::post()
             .uri("/v1/players")
             .set_json(NewPlayer::invalid_player(InvalidPlayer::Email))
@@ -130,8 +158,12 @@ mod tests {
     async fn test_index_post_with_invalid_password() {
         std::env::set_var("TEST_NO_DB", "1");
         let app =
-            test::init_service(App::new().service(web::scope("/v1/players").service(add_player)))
-                .await;
+            test::init_service(
+                App::new()
+                    .app_data(web::Data::new(test_pool()))
+                    .service(web::scope("/v1/players").service(add_player)),
+            )
+            .await;
         let req = test::TestRequest::post()
             .uri("/v1/players")
             .set_json(NewPlayer::invalid_player(InvalidPlayer::Password))

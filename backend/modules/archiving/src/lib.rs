@@ -544,6 +544,17 @@ impl PGNArchiver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{DbBackend, MockDatabase};
+
+    /// These tests only exercise helpers that don't touch the database, so a
+    /// mock connection is enough to build an archiver.
+    fn test_archiver() -> PGNArchiver {
+        PGNArchiver::new(
+            MockDatabase::new(DbBackend::Postgres).into_connection(),
+            "https://ipfs.infura.io:5001".to_string(),
+            "https://arweave.net".to_string(),
+        )
+    }
 
     fn create_sample_pgn() -> PGNGame {
         PGNGame {
@@ -597,12 +608,8 @@ mod tests {
 
     #[test]
     fn test_pgn_to_string() {
-        let archiver = PGNArchiver::new(
-            sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
-            "https://ipfs.infura.io:5001".to_string(),
-            "https://arweave.net".to_string(),
-        );
-        
+        let archiver = test_archiver();
+
         let pgn = create_sample_pgn();
         let pgn_string = archiver.pgn_to_string(&pgn).unwrap();
         
@@ -615,12 +622,8 @@ mod tests {
 
     #[test]
     fn test_hash_calculation() {
-        let archiver = PGNArchiver::new(
-            sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
-            "https://ipfs.infura.io:5001".to_string(),
-            "https://arweave.net".to_string(),
-        );
-        
+        let archiver = test_archiver();
+
         let data = b"test data";
         let hash = archiver.calculate_hash(data);
         
@@ -629,12 +632,8 @@ mod tests {
 
     #[test]
     fn test_cost_estimation() {
-        let archiver = PGNArchiver::new(
-            sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
-            "https://ipfs.infura.io:5001".to_string(),
-            "https://arweave.net".to_string(),
-        );
-        
+        let archiver = test_archiver();
+
         let size = 1024; // 1KB
         let ipfs_cost = archiver.estimate_ipfs_cost(size);
         let arweave_cost = archiver.estimate_arwear_cost(size);

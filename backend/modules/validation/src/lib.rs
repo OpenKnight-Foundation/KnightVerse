@@ -547,7 +547,13 @@ mod tests {
         assert_eq!(result.to_square, "g1");
     }
 
+    // check_rate_limit opens a real async connection to Redis and errors if it
+    // can't reach one, so this test only passes with a live Redis at
+    // localhost:6379. Backend CI has no Redis service, so it's ignored there.
+    // The assertions are correct; run it locally with a Redis running, or
+    // un-ignore it once CI gains a Redis service.
     #[tokio::test]
+    #[ignore = "needs a live Redis at localhost:6379; CI has no Redis service"]
     async fn test_rate_limiting() {
         let validator = RealTimeMoveValidator::with_config("redis://localhost:6379", 300, 100, 2);
         let player_id = Uuid::new_v4();

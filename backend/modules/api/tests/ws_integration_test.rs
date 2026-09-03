@@ -9,7 +9,8 @@ use futures_util::{SinkExt, StreamExt};
 use security::jwt::JwtService;
 use uuid::Uuid;
 
-use api::ws::{Broadcast, LobbyState, WsMessage, ws_route};
+use api::redis_broadcast::RedisBroadcaster;
+use api::ws::{Broadcast, ConnectionStateTracker, LobbyState, WsMessage, ws_route};
 
 const JWT_SECRET: &str = "test_secret_for_ws_integration";
 
@@ -32,8 +33,19 @@ fn start_ws_test_server() -> (actix_test::TestServer, Addr<LobbyState>) {
     let lobby_for_test = lobby.clone();
 
     let srv = actix_test::start(move || {
+        // ws_route also extracts a RedisBroadcaster and a ConnectionStateTracker,
+        // so both have to be registered or the handshake fails with a 500 before
+        // the handler runs. Neither needs live infrastructure here: the tracker
+        // takes an optional pool, and RedisBroadcaster::new only parses the URL
+        // (its publishes are fire-and-forget, so an absent Redis just logs).
+        let connection_tracker = ConnectionStateTracker::new(None).start();
+        let redis_broadcaster = RedisBroadcaster::new("redis://127.0.0.1:6379")
+            .expect("redis url should parse");
+
         App::new()
             .app_data(web::Data::new(lobby.clone()))
+            .app_data(web::Data::new(connection_tracker))
+            .app_data(web::Data::new(redis_broadcaster))
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
     });
 

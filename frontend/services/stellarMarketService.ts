@@ -10,8 +10,15 @@ export async function fetchTokenPrices(): Promise<Record<SupportedToken, number>
   return { XLM: data[tokenIds.XLM]?.usd ?? 0, USDC: data[tokenIds.USDC]?.usd ?? 1, EURC: data[tokenIds.EURC]?.usd ?? 1.08 };
 }
 
-export async function fetchNativeBalance(address: string): Promise<number> {
-  const response = await fetch(`https://horizon.stellar.org/accounts/${encodeURIComponent(address)}`, { cache: "no-store" });
+export type StellarNetwork = "mainnet" | "testnet";
+
+export const HORIZON_URLS: Record<StellarNetwork, string> = {
+  mainnet: "https://horizon.stellar.org",
+  testnet: "https://horizon-testnet.stellar.org",
+};
+
+export async function fetchNativeBalance(address: string, network: StellarNetwork = "mainnet"): Promise<number> {
+  const response = await fetch(`${HORIZON_URLS[network]}/accounts/${encodeURIComponent(address)}`, { cache: "no-store" });
   if (!response.ok) throw new Error("Unable to load wallet balance");
   const data = (await response.json()) as { balances?: Array<{ asset_type: string; balance: string }> };
   return Number(data.balances?.find((balance) => balance.asset_type === "native")?.balance ?? 0);

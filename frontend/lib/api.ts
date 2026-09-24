@@ -92,6 +92,8 @@ export const endpoints = {
   tournaments: {
     list: () => `${API_BASE}/v1/tournaments`,
     create: () => `${API_BASE}/v1/tournaments`,
+    register: (id: string) =>
+      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Profile & Preferences */

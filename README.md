@@ -27,10 +27,12 @@ Target audience: Chess enthusiasts, AI researchers, competitive gamers, and deve
 KnightVerse/
 ├── contracts/          # Soroban smart contracts (Rust)
 ├── backend/            # Rust/Actix server
-├── frontend/           # TypeScript frontend
-├── ai/                 # Python/PyTorch AI integration
-├── docker/             # Dockerfiles & compose
-├── docs/               # Additional documentation
+├── frontend/           # Next.js/TypeScript frontend
+├── agent-engines/      # Python/PyTorch AI infrastructure
+├── apps/               # Additional applications
+├── src/                # Shared source code
+├── pers-store/         # Persistent storage utilities
+├── docker-compose.yml  # Docker Compose for local development
 └── README.md
 ```
 
@@ -52,7 +54,7 @@ cd KnightVerse
 ```
 
 ### 2. Environment Setup
-Create `.env` files in `/backend` and `/contracts` (copy from `.env.example` if present). Key variables:
+Create `.env` files in `/backend`, `/contracts`, and `/frontend` (copy from `.env.example` if present). Key variables:
 ```env
 # Backend
 DATABASE_URL=postgres://user:pass@localhost:5432/knightverse
@@ -61,7 +63,16 @@ HORIZON_URL=https://horizon-testnet.stellar.org
 SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443  # Update for Futurenet if needed
 
 # Contracts
-NETWORK=testnet
+STELLAR_NETWORK=testnet
+HORIZON_URL=https://horizon-testnet.stellar.org
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
+DEPLOYER_ACCOUNT=your-stellar-account-alias
+STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+
+# Frontend
+NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
+NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
 ```
 Fund your Stellar testnet account at https://laboratory.stellar.org/#account-creator?network=testnet
 
@@ -100,8 +111,10 @@ Access at `http://localhost:8080` (adjust port as needed).
 ```bash
 cd ../frontend
 npm install    # or yarn install
-npm run dev    # Starts at http://localhost:5173 (Vite/React/etc.)
+npm run dev    # Starts at http://localhost:3000 (Next.js 15 with Turbopack)
 ```
+
+See [frontend/.env.example](./frontend/.env.example) for required environment variables.
 
 ### 6. Full Stack with Docker (Recommended for Dev)
 ```bash

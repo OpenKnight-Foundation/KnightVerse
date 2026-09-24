@@ -4,53 +4,45 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Chess } from "chess.js";
 import ChessboardComponent from "./ChessboardComponent";
 
-// ── Mock PGN ──────────────────────────────────────────────────────────────────
+// ── Sample PGN fixture ────────────────────────────────────────────────────────
 
 /**
- * Mock PGN for a complete game with clock annotations.
- * Replace with the real PGN string from the API when available.
- * Clock comments use the standard %clk format: { [%clk h:mm:ss] }
+ * Sample PGN for a complete game with clock annotations.
+ *
+ * This is a **fixture, never a default**. `GameHistoryPGNViewer` requires the
+ * caller to supply the real game it should replay; import this only when you
+ * deliberately want a self-contained example (unit tests, docs, storybook).
+ *
+ * The moves are the "Opera Game" (Morphy – Duke of Brunswick & Count Isouard,
+ * Paris 1858): a short game that is legal from move one and ends in checkmate,
+ * so the fixture can be replayed end to end in tests and previews. The clock
+ * annotations layered on top use the standard %clk format: { [%clk h:mm:ss] }
  */
-export const MOCK_PGN = `[Event "KnightVerse Rated Game"]
-[Site "knightverse.app"]
-[Date "2026.03.26"]
-[White "GABC...XYZ"]
-[Black "GDEF...UVW"]
+export const MOCK_PGN = `[Event "Sample Game (Opera Game, Paris 1858)"]
+[Site "Paris FRA"]
+[Date "1858.10.21"]
+[White "Morphy, Paul"]
+[Black "Duke of Brunswick"]
 [Result "1-0"]
-[WhiteElo "1280"]
-[BlackElo "1263"]
 [TimeControl "300+3"]
 
 1. e4 { [%clk 0:05:00] } e5 { [%clk 0:05:00] }
-2. Nf3 { [%clk 0:04:58] } Nc6 { [%clk 0:04:57] }
-3. Bb5 { [%clk 0:04:55] } a6 { [%clk 0:04:54] }
-4. Ba4 { [%clk 0:04:52] } Nf6 { [%clk 0:04:51] }
-5. O-O { [%clk 0:04:50] } Be7 { [%clk 0:04:49] }
-6. Re1 { [%clk 0:04:47] } b5 { [%clk 0:04:46] }
-7. Bb3 { [%clk 0:04:45] } d6 { [%clk 0:04:43] }
-8. c3 { [%clk 0:04:43] } O-O { [%clk 0:04:41] }
-9. h3 { [%clk 0:04:41] } Nb8 { [%clk 0:04:39] }
-10. d4 { [%clk 0:04:38] } Nbd7 { [%clk 0:04:37] }
-11. Nbd2 { [%clk 0:04:36] } Bb7 { [%clk 0:04:35] }
-12. Bc2 { [%clk 0:04:34] } Re8 { [%clk 0:04:33] }
-13. Nf1 { [%clk 0:04:32] } Bf8 { [%clk 0:04:30] }
-14. Ng3 { [%clk 0:04:30] } g6 { [%clk 0:04:28] }
-15. a4 { [%clk 0:04:28] } c5 { [%clk 0:04:26] }
-16. d5 { [%clk 0:04:26] } c4 { [%clk 0:04:24] }
-17. b4 { [%clk 0:04:24] } cxb3 { [%clk 0:04:22] }
-18. Bxb3 { [%clk 0:04:22] } Nc5 { [%clk 0:04:20] }
-19. Bc2 { [%clk 0:04:20] } Rc8 { [%clk 0:04:18] }
-20. axb5 { [%clk 0:04:18] } axb5 { [%clk 0:04:16] }
-21. Nf5 { [%clk 0:04:15] } gxf5 { [%clk 0:04:13] }
-22. exf5 { [%clk 0:04:14] } Kh8 { [%clk 0:04:11] }
-23. Qd2 { [%clk 0:04:12] } Ng8 { [%clk 0:04:09] }
-24. Bh6 { [%clk 0:04:10] } Bxh6 { [%clk 0:04:07] }
-25. Qxh6 { [%clk 0:04:09] } Nf6 { [%clk 0:04:05] }
-26. f6 { [%clk 0:04:07] } Rg8 { [%clk 0:04:03] }
-27. Ng5 { [%clk 0:04:05] } Rg6 { [%clk 0:04:01] }
-28. Qh4 { [%clk 0:04:03] } Rcg8 { [%clk 0:03:59] }
-29. Re3 { [%clk 0:04:01] } Rxg5 { [%clk 0:03:56] }
-30. Rg3 { [%clk 0:03:59] } 1-0`;
+2. Nf3 { [%clk 0:04:58] } d6 { [%clk 0:04:57] }
+3. d4 { [%clk 0:04:56] } Bg4 { [%clk 0:04:54] }
+4. dxe5 { [%clk 0:04:53] } Bxf3 { [%clk 0:04:51] }
+5. Qxf3 { [%clk 0:04:50] } dxe5 { [%clk 0:04:48] }
+6. Bc4 { [%clk 0:04:47] } Nf6 { [%clk 0:04:45] }
+7. Qb3 { [%clk 0:04:44] } Qe7 { [%clk 0:04:41] }
+8. Nc3 { [%clk 0:04:40] } c6 { [%clk 0:04:38] }
+9. Bg5 { [%clk 0:04:36] } b5 { [%clk 0:04:34] }
+10. Nxb5 { [%clk 0:04:33] } cxb5 { [%clk 0:04:31] }
+11. Bxb5+ { [%clk 0:04:30] } Nbd7 { [%clk 0:04:28] }
+12. O-O-O { [%clk 0:04:25] } Rd8 { [%clk 0:04:23] }
+13. Rxd7 { [%clk 0:04:21] } Rxd7 { [%clk 0:04:19] }
+14. Rd1 { [%clk 0:04:18] } Qe6 { [%clk 0:04:15] }
+15. Bxd7+ { [%clk 0:04:13] } Nxd7 { [%clk 0:04:11] }
+16. Qb8+ { [%clk 0:04:10] } Nxb8 { [%clk 0:04:08] }
+17. Rd8# { [%clk 0:04:06] } 1-0`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -235,10 +227,13 @@ function PlaybackButton({
 
 interface GameHistoryPGNViewerProps {
   /**
-   * PGN string to replay. Defaults to MOCK_PGN.
-   * Swap for a real PGN from the API once available.
+   * The PGN of the completed game to replay. Required.
+   *
+   * The component renders exactly the game it is handed — it never falls back
+   * to sample data. Callers that only need a self-contained example (tests,
+   * storybook) can import the `MOCK_PGN` fixture and pass it explicitly.
    */
-  pgn?: string;
+  pgn: string;
 }
 
 /**
@@ -254,10 +249,10 @@ interface GameHistoryPGNViewerProps {
  * - Scrollable move list with the current move highlighted
  *
  * @example
- *   <GameHistoryPGNViewer />                  // mock PGN
- *   <GameHistoryPGNViewer pgn={game.pgn} />   // real PGN
+ *   <GameHistoryPGNViewer pgn={game.pgn} />   // real PGN from the API
+ *   <GameHistoryPGNViewer pgn={MOCK_PGN} />   // test/storybook fixture
  */
-export function GameHistoryPGNViewer({ pgn = MOCK_PGN }: GameHistoryPGNViewerProps) {
+export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [parsed, setParsed] = useState<ReturnType<typeof parsePGN>>(null);
   const [parseError, setParseError] = useState(false);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import os
 import psutil
 import signal
@@ -230,11 +231,13 @@ class AutoscalingDaemon:
                     item = self._redis_client.lindex(self.config.redis_queue_key, i)
                     if item:
                         try:
-                            # Assume items have timestamp metadata (implement based on your queue format)
-                            # For now, use a simplified approach
-                            total_wait += (current_time - (current_time - (i * 0.1)))  # Mock calculation
-                        except Exception:
-                            continue
+                            # Assume items are JSON with a 'timestamp'
+                            item_data = json.loads(item)
+                            enqueue_time = item_data.get("timestamp", current_time)
+                            total_wait += (current_time - enqueue_time)
+                        except (json.JSONDecodeError, TypeError):
+                            # Fallback for non-JSON items or items without timestamp
+                            total_wait += (i * 0.1)  # Maintain a baseline estimate
                             
                 if sample_size > 0:
                     avg_wait_time_ms = (total_wait / sample_size) * 1000

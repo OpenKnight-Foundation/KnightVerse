@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { FaPlus, FaSpinner } from "react-icons/fa";
+import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
 import type { TournamentBracket, BracketFormat } from "@/components/tournament/BracketView";
 import { endpoints } from "@/lib/api";
 
@@ -27,6 +27,11 @@ export default function TournamentPage() {
   const [name, setName] = useState("");
   const [format, setFormat] = useState<BracketFormat>("SingleElimination");
   const [creating, setCreating] = useState(false);
+
+  // Registration state
+  const [registering, setRegistering] = useState(false);
+  const [registeredIds, setRegisteredIds] = useState<Set<string>>(new Set());
+  const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
 
   const fetchBrackets = useCallback(async () => {
     setLoading(true);
@@ -72,6 +77,29 @@ export default function TournamentPage() {
       setError(e instanceof Error ? e.message : "Failed to create tournament");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleRegister(tournament: TournamentBracket) {
+    setRegistering(true);
+    setRegistrationMessage(null);
+    setError(null);
+    try {
+      const res = await fetch(endpoints.tournaments.register(tournament.id), {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.status === 409) {
+        setRegisteredIds((prev) => new Set(prev).add(tournament.id));
+        throw new Error("You are already registered for this tournament.");
+      }
+      if (!res.ok) throw new Error(`Failed to register: ${res.status}`);
+      setRegisteredIds((prev) => new Set(prev).add(tournament.id));
+      setRegistrationMessage(`You're registered for ${tournament.name}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to register for tournament");
+    } finally {
+      setRegistering(false);
     }
   }
 
@@ -137,9 +165,19 @@ export default function TournamentPage() {
           </form>
         )}
 
+        {/* Registration success */}
+        {registrationMessage && (
+          <div
+            role="status"
+            className="mb-6 p-4 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-sm"
+          >
+            {registrationMessage}
+          </div>
+        )}
+
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+          <div role="alert" className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
             {error}
           </div>
         )}
@@ -187,7 +225,25 @@ export default function TournamentPage() {
             {/* Main: bracket view */}
             <main className="flex-1 min-w-0 bg-gray-900/60 border border-gray-700/40 rounded-2xl p-6">
               {selected ? (
-                <BracketView bracket={selected} />
+                <>
+                  {selected.status === "Registration" && (
+                    <div className="mb-6 flex justify-end">
+                      <button
+                        onClick={() => handleRegister(selected)}
+                        disabled={registering}
+                        className="flex items-center gap-2 px-5 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold text-sm transition-all"
+                      >
+                        {registering ? (
+                          <FaSpinner className="animate-spin" />
+                        ) : registeredIds.has(selected.id) ? (
+                          <FaCheck />
+                        ) : null}
+                        {registeredIds.has(selected.id) ? "Registered" : "Register"}
+                      </button>
+                    </div>
+                  )}
+                  <BracketView bracket={selected} />
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-gray-600">
                   <p>Select or create a tournament to view its bracket.</p>

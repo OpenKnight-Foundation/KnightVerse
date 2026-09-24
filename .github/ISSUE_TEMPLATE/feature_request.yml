@@ -1,0 +1,97 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please provide as much detail as possible so we can evaluate and plan effectively.
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem Statement
+      description: |
+        A clear and concise description of the problem this feature would solve.
+        What is the pain point? Who experiences it? Why does it matter?
+      placeholder: |
+        Currently, users cannot...
+        This is a problem because...
+        It affects...
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: |
+        Describe your proposed solution in detail.
+        Include any API changes, UI mockups, configuration options, or data model changes.
+      placeholder: |
+        We propose adding a new endpoint /api/v1/...
+        The response would include...
+        Configuration would be via...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: |
+        Describe any alternative solutions or features you've considered, and why they were not chosen.
+      placeholder: |
+        We considered X but it didn't work because...
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: |
+        Define the specific criteria that must be met for this feature to be considered complete.
+        Use checkboxes for testable conditions.
+      placeholder: |
+        - [ ] New API endpoint `/api/v1/...` returns 200 with expected schema
+        - [ ] Frontend integrates the new endpoint and displays data correctly
+        - [ ] Unit tests cover the new logic (>= 80% coverage)
+        - [ ] Documentation updated in CONTRIBUTING.md / README.md
+        - [ ] No regression in existing tests
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the codebase would this affect?
+      options:
+        - Smart Contracts (contracts/)
+        - Backend (backend/)
+        - Frontend (frontend/)
+        - AI Engines (agent-engines/)
+        - Infrastructure/DevOps
+        - Documentation
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature?
+      options:
+        - P0 - Critical (blocking release / security)
+        - P1 - High (core functionality)
+        - P2 - Medium (nice to have)
+        - P3 - Low (future consideration)
+      default: 2
+    validations:
+      required: false
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues/PRs to avoid duplicates
+          required: true
+        - label: This feature aligns with the project's roadmap (see CONTRIBUTING.md)
+          required: true

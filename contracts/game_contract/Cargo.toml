@@ -10,6 +10,7 @@ soroban-sdk = "21.0.0"
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
+emergency_circuit_breaker = { path = "../emergency_circuit_breaker", features = ["testutils"] }
 
 [lib]
 crate-type = ["cdylib"]

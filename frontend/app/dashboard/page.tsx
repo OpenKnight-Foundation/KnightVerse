@@ -29,6 +29,15 @@ const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
     </div>
   ),
 });
+const AnalyticsCharts = dynamic(() => import("@/components/dashboard/AnalyticsCharts"), {
+  ssr: false,
+  loading: () => (
+    <div className="grid gap-6 xl:grid-cols-2">
+      <LoadingSkeleton className="h-[320px] w-full rounded-2xl" />
+      <LoadingSkeleton className="h-[320px] w-full rounded-2xl" />
+    </div>
+  ),
+});
 const PerformanceBreakdown = dynamic(() => import("@/components/dashboard/PerformanceBreakdown"), {
   ssr: false,
   loading: () => (
@@ -50,6 +59,7 @@ const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
   { label: "7D", value: "7d" },
   { label: "30D", value: "30d" },
   { label: "90D", value: "90d" },
+  { label: "1Y", value: "1y" },
   { label: "ALL", value: "all" },
 ];
 
@@ -189,6 +199,8 @@ export default function DashboardPage() {
       </section>
 
       <EloChart data={filteredData} title="Interactive ELO trajectory" height={390} />
+
+      <AnalyticsCharts data={filteredData} range={range} />
 
       <section className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
         <RecentMatches data={filteredData} />

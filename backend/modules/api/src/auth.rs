@@ -2,19 +2,60 @@ use actix_web::{
     cookie::{time::Duration, Cookie},
     post, web, HttpRequest, HttpResponse,
 };
+use deadpool_redis::Pool;
+use redis::AsyncCommands;
 use std::env;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::metrics::increment_auth_events;
+use db::DbPool;
 use db_entity::player;
 use dto::auth::{
     AuthResponse, ErrorResponse, LoginRequest, LogoutResponse, RefreshResponse,
     RefreshTokenRequest, RegisterRequest,
 };
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use security::{JwtService, TokenService, TokenServiceError};
 use service::helper::password;
+
+async fn add_jti_to_blacklist(
+    redis_pool: &Pool,
+    jti: &str,
+    ttl_seconds: usize,
+) -> Result<(), String> {
+    if jti.trim().is_empty() {
+        return Ok(());
+    }
+
+    let mut conn = redis_pool.get().await.map_err(|e| e.to_string())?;
+    let key = format!("token_blacklist:{}", jti);
+    let ttl = ttl_seconds.max(1) as usize;
+    let _: () = redis::cmd("SET")
+        .arg(&key)
+        .arg("1")
+        .arg("EX")
+        .arg(ttl)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| format!("Redis blacklist write failed: {}", e))?;
+    Ok(())
+}
+
+async fn is_jti_blacklisted(redis_pool: &Pool, jti: &str) -> bool {
+    if jti.trim().is_empty() {
+        return false;
+    }
+
+    let mut conn = match redis_pool.get().await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let key = format!("token_blacklist:{}", jti);
+    conn.exists(&key).await.unwrap_or(false)
+}
 
 /// Register a new user
 #[utoipa::path(
@@ -29,10 +70,9 @@ use service::helper::password;
 )]
 #[post("/register")]
 pub async fn register(
-    _db: web::Data<DatabaseConnection>,
+    _pool: web::Data<DbPool>,
     payload: web::Json<RegisterRequest>,
 ) -> HttpResponse {
-    // Validate input
     if let Err(errors) = payload.validate() {
         return HttpResponse::BadRequest().json(ErrorResponse {
             message: format!("Validation failed: {:?}", errors),
@@ -41,6 +81,8 @@ pub async fn register(
     }
 
     // For now, return a mock response
+    increment_auth_events("register", true);
+
     HttpResponse::Created().json(AuthResponse {
         access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
         refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
@@ -52,7 +94,7 @@ pub async fn register(
     })
 }
 
-/// Login with credentials
+/// Login with credentials — player lookup goes to replica; token write goes to primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/login",
@@ -66,11 +108,10 @@ pub async fn register(
 )]
 #[post("/login")]
 pub async fn login(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     payload: web::Json<LoginRequest>,
     jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
-    // Validate input
     if let Err(errors) = payload.validate() {
         return HttpResponse::BadRequest().json(ErrorResponse {
             message: format!("Validation failed: {:?}", errors),
@@ -80,10 +121,10 @@ pub async fn login(
 
     let username = payload.username.clone();
 
-    // Look up the player and verify password
+    // READ: look up player on replica
     let player = match player::Entity::find()
         .filter(player::Column::Username.eq(&username))
-        .one(db.get_ref())
+        .one(pool.replica())
         .await
     {
         Ok(Some(p)) => p,
@@ -106,10 +147,10 @@ pub async fn login(
     let player_id = player.id;
     let user_id = (player_id.as_u128() & 0x7F_FF_FF_FF) as i32;
 
-    // Generate access token
     let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
         Ok(t) => t,
         Err(_) => {
+            increment_auth_events("login", false);
             return HttpResponse::InternalServerError().json(ErrorResponse {
                 message: "Failed to generate access token".to_string(),
                 code: "TOKEN_ERROR".to_string(),
@@ -117,15 +158,15 @@ pub async fn login(
         }
     };
 
-    // Generate refresh token
     let family_id = Uuid::new_v4();
     let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
         .unwrap_or_else(|_| "7".to_string())
         .parse::<i64>()
         .unwrap_or(7);
 
+    // WRITE: create refresh token on primary
     let refresh_token =
-        match TokenService::generate_refresh_token(db.get_ref(), user_id, family_id, refresh_ttl)
+        match TokenService::generate_refresh_token(pool.primary(), user_id, family_id, refresh_ttl)
             .await
         {
             Ok(t) => t,
@@ -138,7 +179,6 @@ pub async fn login(
             }
         };
 
-    // Build response with cookie
     let mut response = HttpResponse::Ok().json(AuthResponse {
         access_token,
         refresh_token: refresh_token.clone(),
@@ -149,19 +189,22 @@ pub async fn login(
         username,
     });
 
-    // Set HTTP-only secure cookie
     let cookie = Cookie::build("refresh_token", refresh_token)
         .http_only(true)
-        .secure(false) // Set to true in production HTTPS
+        .secure(false)
         .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(Duration::seconds(refresh_ttl as i64 * 86400))
         .finish();
 
     response.add_cookie(&cookie).ok();
+
+    // Track successful login
+    increment_auth_events("login", true);
+
     response
 }
 
-/// Refresh tokens - rotate refresh token and get new access token
+/// Refresh tokens — token verification reads from replica; new token write to primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/refresh",
@@ -174,12 +217,12 @@ pub async fn login(
 )]
 #[post("/refresh")]
 pub async fn refresh(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     req: HttpRequest,
     payload: Option<web::Json<RefreshTokenRequest>>,
     jwt_service: web::Data<JwtService>,
+    redis_pool: web::Data<Pool>,
 ) -> HttpResponse {
-    // Extract refresh token from cookie or request body
     let refresh_token = if let Some(cookie) = req.cookie("refresh_token") {
         cookie.value().to_string()
     } else if let Some(body) = payload {
@@ -191,7 +234,6 @@ pub async fn refresh(
         });
     };
 
-    // Extract user from access token in Authorization header
     let auth_header = match req.headers().get("Authorization") {
         Some(h) => match h.to_str() {
             Ok(s) => s.to_string(),
@@ -210,7 +252,6 @@ pub async fn refresh(
         }
     };
 
-    // Extract Bearer token
     let token = match auth_header.strip_prefix("Bearer ") {
         Some(t) => t,
         None => {
@@ -221,7 +262,6 @@ pub async fn refresh(
         }
     };
 
-    // Validate access token and get user info
     let claims = match jwt_service.validate_token(token) {
         Ok(c) => c,
         Err(_) => {
@@ -232,37 +272,42 @@ pub async fn refresh(
         }
     };
 
-    // Verify refresh token and mark as used
-    let family_id = match TokenService::verify_and_mark_used(
-        db.get_ref(),
-        &refresh_token,
-        claims.user_id,
-    )
-    .await
-    {
-        Ok(fid) => fid,
-        Err(TokenServiceError::TokenReuseDetected) => {
-            warn!("Token reuse detected for player {}", claims.user_id);
+    if let Some(jti) = claims.jti.as_ref() {
+        if is_jti_blacklisted(redis_pool.as_ref(), jti).await {
             return HttpResponse::Unauthorized().json(ErrorResponse {
-                message: "Token reuse detected. Account locked for security.".to_string(),
-                code: "TOKEN_THEFT_DETECTED".to_string(),
+                message: "Token revoked".to_string(),
+                code: "TOKEN_REVOKED".to_string(),
             });
         }
-        Err(TokenServiceError::TokenExpired) => {
-            return HttpResponse::Unauthorized().json(ErrorResponse {
-                message: "Refresh token has expired".to_string(),
-                code: "TOKEN_EXPIRED".to_string(),
-            });
-        }
-        Err(_) => {
-            return HttpResponse::Unauthorized().json(ErrorResponse {
-                message: "Invalid refresh token".to_string(),
-                code: "INVALID_REFRESH_TOKEN".to_string(),
-            });
-        }
-    };
+    }
 
-    // Generate new access token
+    // WRITE: mark refresh token as used (must go to primary for atomicity)
+    let family_id =
+        match TokenService::verify_and_mark_used(pool.primary(), &refresh_token, claims.user_id)
+            .await
+        {
+            Ok(fid) => fid,
+            Err(TokenServiceError::TokenReuseDetected) => {
+                warn!("Token reuse detected for player {}", claims.user_id);
+                return HttpResponse::Unauthorized().json(ErrorResponse {
+                    message: "Token reuse detected. Account locked for security.".to_string(),
+                    code: "TOKEN_THEFT_DETECTED".to_string(),
+                });
+            }
+            Err(TokenServiceError::TokenExpired) => {
+                return HttpResponse::Unauthorized().json(ErrorResponse {
+                    message: "Refresh token has expired".to_string(),
+                    code: "TOKEN_EXPIRED".to_string(),
+                });
+            }
+            Err(_) => {
+                return HttpResponse::Unauthorized().json(ErrorResponse {
+                    message: "Invalid refresh token".to_string(),
+                    code: "INVALID_REFRESH_TOKEN".to_string(),
+                });
+            }
+        };
+
     let new_access_token =
         match jwt_service.generate_token(claims.user_id, &claims.username, claims.player_id) {
             Ok(t) => t,
@@ -274,14 +319,14 @@ pub async fn refresh(
             }
         };
 
-    // Generate new refresh token in same family
     let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
         .unwrap_or_else(|_| "7".to_string())
         .parse::<i64>()
         .unwrap_or(7);
 
+    // WRITE: generate new refresh token on primary
     let new_refresh_token = match TokenService::generate_refresh_token(
-        db.get_ref(),
+        pool.primary(),
         claims.user_id,
         family_id,
         refresh_ttl,
@@ -298,7 +343,6 @@ pub async fn refresh(
         }
     };
 
-    // Build response with new cookie
     let mut response = HttpResponse::Ok().json(RefreshResponse {
         access_token: new_access_token,
         refresh_token: new_refresh_token.clone(),
@@ -306,10 +350,9 @@ pub async fn refresh(
         expires_in: 3600,
     });
 
-    // Set new HTTP-only cookie
     let cookie = Cookie::build("refresh_token", new_refresh_token)
         .http_only(true)
-        .secure(false) // Set to true in production HTTPS
+        .secure(false)
         .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(Duration::seconds(refresh_ttl as i64 * 86400))
         .finish();
@@ -318,7 +361,7 @@ pub async fn refresh(
     response
 }
 
-/// Logout - revoke all tokens
+/// Logout — revoke all tokens on primary.
 #[utoipa::path(
     post,
     path = "/v1/auth/logout",
@@ -330,11 +373,11 @@ pub async fn refresh(
 )]
 #[post("/logout")]
 pub async fn logout(
-    db: web::Data<DatabaseConnection>,
+    pool: web::Data<DbPool>,
     req: HttpRequest,
     jwt_service: web::Data<JwtService>,
+    redis_pool: web::Data<Pool>,
 ) -> HttpResponse {
-    // Extract user from access token
     let auth_header = match req.headers().get("Authorization") {
         Some(h) => match h.to_str() {
             Ok(s) => s.to_string(),
@@ -363,7 +406,6 @@ pub async fn logout(
         }
     };
 
-    // Validate the token and extract the actual user ID
     let claims = match jwt_service.validate_token(token) {
         Ok(c) => c,
         Err(_) => {
@@ -376,8 +418,20 @@ pub async fn logout(
 
     let user_id = claims.user_id;
 
-    // Revoke all tokens for this player
-    if let Err(e) = TokenService::revoke_player_tokens(db.get_ref(), user_id).await {
+    if let Some(jti) = claims.jti.as_ref() {
+        let ttl = claims.exp.saturating_sub(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as usize,
+        );
+        if let Err(e) = add_jti_to_blacklist(redis_pool.as_ref(), jti, ttl).await {
+            error!("Failed to blacklist access token jti {}: {}", jti, e);
+        }
+    }
+
+    // WRITE: revoke tokens on primary
+    if let Err(e) = TokenService::revoke_player_tokens(pool.primary(), user_id).await {
         error!("Failed to revoke tokens: {}", e);
         return HttpResponse::InternalServerError().json(ErrorResponse {
             message: "Failed to logout".to_string(),
@@ -385,9 +439,101 @@ pub async fn logout(
         });
     }
 
-    // Clear the refresh token cookie
     let mut response = HttpResponse::Ok().json(LogoutResponse {
         message: "Logged out successfully".to_string(),
+    });
+
+    let cookie = Cookie::build("refresh_token", "")
+        .http_only(true)
+        .secure(false)
+        .same_site(actix_web::cookie::SameSite::Strict)
+        .max_age(Duration::seconds(0))
+        .finish();
+
+    response.add_cookie(&cookie).ok();
+    response
+}
+
+/// Logout all sessions for the current user and immediately blacklist the active token.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/logout_all",
+    responses(
+        (status = 200, description = "Logout all sessions successful", body = LogoutResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse)
+    ),
+    tag = "Authentication"
+)]
+#[post("/logout_all")]
+pub async fn logout_all(
+    pool: web::Data<DbPool>,
+    req: HttpRequest,
+    jwt_service: web::Data<JwtService>,
+    redis_pool: web::Data<Pool>,
+) -> HttpResponse {
+    let auth_header = match req.headers().get("Authorization") {
+        Some(h) => match h.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                return HttpResponse::Unauthorized().json(ErrorResponse {
+                    message: "Invalid authorization header".to_string(),
+                    code: "INVALID_AUTH_HEADER".to_string(),
+                });
+            }
+        },
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Missing authorization header".to_string(),
+                code: "MISSING_AUTH_HEADER".to_string(),
+            });
+        }
+    };
+
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid authorization format".to_string(),
+                code: "INVALID_AUTH_FORMAT".to_string(),
+            });
+        }
+    };
+
+    let claims = match jwt_service.validate_token(token) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Invalid or expired access token".to_string(),
+                code: "INVALID_ACCESS_TOKEN".to_string(),
+            });
+        }
+    };
+
+    if let Some(jti) = claims.jti.as_ref() {
+        let ttl = claims.exp.saturating_sub(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as usize,
+        );
+        if let Err(e) = add_jti_to_blacklist(redis_pool.as_ref(), jti, ttl).await {
+            error!("Failed to blacklist access token jti {}: {}", jti, e);
+        }
+    }
+
+    if let Err(e) = TokenService::revoke_player_tokens(pool.primary(), claims.user_id).await {
+        error!(
+            "Failed to revoke all sessions for user {}: {}",
+            claims.user_id, e
+        );
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            message: "Failed to logout all devices".to_string(),
+            code: "LOGOUT_ALL_ERROR".to_string(),
+        });
+    }
+
+    let mut response = HttpResponse::Ok().json(LogoutResponse {
+        message: "Logged out all devices successfully".to_string(),
     });
 
     let cookie = Cookie::build("refresh_token", "")

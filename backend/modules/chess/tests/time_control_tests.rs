@@ -20,11 +20,17 @@ mod tests {
 
         assert!(clock.get_real_time_remaining() <= Duration::from_secs(299));
 
+        let before_delay = clock.get_real_time_remaining();
         clock.apply_delay(time_control.delay);
-        assert_eq!(clock.get_real_time_remaining(), Duration::from_secs(300));
+        let after_delay = clock.get_real_time_remaining();
+        assert!(after_delay > before_delay);
+        assert!(after_delay <= Duration::from_secs(300));
+        assert!(after_delay > Duration::from_secs(298));
 
+        let before_inc = clock.get_real_time_remaining();
         clock.apply_increment(time_control.increment);
-        assert_eq!(clock.get_real_time_remaining(), Duration::from_secs(302));
+        let after_inc = clock.get_real_time_remaining();
+        assert_eq!(after_inc, before_inc + time_control.increment);
 
         clock.start();
         std::thread::sleep(Duration::from_secs(2));

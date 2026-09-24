@@ -280,9 +280,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     args: any[] = [],
   ) => {
     if (!address) throw new Error("No wallet connected");
-    // Best-effort Soroban invocation using `soroban-client` if present. This is a helper that
-    // will build a transaction targeting the Soroban network and request Freighter to sign it.
-    // Actual invocation details (host function, footprints, etc.) depend on the contract ABI.
     try {
       // dynamic import to avoid build-time hard dependency when not used
       const sc = await import("soroban-client");

@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
 
+const AUDIO_EVENTS = ['move', 'capture', 'check', 'castle', 'promote', 'low_time_alarm', 'victory', 'defeat'] as const;
+const AUDIO_PACKS = ['classic-wood', 'marble', 'cyberpunk', 'retro-8bit'] as const;
+const AUDIO_BASE_PATH = '/sounds';
+
 export const OfflineModeBanner: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -12,7 +16,7 @@ export const OfflineModeBanner: React.FC = () => {
 
   return (
     <div className="fixed top-0 left-0 right-0 bg-yellow-500 text-white p-3 text-center">
-      ⚠️ Offline mode: Puzzles cached locally
+      ❤️ Offline mode: Puzzles and audio cached locally
     </div>
   );
 };
@@ -36,4 +40,27 @@ async function cacheOfflinePuzzles() {
     const response = await fetch(url);
     await cache.put(url, response.clone());
   }
+  await cacheAudioAssets();
+}
+
+async function cacheAudioAssets() {
+  const cache = await caches.open('audio-v1');
+  const assets = AUDIO_PACKS.flatMap(pack =>
+    AUDIO_EVENTS.map(event => `${AUDIO_BASE_PATH}/${pack}/${event}.mp3`)
+  );
+
+  await Promise.all(
+    assets.map(async url => {
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          await cache.put(url, response.clone());
+        } else {
+          console.warn(`Audio asset not found: ${url}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to cache audio asset: ${url}`, error);
+      }
+    })
+  );
 }

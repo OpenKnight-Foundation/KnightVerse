@@ -21,6 +21,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "ai_nft"
 version = "0.1.0"
 dependencies = [
+ "emergency_circuit_breaker",
  "soroban-sdk",
 ]
 
@@ -504,6 +505,16 @@ dependencies = [
 
 [[package]]
 name = "game_contract"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "emergency_circuit_breaker",
+ "rand",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "gasless_relayer"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
@@ -1321,6 +1332,14 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sponsorship_escrow"
+version = "0.1.0"
+dependencies = [
+ "emergency_circuit_breaker",
+ "soroban-sdk",
 ]
 
 [[package]]

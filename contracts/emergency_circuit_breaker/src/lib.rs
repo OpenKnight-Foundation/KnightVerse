@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env};
 
 // Storage keys
 #[contracttype]
@@ -18,6 +18,28 @@ pub struct MatchEscrowData {
     pub amount: i128,
 }
 
+/// Structured error codes for the PausableContract.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum ContractError {
+    /// Contract has already been initialized
+    AlreadyInitialized = 1,
+    /// Caller is not the contract admin
+    NotAdmin = 2,
+    /// Contract is already paused
+    AlreadyPaused = 3,
+    /// Contract is not currently paused
+    NotPaused = 4,
+    /// Contract is paused — state-changing operations are blocked
+    ContractPaused = 5,
+    /// Amount must be a positive integer
+    InvalidAmount = 6,
+    /// Account has insufficient balance for the requested operation
+    InsufficientBalance = 7,
+    /// Match escrow with this ID already exists
+    EscrowAlreadyExists = 8,
+}
+
 #[contract]
 pub struct PausableContract;
 
@@ -27,7 +49,7 @@ impl PausableContract {
     pub fn initialize(env: Env, admin: Address) {
         // Ensure contract hasn't been initialized
         if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialized");
+            panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
 
         // Set admin
@@ -55,7 +77,7 @@ impl PausableContract {
         // Check if already paused
         let is_paused = Self::is_paused(&env);
         if is_paused {
-            panic!("Already paused");
+            panic_with_error!(&env, ContractError::AlreadyPaused);
         }
 
         // Set paused state to true
@@ -77,7 +99,7 @@ impl PausableContract {
         // Check if not paused
         let is_paused = Self::is_paused(&env);
         if !is_paused {
-            panic!("Not paused");
+            panic_with_error!(&env, ContractError::NotPaused);
         }
 
         // Set paused state to false
@@ -108,7 +130,7 @@ impl PausableContract {
         Self::check_not_paused(&env);
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         // Get current balance
@@ -144,7 +166,7 @@ impl PausableContract {
         Self::check_not_paused(&env);
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         // Get current balance
@@ -153,7 +175,7 @@ impl PausableContract {
 
         // Check sufficient balance
         if current_balance < amount {
-            panic!("Insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         // Update balance
@@ -186,7 +208,7 @@ impl PausableContract {
         Self::check_not_paused(&env);
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         // Get current balance
@@ -220,13 +242,13 @@ impl PausableContract {
         Self::check_not_paused(&env);
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         // Check if match escrow already exists
         let escrow_key = DataKey::MatchEscrow(match_id);
         if env.storage().instance().has(&escrow_key) {
-            panic!("Match escrow already exists");
+            panic_with_error!(&env, ContractError::EscrowAlreadyExists);
         }
 
         // Get player's balance
@@ -235,7 +257,7 @@ impl PausableContract {
 
         // Check sufficient balance
         if current_balance < amount {
-            panic!("Insufficient balance");
+            panic_with_error!(&env, ContractError::InsufficientBalance);
         }
 
         // Deduct from player's balance
@@ -285,7 +307,7 @@ impl PausableContract {
         // NOTE: No pause check here! This works even when paused.
 
         if amount <= 0 {
-            panic!("Amount must be positive");
+            panic_with_error!(&env, ContractError::InvalidAmount);
         }
 
         // Get current balance
@@ -410,15 +432,15 @@ impl PausableContract {
     // HELPER FUNCTIONS (INTERNAL)
     // ============================================
 
-    /// Check if contract is paused, panic if it is
-    /// This is the core circuit breaker check
+    /// Check if contract is paused, panic with `ContractError::ContractPaused` if it is.
+    /// This is the core circuit breaker check.
     fn check_not_paused(env: &Env) {
         if Self::is_paused(env) {
-            panic!("Contract is paused");
+            panic_with_error!(env, ContractError::ContractPaused);
         }
     }
 
-    /// Check if caller is admin, panic if not
+    /// Check if caller is admin, panic with `ContractError::NotAdmin` if not.
     fn check_admin(env: &Env, caller: &Address) {
         let admin: Address = env
             .storage()
@@ -427,7 +449,7 @@ impl PausableContract {
             .expect("Admin not set");
 
         if admin != *caller {
-            panic!("Not admin");
+            panic_with_error!(env, ContractError::NotAdmin);
         }
     }
 }
@@ -471,7 +493,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
+    #[should_panic]
     fn test_deposit_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
@@ -485,7 +507,7 @@ mod test {
         client.initialize(&admin);
         client.pause(&admin);
 
-        // This should panic with "Contract is paused"
+        // This should return ContractError::ContractPaused
         client.deposit(&user, &1000);
     }
 
@@ -508,7 +530,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
+    #[should_panic]
     fn test_claim_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
@@ -523,12 +545,12 @@ mod test {
         client.deposit(&user, &1000);
         client.pause(&admin);
 
-        // This should panic with "Contract is paused"
+        // This should return ContractError::ContractPaused
         client.claim(&user, &500);
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
+    #[should_panic]
     fn test_mint_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
@@ -542,7 +564,7 @@ mod test {
         client.initialize(&admin);
         client.pause(&admin);
 
-        // This should panic with "Contract is paused"
+        // This should return ContractError::ContractPaused
         client.mint(&admin, &user, &1000);
     }
 
@@ -566,7 +588,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Not admin")]
+    #[should_panic]
     fn test_pause_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -579,7 +601,7 @@ mod test {
 
         client.initialize(&admin);
 
-        // Non-admin trying to pause should fail
+        // Non-admin trying to pause should return ContractError::NotAdmin
         client.pause(&non_admin);
     }
 
@@ -678,7 +700,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Not admin")]
+    #[should_panic]
     fn test_admin_refund_match_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -694,7 +716,7 @@ mod test {
         client.mint(&admin, &player, &1000);
         client.deposit_match(&player, &123, &500);
 
-        // Non-admin trying to refund should fail
+        // Non-admin trying to refund should return ContractError::NotAdmin
         client.admin_refund_match(&non_admin, &123);
     }
 

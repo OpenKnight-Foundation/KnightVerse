@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map,
-    String, Symbol,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    BytesN, Env, Map, String, Symbol,
 };
 
 // AI NFT metadata structure
@@ -22,6 +22,8 @@ const NFT_COUNTER: Symbol = symbol_short!("NFT_CNT");
 const NFT_OWNERS: Symbol = symbol_short!("OWNERS");
 const NFT_METADATA: Symbol = symbol_short!("METADATA");
 const MINTER_REGISTRY: Symbol = symbol_short!("MINTER");
+// Dynamic metadata (FE-10)
+const METADATA_VERSION: Symbol = symbol_short!("META_VER");
 // Pausable extension (SC-11)
 const PAUSED: Symbol = symbol_short!("PAUSED");
 
@@ -37,6 +39,14 @@ pub enum ContractError {
     MinterMismatch = 6,
     /// Contract is paused for emergency halt (SC-11)
     ContractPaused = 7,
+    /// Contract has already been initialized
+    AlreadyInitialized = 8,
+    /// Caller is not the contract admin
+    NotAdmin = 9,
+    /// Contract is already paused
+    AlreadyPaused = 10,
+    /// Contract is not currently paused
+    NotPaused = 11,
 }
 
 #[contract]
@@ -47,7 +57,7 @@ impl AINFTContract {
     /// Initialize the AI NFT contract with an admin address
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&ADMIN) {
-            panic!("Contract already initialized");
+            panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
         admin.require_auth();
         env.storage().instance().set(&ADMIN, &admin);
@@ -67,10 +77,10 @@ impl AINFTContract {
         caller.require_auth();
         let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Already paused");
+            panic_with_error!(&env, ContractError::AlreadyPaused);
         }
         env.storage().instance().set(&PAUSED, &true);
         env.events()
@@ -83,10 +93,10 @@ impl AINFTContract {
         caller.require_auth();
         let admin: Address = env.storage().instance().get(&ADMIN).expect("Admin not set");
         if caller != admin {
-            panic!("Not admin");
+            panic_with_error!(&env, ContractError::NotAdmin);
         }
         if !env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Not paused");
+            panic_with_error!(&env, ContractError::NotPaused);
         }
         env.storage().instance().set(&PAUSED, &false);
         env.events()
@@ -98,10 +108,10 @@ impl AINFTContract {
         env.storage().instance().get(&PAUSED).unwrap_or(false)
     }
 
-    /// Internal helper — panics with "Contract is paused" when the contract is paused.
+    /// Internal helper — panics with `ContractError::ContractPaused` when the contract is paused.
     fn check_not_paused(env: &Env) {
         if env.storage().instance().get(&PAUSED).unwrap_or(false) {
-            panic!("Contract is paused");
+            panic_with_error!(env, ContractError::ContractPaused);
         }
     }
 
@@ -245,6 +255,62 @@ impl AINFTContract {
     pub fn total_supply(env: Env) -> u64 {
         env.storage().instance().get(&NFT_COUNTER).unwrap_or(0)
     }
+
+    // ── Dynamic NFT Metadata (FE-10) ──────────────────────────────────────────
+
+    /// Update the personality traits and metadata hash for an existing NFT.
+    /// Only the current owner or the original minter may call this.
+    pub fn update_metadata(
+        env: Env,
+        caller: Address,
+        nft_id: u64,
+        new_metadata_hash: BytesN<32>,
+        new_personality_traits: String,
+    ) -> Result<u64, ContractError> {
+        Self::check_not_paused(&env);
+        caller.require_auth();
+
+        let mut nft_metadata: Map<u64, AINFTMetadata> = env
+            .storage()
+            .instance()
+            .get(&NFT_METADATA)
+            .ok_or(ContractError::NFTNotFound)?;
+        let mut nft = nft_metadata.get(nft_id).ok_or(ContractError::NFTNotFound)?;
+
+        let is_owner = nft.owner == caller;
+        let is_minter = nft.minter == caller;
+        if !is_owner && !is_minter {
+            return Err(ContractError::NotAuthorized);
+        }
+
+        // Bump version
+        let version: u64 = env
+            .storage()
+            .instance()
+            .get(&METADATA_VERSION)
+            .unwrap_or(0);
+        let new_version = version + 1;
+        env.storage().instance().set(&METADATA_VERSION, &new_version);
+
+        // Update NFT metadata
+        nft.metadata_hash = new_metadata_hash.clone();
+        nft.personality_traits = new_personality_traits.clone();
+        nft_metadata.set(nft_id, nft);
+        env.storage().instance().set(&NFT_METADATA, &nft_metadata);
+
+        // Emit metadata updated event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("meta_upd")),
+            (nft_id, caller, new_version, new_metadata_hash),
+        );
+
+        Ok(new_version)
+    }
+
+    /// Get the current metadata version (incremented on each update)
+    pub fn metadata_version(env: Env) -> u64 {
+        env.storage().instance().get(&METADATA_VERSION).unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -378,5 +444,84 @@ mod tests {
         assert_eq!(retrieved.minter, minter);
         assert_eq!(retrieved.owner, minter);
         assert_eq!(retrieved.personality_traits, personality);
+    }
+
+    // ── Pausable / SC-11 Tests ────────────────────────────────────────────────
+
+    /// mint is blocked when the contract is paused.
+    #[test]
+    fn test_pause_blocks_mint() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+        client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+        let personality = String::from_str(&env, "blocked_bot");
+
+        let result = client.try_mint(&minter, &metadata_hash, &personality);
+        assert!(result.is_err(), "mint should fail when paused");
+    }
+
+    /// transfer is blocked when the contract is paused.
+    #[test]
+    fn test_pause_blocks_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        // Mint while not yet paused
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "live_bot"));
+
+        // Pause and verify transfer is blocked
+        client.pause(&admin);
+        let result = client.try_transfer(&nft_id, &new_owner);
+        assert!(result.is_err(), "transfer should fail when paused");
+    }
+
+    /// After unpausing, mint and transfer work again.
+    #[test]
+    fn test_unpause_resumes_mint_and_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let new_owner = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+        client.pause(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+        // mint blocked while paused
+        assert!(client
+            .try_mint(&minter, &metadata_hash, &String::from_str(&env, "bot"))
+            .is_err());
+
+        client.unpause(&admin);
+
+        // Now mint succeeds
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "bot"));
+        assert_eq!(client.owner_of(&nft_id), minter);
+
+        // And transfer succeeds
+        client.transfer(&nft_id, &new_owner);
+        assert_eq!(client.owner_of(&nft_id), new_owner);
     }
 }

@@ -9,15 +9,22 @@ from __future__ import annotations
 import math
 import numpy as np
 import pytest
-import torch
 
-from gpu_worker.train_valuation_head import (
-    TrainingConfig,
-    encode_board_from_fen,
-    ChessPositionDataset,
-    KnightVerseHead,
-    ResidualBlock,
-)
+try:
+    import torch
+
+    from gpu_worker.train_valuation_head import (
+        TrainingConfig,
+        encode_board_from_fen,
+        ChessPositionDataset,
+        KnightVerseHead,
+        ResidualBlock,
+    )
+except ImportError:
+    pytest.skip(
+        "torch is not declared in pyproject.toml, so `pip install -e .[dev]` doesn't install it",
+        allow_module_level=True,
+    )
 
 
 STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"

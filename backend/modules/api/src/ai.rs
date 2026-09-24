@@ -10,6 +10,7 @@ use serde_json::json;
 use tracing::error;
 use validator::Validate;
 
+use crate::metrics::increment_ai_requests;
 use service::engine_service::EngineService;
 use std::env;
 
@@ -28,6 +29,9 @@ use std::env;
 )]
 #[post("/suggest")]
 pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpResponse {
+    // Track AI request
+    increment_ai_requests("suggestion");
+
     match payload.0.validate() {
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());
@@ -57,7 +61,9 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
         }
         Err(errors) => {
             let error_strings: Vec<String> = errors
-                .field_errors().values().flat_map(|errs| {
+                .field_errors()
+                .values()
+                .flat_map(|errs| {
                     errs.iter()
                         .map(|err| err.message.clone().unwrap_or_default().to_string())
                 })
@@ -87,6 +93,9 @@ pub async fn get_ai_suggestion(payload: Json<AiSuggestionRequest>) -> HttpRespon
 )]
 #[post("/analyze")]
 pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpResponse {
+    // Track AI request
+    increment_ai_requests("analysis");
+
     match payload.0.validate() {
         Ok(_) => {
             let engine_path = env::var("ENGINE_PATH").unwrap_or_else(|_| "stockfish".to_string());
@@ -114,7 +123,9 @@ pub async fn analyze_position(payload: Json<PositionAnalysisRequest>) -> HttpRes
         }
         Err(errors) => {
             let error_strings: Vec<String> = errors
-                .field_errors().values().flat_map(|errs| {
+                .field_errors()
+                .values()
+                .flat_map(|errs| {
                     errs.iter()
                         .map(|err| err.message.clone().unwrap_or_default().to_string())
                 })

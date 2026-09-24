@@ -8,18 +8,37 @@ from gpu_worker.anomaly import (
     BotFarmFinding,
     BotFarmReport,
 )
-from gpu_worker.batch import BatchAnalyzer
+from gpu_worker.batch import (
+    BatchEvaluator,
+    FENTokenizer,
+    TensorEvaluationCache,
+    fen_hash,
+)
 from gpu_worker.config import EngineBackend, GPUConfig, WorkerConfig
 from gpu_worker.elo_middleware import EloAnalysisRequest, EloScalingMiddleware
-from gpu_worker.elo_scaling import EngineParams, elo_to_engine_params
+from gpu_worker.elo_scaling import (
+    CandidateMove,
+    DynamicEloController,
+    DynamicScalingConfig,
+    DynamicScalingRegistry,
+    EngineParams,
+    GameMode,
+    ScalingDecision,
+    ScalingState,
+    elo_to_engine_params,
+)
 from gpu_worker.models import (
     AnalysisRequest,
     AnalysisResult,
     WorkerInfo,
     WorkerStatus,
 )
-from gpu_worker.pool import WorkerPool
+from gpu_worker.nl_agent import BlunderCoach, BlunderExplanation, explain_blunder
+from gpu_worker.nl_intent_parser import MoveGuardrail
+from gpu_worker.pool import ConsensusResult, EnsembleEvaluator
 from gpu_worker.resource_monitor import ResourceMonitor
+from gpu_worker.tactics import MotifDetection, TacticalMotif, TacticalPatternExtractor
+from gpu_worker.training_pipeline import LoRAModel, LoRATrainingPipeline
 from gpu_worker.uci_bridge import AsyncUciBridge, UciBestMove, UciBridgeError, UciInfo
 from gpu_worker.worker import GPUAnalysisWorker
 
@@ -28,17 +47,38 @@ __all__ = [
     "AnalysisResult",
     "AnomalyRiskLevel",
     "AsyncUciBridge",
-    "BatchAnalyzer",
+    "BatchEvaluator",
+    "BlunderCoach",
+    "BlunderExplanation",
     "BotFarmAnomalyDetector",
     "BotFarmDetectionConfig",
     "BotFarmEvent",
     "BotFarmFinding",
     "BotFarmReport",
+    "CandidateMove",
+    "ConsensusResult",
+    "DynamicEloController",
+    "DynamicScalingConfig",
+    "DynamicScalingRegistry",
     "EloAnalysisRequest",
     "EloScalingMiddleware",
+    "EnsembleEvaluator",
     "EngineBackend",
     "EngineParams",
+    "FENTokenizer",
+    "GameMode",
+    "LoRAModel",
+    "LoRATrainingPipeline",
+    "MotifDetection",
+    "MoveGuardrail",
+    "ScalingDecision",
+    "ScalingState",
+    "TacticalMotif",
+    "TacticalPatternExtractor",
+    "TensorEvaluationCache",
     "elo_to_engine_params",
+    "explain_blunder",
+    "fen_hash",
     "GPUAnalysisWorker",
     "GPUConfig",
     "ResourceMonitor",
@@ -47,6 +87,5 @@ __all__ = [
     "UciInfo",
     "WorkerConfig",
     "WorkerInfo",
-    "WorkerPool",
     "WorkerStatus",
 ]

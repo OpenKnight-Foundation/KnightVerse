@@ -17,6 +17,7 @@ class FakeBridge:
         self.started = False
         self.initialized = False
         self.positions: list[str] = []
+        self.options: dict[str, str | None] = {}
         self.quit_called = False
 
     async def start(self) -> None:
@@ -27,6 +28,12 @@ class FakeBridge:
 
     async def set_position(self, fen: str) -> None:
         self.positions.append(fen)
+
+    async def _set_option_if_supported(self, name: str, value: str | None) -> None:
+        self.options[name] = value
+
+    async def ensure_ready(self) -> None:
+        pass
 
     async def go(self, **_: object) -> tuple[UciBestMove, UciInfo]:
         return UciBestMove(best_move="e2e4"), UciInfo(

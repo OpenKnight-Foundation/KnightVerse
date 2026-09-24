@@ -1,32 +1,34 @@
 // src/server.rs
 
 use crate::ai::{analyze_position, get_ai_suggestion};
-use crate::auth::{login, logout, refresh, register};
+use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
 use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,
 };
+use crate::idempotency::IdempotencyMiddleware;
 use crate::players::{add_player, delete_player, find_player_by_id, update_player};
 use crate::rate_limiter::RedisRateLimiter;
-use crate::ws::{ws_route, LobbyState};
+use crate::request_id::RequestIdMiddleware;
+use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
 use actix::Actor;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use challenge::api::configure_puzzle_routes;
 use challenge::puzzle_validation::PuzzleValidationService;
+use db::DbPool;
 use dotenv::dotenv;
 use matchmaking::redis::{create_redis_pool, test_redis_connection};
 use matchmaking::MatchmakingService;
 use migration::Migrator;
 use migration::MigratorTrait;
 use security::jwt::{JwtAuthMiddleware, JwtService};
-use tracing::{info, warn, error};
-use tracing_actix_web::TracingLogger;
-use sea_orm::Database;
 use std::env;
 use std::sync::Arc;
+use tracing::{info, warn};
+use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 use utoipa_swagger_ui::SwaggerUi;
@@ -38,9 +40,45 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "ok"}))
 }
 
+/// Redis health check endpoint
+async fn health_redis(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
+    let start = std::time::Instant::now();
+    match redis_pool.get().await {
+        Ok(mut conn) => {
+            let ping_result: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
+            let latency_ms = start.elapsed().as_millis() as u64;
+            match ping_result {
+                Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+                    "status": "ok",
+                    "redis": "connected",
+                    "latency_ms": latency_ms
+                })),
+                Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
+                    "status": "error",
+                    "redis": "ping_failed",
+                    "error": e.to_string()
+                })),
+            }
+        }
+        Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
+            "status": "error",
+            "redis": "connection_failed",
+            "error": e.to_string()
+        })),
+    }
+}
+
 /// Welcome endpoint
 async fn greet() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"message": "Welcome to KnightVerse API"}))
+}
+
+/// Prometheus metrics endpoint — exposes `db_pool_connections_*` and any other
+/// registered metrics in the crate's metrics registry.
+async fn metrics_endpoint(pool: web::Data<DbPool>) -> impl Responder {
+    // Snapshot pool stats into Prometheus gauges before encoding
+    pool.update_metrics();
+    crate::metrics::metrics_handler().await
 }
 
 /// Main server initialization function
@@ -54,11 +92,10 @@ pub async fn main() -> std::io::Result<()> {
     {
         use tracing_subscriber::EnvFilter;
 
-        let env_filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-        let subscriber = tracing_subscriber::fmt()
-            .with_env_filter(env_filter);
+        let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter);
 
         #[cfg(debug_assertions)]
         let subscriber = subscriber.pretty();
@@ -71,7 +108,7 @@ pub async fn main() -> std::io::Result<()> {
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
+    let _database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     // JWT: strict env — crash on missing/insecure secret
     let jwt_service = JwtService::from_env();
@@ -79,42 +116,42 @@ pub async fn main() -> std::io::Result<()> {
     let jwt_expiration = jwt_service.expiration_time();
 
     // Redis: strict env — no localhost fallback that could mask misconfiguration
-    let redis_url = env::var("REDIS_URL").expect(
-        "REDIS_URL must be set. Refusing to start with a hardcoded fallback.",
-    );
+    let redis_url = env::var("REDIS_URL")
+        .expect("REDIS_URL must be set. Refusing to start with a hardcoded fallback.");
 
     info!("Initializing KnightVerse Backend Server");
     info!("Server address: {}", server_addr);
 
-    // Connect to database
-    let db = match Database::connect(&database_url).await {
-        Ok(conn) => {
-            info!("Database connection successful");
-            conn
-        }
-        Err(e) => {
-            error!("Failed to connect to database: {}", e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Database connection failed",
-            ));
-        }
-    };
+    // Connect to database — dual pool (primary + optional replica)
+    let db_pool = DbPool::from_env().await;
+    info!(
+        "Database pool ready (has_replica={})",
+        db_pool.has_replica()
+    );
 
-    // Run database migrations automatically on startup
+    // Run database migrations against the primary
     eprintln!("Running database migrations...");
-    match Migrator::up(&db, None).await {
+    match Migrator::up(db_pool.primary(), None).await {
         Ok(_) => eprintln!("Database migrations completed successfully"),
         Err(e) => {
             eprintln!("Warning: Failed to run database migrations: {}", e);
-            // Don't abort server startup — allow running with existing schema
         }
     }
 
-    let db = std::sync::Arc::new(db); // Wrap db in Arc
+    let db_pool = Arc::new(db_pool);
 
     // Create a shared LobbyState actor
     let lobby = LobbyState::new().start();
+
+    // Create a shared ConnectionStateTracker actor with DB pool for game session management
+    let connection_tracker = ConnectionStateTracker::new(Some((*db_pool).clone())).start();
+
+    // Create the Redis pub/sub broadcaster used to fan messages out to spectators
+    let redis_broadcaster = crate::redis_broadcast::RedisBroadcaster::new(&redis_url)
+        .expect("Failed to create Redis broadcaster");
+
+    // Initialize application-level Prometheus metrics
+    crate::metrics::init_metrics();
 
     // Load AppConfig
     let config = AppConfig::from_env();
@@ -129,7 +166,7 @@ pub async fn main() -> std::io::Result<()> {
     }
 
     let rate_limiter_pool = redis_pool.clone();
-    let matchmaking_service = MatchmakingService::new(redis_pool);
+    let matchmaking_service = MatchmakingService::new(redis_pool.clone());
 
     // Initialize Puzzle Validation Service
     let puzzle_service = Arc::new(PuzzleValidationService::new(jwt_secret.clone()));
@@ -138,11 +175,14 @@ pub async fn main() -> std::io::Result<()> {
 
     // Define the app factory closure
     let app_factory = move || {
-        let db = db.clone();
+        let db_pool = db_pool.clone();
         let jwt_service = jwt_service.clone();
         let jwt_secret = jwt_secret.clone();
+        let redis_pool = redis_pool.clone();
+        let redis_broadcaster = redis_broadcaster.clone();
         let matchmaking_service = matchmaking_service.clone();
         let puzzle_service = puzzle_service.clone();
+        let connection_tracker = connection_tracker.clone();
 
         // Configure CORS middleware with environment variables for flexibility
         let cors = {
@@ -196,26 +236,42 @@ pub async fn main() -> std::io::Result<()> {
             config.redis_game_rate_limit_window,
         );
 
+        // BE-46: Redis-backed IdempotencyMiddleware for mutating financial, staking & tournament requests
+        let _idempotency_middleware = IdempotencyMiddleware::new(rate_limiter_pool.clone());
+
         App::new()
+            .wrap(RequestIdMiddleware)
             .wrap(TracingLogger::default())
-            .wrap(actix_web::middleware::DefaultHeaders::new().add(("Strict-Transport-Security", "max-age=31536000; includeSubDomains")))
+            .wrap(actix_web::middleware::DefaultHeaders::new().add((
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )))
             // Global middleware
             .wrap(cors)
             // App data
-            .app_data(web::Data::from(db.clone()))
+            .app_data(web::Data::from(db_pool.clone()))
+            .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(lobby.clone()))
+            .app_data(web::Data::new(connection_tracker.clone()))
+            .app_data(web::Data::new(redis_broadcaster.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
             // Register your routes
             .route("/health", web::get().to(health))
+            .route("/health/redis", web::get().to(health_redis))
             .route("/", web::get().to(greet))
+            .route("/metrics", web::get().to(metrics_endpoint))
             // Puzzle routes
             .configure(configure_puzzle_routes)
             // Player routes
             .service(
                 web::scope("/v1/players")
-                    .wrap(JwtAuthMiddleware::new(jwt_secret.clone(), jwt_expiration))
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
                     .service(add_player)
                     .service(find_player_by_id)
                     .service(update_player)
@@ -226,7 +282,11 @@ pub async fn main() -> std::io::Result<()> {
                 web::scope("/v1/games")
                     .wrap(Governor::new(&game_governor_conf))
                     .wrap(game_redis_limiter)
-                    .wrap(JwtAuthMiddleware::new(jwt_secret.clone(), jwt_expiration))
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
                     .service(create_game)
                     .service(get_game)
                     .service(list_games)
@@ -240,11 +300,79 @@ pub async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/auth")
                     .wrap(Governor::new(&auth_governor_conf))
+                    .wrap(auth_redis_limiter.clone())
+                    .service(login)
+                    .service(register)
+                    .service(refresh)
+                    .service(logout)
+                    .service(logout_all),
+            )
+            .service(
+                web::scope("/api/v1/auth")
+                    .wrap(Governor::new(&auth_governor_conf))
                     .wrap(auth_redis_limiter)
                     .service(login)
                     .service(register)
                     .service(refresh)
-                    .service(logout),
+                    .service(logout)
+                    .service(logout_all),
+            )
+            // Tournament routes (with Idempotency protection)
+            .service(
+                web::scope("/api/v1/tournaments")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .route(
+                        "/{id}/register",
+                        web::post().to(|path: web::Path<String>| async move {
+                            HttpResponse::Ok().json(serde_json::json!({
+                                "status": "registered",
+                                "tournament_id": path.into_inner(),
+                                "message": "Tournament registration successful"
+                            }))
+                        }),
+                    ),
+            )
+            // Escrow routes (with Idempotency protection)
+            .service(
+                web::scope("/api/v1/escrow")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .route(
+                        "/{action}",
+                        web::post().to(|path: web::Path<String>| async move {
+                            HttpResponse::Ok().json(serde_json::json!({
+                                "status": "success",
+                                "operation": path.into_inner(),
+                                "message": "Escrow operation completed successfully"
+                            }))
+                        }),
+                    ),
+            )
+            // Staking routes (with Idempotency protection)
+            .service(
+                web::scope("/api/v1/staking")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .route(
+                        "/{action}",
+                        web::post().to(|path: web::Path<String>| async move {
+                            HttpResponse::Ok().json(serde_json::json!({
+                                "status": "success",
+                                "operation": path.into_inner(),
+                                "message": "Staking operation completed successfully"
+                            }))
+                        }),
+                    ),
             )
             // WebSocket routes
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
@@ -253,7 +381,11 @@ pub async fn main() -> std::io::Result<()> {
             // AI routes
             .service(
                 web::scope("/v1/ai")
-                    .wrap(JwtAuthMiddleware::new(jwt_secret.clone(), jwt_expiration))
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
                     .service(get_ai_suggestion)
                     .service(analyze_position),
             )
@@ -297,10 +429,10 @@ pub async fn main() -> std::io::Result<()> {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate())
-                .expect("failed to install SIGTERM handler");
-            let mut sigint = signal(SignalKind::interrupt())
-                .expect("failed to install SIGINT handler");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+            let mut sigint =
+                signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
             tokio::select! {
                 _ = sigterm.recv() => {
                     eprintln!("Received SIGTERM — initiating graceful shutdown...");

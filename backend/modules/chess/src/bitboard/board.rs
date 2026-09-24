@@ -542,7 +542,6 @@ impl Board {
         if piece_opt.is_none() {
             return None;
         }
-        
         let piece = piece_opt.unwrap();
         let piece_color = piece.color;
         

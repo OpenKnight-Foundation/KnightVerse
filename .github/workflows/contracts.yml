@@ -16,7 +16,7 @@ jobs:
   test:
     name: Test Contracts
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,33 +27,27 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-contracts-cargo-${{ hashFiles('contracts/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-git-
+            ${{ runner.os }}-contracts-cargo-
 
       - name: Cache cargo build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: contracts/target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-contracts-build-${{ hashFiles('contracts/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-build-target-
+            ${{ runner.os }}-contracts-build-
 
-      - name: Run tests
+      - name: Run contract tests
         working-directory: contracts
         run: cargo test --verbose
 
-      - name: Build contracts
+      - name: Build contracts (WASM)
         working-directory: contracts
-        run: cargo build --release --target wasm32-unknown-unknown --verbose
+        run: cargo build --release --target wasm32-unknown-unknown

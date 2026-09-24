@@ -1,0 +1,214 @@
+name: Agent Engines CI
+
+on:
+  pull_request:
+    paths:
+      - 'agent-engines/**'
+      - '.github/workflows/agent-engines.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent-engines/**'
+      - '.github/workflows/agent-engines.yml'
+
+jobs:
+  test:
+    name: Test Agent Engines (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('agent-engines/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run linting with ruff
+        working-directory: agent-engines
+        run: |
+          pip install ruff
+          ruff check gpu_worker/ || true
+          ruff format gpu_worker/ --check || true
+        continue-on-error: true
+
+      - name: Run unit tests
+        working-directory: agent-engines
+        run: python -m pytest tests/ -v --tb=short --durations=10 -x
+        env:
+          PYTHONPATH: .
+          REDIS_URL: redis://localhost:6379
+
+      - name: Generate coverage report
+        working-directory: agent-engines
+        run: |
+          pip install pytest-cov
+          python -m pytest tests/ --cov=gpu_worker --cov-report=xml --cov-report=term-missing -q
+        env:
+          PYTHONPATH: .
+          REDIS_URL: redis://localhost:6379
+        continue-on-error: true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: agent-engines/coverage.xml
+          flags: agent-engines
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  test-no-redis:
+    name: Test Graceful Redis Fallback
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-3.11-no-redis-${{ hashFiles('agent-engines/pyproject.toml') }}
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Test graceful Redis failure handling
+        working-directory: agent-engines
+        run: |
+          python -c "
+          import asyncio
+          from gpu_worker.resource_optimizer import AutoscalingConfig, AutoscalingDaemon
+
+          async def test_no_redis():
+              config = AutoscalingConfig()
+              daemon = AutoscalingDaemon(config)
+              queue_metrics = await daemon._get_queue_metrics()
+              assert 'error' in queue_metrics or 'queue_length' in queue_metrics
+              print('Graceful Redis failure handling works')
+
+          asyncio.run(test_no_redis())
+          "
+        env:
+          PYTHONPATH: .
+
+  validate-dependencies:
+    name: Validate Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate pyproject.toml and dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install tomli
+          python -c "
+          import sys, tomli
+          with open('pyproject.toml', 'rb') as f:
+              config = tomli.load(f)
+          deps = config.get('project', {}).get('dependencies', [])
+          required = ['redis', 'prometheus-client', 'psutil', 'pydantic']
+          for req in required:
+              found = any(req in d for d in deps)
+              status = 'OK' if found else 'MISSING'
+              print(f'[{status}] {req}')
+              if not found:
+                  sys.exit(1)
+          print('All required dependencies present')
+          "
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run bandit security analysis
+        working-directory: agent-engines
+        run: |
+          pip install bandit
+          bandit -r gpu_worker/ -ll -q || true
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, test-no-redis, validate-dependencies]
+    if: always()
+
+    steps:
+      - name: Generate CI Summary
+        run: |
+          echo "## Agent Engines CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Redis Fallback | ${{ needs.test-no-redis.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Validation | ${{ needs.validate-dependencies.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

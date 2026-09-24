@@ -1,0 +1,7 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Staunton Classic Black King - Traditional tournament design -->
+  <path d="M50 5L50 20M40 12L60 12" stroke="#222" stroke-width="4" stroke-linecap="round"/>
+  <path d="M35 20L65 20L70 35L75 40L72 50L78 60L65 90H35L22 60L28 50L25 40L30 35L35 20Z" fill="#222" stroke="#111" stroke-width="2"/>
+  <circle cx="50" cy="50" r="12" fill="#333" stroke="#111" stroke-width="1"/>
+  <path d="M40 70L50 85L60 70H40Z" fill="#111"/>
+</svg>

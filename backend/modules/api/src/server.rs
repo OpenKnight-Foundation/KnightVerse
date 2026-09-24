@@ -8,7 +8,7 @@ use crate::games::{
     make_move,
 };
 use crate::idempotency::IdempotencyMiddleware;
-use crate::players::{add_player, delete_player, find_player_by_id, update_player};
+use crate::players::{add_player, delete_player, export_player_data, find_player_by_id, update_player};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -272,6 +272,7 @@ pub async fn main() -> std::io::Result<()> {
                         jwt_expiration,
                         Some(redis_pool.clone()),
                     ))
+                    .service(export_player_data)
                     .service(add_player)
                     .service(find_player_by_id)
                     .service(update_player)

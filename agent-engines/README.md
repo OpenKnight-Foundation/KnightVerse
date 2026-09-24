@@ -432,10 +432,35 @@ Configure GitHub environments:
 - **testnet**: Requires approval for main branch deployments
 - **futurenet**: Manual trigger only
 
+## Implementation Status
+
+The following table documents the current implementation status of each major subsystem in `agent-engines`. Subsystems marked as **Reference/Simulated** are not production-functional and have tracking issues for their full implementation.
+
+| Subsystem | Status | Description | Tracking Issue |
+|-----------|--------|-------------|----------------|
+| Natural Language Agent | **Production-Real** | Intent parsing, entity extraction, and response generation fully implemented | — |
+| Stockfish WASM Bridge | **Reference/Simulated** | WASM module loading, instance creation, and analysis are simulated (no real WASM execution) | [AI-51](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1250) |
+| Soroban CI/CD Deployment Pipeline | **Reference/Simulated** | All 7 pipeline stages (validate/build/test/optimize/deploy/verify/rollback) are simulated | [AI-55](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1254) |
+| Resource Optimizer | **Production-Real** | CPU/memory allocation, tier-based resource management, gas cost estimation | — |
+| Deployment Pipeline Orchestrator | **Reference/Simulated** | Pipeline orchestration logic exists but relies on simulated deployment pipeline | [AI-55](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1254) |
+| Dynamic Autoscaling Daemon | **Production-Real** | Queue monitoring, scaling decisions, Prometheus metrics; GPU capacity now queries real NVML | [AI-46](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1245), [AI-48](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1247) |
+| Training Pipeline (PEFT Fine-tuning) | **Reference/Simulated** | HuggingFace PEFT integration not implemented; gradient update is approximated | [AI-54](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1253), [AI-53](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1252) |
+| Decentralized Orchestrator | **Reference/Simulated** | Remote dispatch returns hardcoded dummy move; no real network calls | [AI-52](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1251) |
+| Stockfish WASM Engine | **Reference/Simulated** | Full initialization and analysis simulated; no real Stockfish WASM execution | [AI-51](https://github.com/OpenKnight-Foundation/KnightVerse/issues/1250) |
+| GPU Worker Pool & UCI Bridge | **Production-Real** | Async UCI subprocess bridge, worker lifecycle, least-loaded dispatch | — |
+| Batch Analyzer | **Production-Real** | Time- and size-based request coalescing | — |
+| Bot-Farm Anomaly Detection | **Production-Real** | Passive telemetry scoring for anomaly detection | — |
+
+**Legend:**
+- **Production-Real**: Fully implemented and tested, suitable for production use
+- **Reference/Simulated**: Placeholder implementation with simulated behavior; not production-ready
+
+*This table is updated as each tracking issue is resolved. When a subsystem becomes Production-Real, its row is updated and the tracking issue link is removed.*
+
 ## Notes
 
 - The UCI bridge works with any UCI-compatible engine and only applies `setoption` calls for engine options reported during the `uci` handshake.
-- GPU monitoring gracefully degrades to empty metrics when NVML or `nvidia-smi` are unavailable.
+- GPU monitoring gracefully degrades to empty metrics when NVML or `nvidia-smi` are unavailable (fail-closed for autoscaling).
 - `BatchAnalyzer` improves throughput for bursty workloads such as review pipelines or offline game processing.
 
 ## Resource Optimization & Orchestration

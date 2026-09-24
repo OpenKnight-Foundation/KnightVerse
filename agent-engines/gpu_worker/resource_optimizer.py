@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import psutil
@@ -17,10 +18,29 @@ try:
 except ImportError:
     redis = None
 
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    pynvml = None
+    PYNVML_AVAILABLE = False
+
 import prometheus_client
 from prometheus_client import Counter, Gauge, Histogram
 
 logger = logging.getLogger("KnightVerse.ResourceOptimizer")
+
+# Initialize NVML if available
+_NVML_INITIALIZED = False
+def _init_nvml():
+    global _NVML_INITIALIZED
+    if PYNVML_AVAILABLE and not _NVML_INITIALIZED:
+        try:
+            pynvml.nvmlInit()
+            _NVML_INITIALIZED = True
+            logger.info("NVML initialized successfully for GPU monitoring")
+        except Exception as e:
+            logger.warning(f"Failed to initialize NVML: {e}")
 
 
 class ResourceTier(Enum):
@@ -74,6 +94,8 @@ class AutoscalingConfig:
     redis_queue_key: str = "ai_task_queue"
     monitoring_interval_seconds: float = 10.0
     gpu_memory_threshold_percent: float = 90.0
+    gpu_memory_per_worker_mb: int = 1024  # Minimum GPU memory required per worker
+    graceful_shutdown_timeout_seconds: int = 300  # 5 minutes to wait for in-flight tasks
 
 
 @dataclass
@@ -85,6 +107,9 @@ class WorkerProcess:
     last_active: float
     is_busy: bool = False
     process_handle: Optional[Process] = None
+    current_task_started_at: Optional[float] = None
+    current_task_id: Optional[str] = None
+    processing_durations: List[float] = field(default_factory=list)
 
 
 # Prometheus Metrics for Autoscaling
@@ -93,6 +118,10 @@ QUEUE_LENGTH = Gauge('ai_autoscaler_queue_length', 'Length of AI task queue')
 QUEUE_LATENCY = Histogram('ai_autoscaler_queue_latency_seconds', 'Queue latency in seconds')
 SCALING_EVENTS = Counter('ai_autoscaler_scaling_events_total', 'Total scaling events', ['event_type'])
 GPU_MEMORY_UTILIZATION = Gauge('ai_autoscaler_gpu_memory_utilization_percent', 'GPU memory utilization', ['gpu_device'])
+
+# Additional metrics for worker processing time tracking
+WORKER_PROCESSING_DURATION = Histogram('ai_worker_processing_duration_seconds', 'Worker processing duration', ['worker_id'])
+WORKER_TASKS_COMPLETED = Counter('ai_worker_tasks_completed_total', 'Total tasks completed by worker', ['worker_id'])
 
 
 class AutoscalingDaemon:
@@ -216,34 +245,44 @@ class AutoscalingDaemon:
         try:
             # Get queue length
             queue_length = self._redis_client.llen(self.config.redis_queue_key)
-            
-            # Estimate average wait time by checking queue timestamps
-            # This is a simplified implementation - in production you might want more sophisticated tracking
+
+            # Calculate average wait time using real enqueue timestamps from queue items
             avg_wait_time_ms = 0.0
             if queue_length > 0:
-                # Sample a few items to estimate wait time
-                sample_size = min(5, queue_length)
+                # Sample items from the queue to estimate wait time
+                sample_size = min(10, queue_length)
                 current_time = time.time()
                 total_wait = 0.0
-                
+                valid_samples = 0
+
                 for i in range(sample_size):
                     item = self._redis_client.lindex(self.config.redis_queue_key, i)
                     if item:
                         try:
-                            # Assume items have timestamp metadata (implement based on your queue format)
-                            # For now, use a simplified approach
-                            total_wait += (current_time - (current_time - (i * 0.1)))  # Mock calculation
-                        except Exception:
+                            # Parse the queue item - expect JSON with 'enqueued_at' timestamp
+                            task_data = json.loads(item)
+                            enqueued_at = task_data.get('enqueued_at')
+                            if enqueued_at:
+                                wait_time = current_time - float(enqueued_at)
+                                total_wait += wait_time
+                                valid_samples += 1
+                            else:
+                                # Fallback: if no timestamp, skip this item
+                                logger.debug(f"Queue item at index {i} missing enqueued_at timestamp")
+                        except (json.JSONDecodeError, ValueError, TypeError) as e:
+                            logger.debug(f"Failed to parse queue item at index {i}: {e}")
                             continue
-                            
-                if sample_size > 0:
-                    avg_wait_time_ms = (total_wait / sample_size) * 1000
-            
+
+                if valid_samples > 0:
+                    avg_wait_time_ms = (total_wait / valid_samples) * 1000
+                else:
+                    logger.debug("No queue items with valid enqueued_at timestamps found")
+
             return {
                 "queue_length": queue_length,
                 "avg_wait_time_ms": avg_wait_time_ms
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to get queue metrics: {e}")
             return {"queue_length": 0, "avg_wait_time_ms": 0.0, "error": str(e)}
@@ -255,14 +294,37 @@ class AutoscalingDaemon:
         memory = psutil.virtual_memory()
         memory_used_mb = memory.used / (1024 * 1024)
         memory_available_mb = memory.available / (1024 * 1024)
-        
-        # Get GPU metrics (simplified - would need proper GPU monitoring)
+
+        # Get GPU metrics using NVML if available
         gpu_utilization = 0.0
         gpu_memory_used_mb = 0.0
         
+        if PYNVML_AVAILABLE:
+            _init_nvml()
+            if _NVML_INITIALIZED:
+                try:
+                    device_count = pynvml.nvmlDeviceGetCount()
+                    total_gpu_memory_used = 0
+                    total_gpu_utilization = 0
+                    
+                    for i in range(device_count):
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                        mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                        total_gpu_memory_used += mem_info.used / (1024 * 1024)
+                        
+                        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                        total_gpu_utilization += util.gpu
+                    
+                    if device_count > 0:
+                        gpu_memory_used_mb = total_gpu_memory_used
+                        gpu_utilization = total_gpu_utilization / device_count
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to query GPU metrics via NVML: {e}")
+
         # Count active workers
         active_workers = len([w for w in self._workers.values() if w.is_busy])
-        
+
         return ResourceMetrics(
             cpu_percent=cpu_percent,
             memory_used_mb=memory_used_mb,
@@ -377,13 +439,41 @@ class AutoscalingDaemon:
     async def _has_available_gpu_capacity(self) -> bool:
         """Check if there's available GPU memory capacity for new workers."""
         try:
-            # This would need proper GPU monitoring implementation
-            # For now, return True if we're under the memory threshold
-            # In production, you'd check actual GPU memory usage per device
-            return True
+            if not PYNVML_AVAILABLE:
+                logger.warning("pynvml not available, cannot check GPU capacity - refusing scale-up (fail closed)")
+                return False
+            
+            _init_nvml()
+            if not _NVML_INITIALIZED:
+                logger.warning("NVML not initialized, cannot check GPU capacity - refusing scale-up (fail closed)")
+                return False
+            
+            # Check each GPU device for available memory
+            device_count = pynvml.nvmlDeviceGetCount()
+            for i in range(device_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                
+                total_memory_mb = mem_info.total / (1024 * 1024)
+                used_memory_mb = mem_info.used / (1024 * 1024)
+                free_memory_mb = mem_info.free / (1024 * 1024)
+                usage_percent = (used_memory_mb / total_memory_mb) * 100
+                
+                # Check if this GPU has enough free memory for a new worker
+                # We need at least the configured GPU memory per worker plus some buffer
+                required_memory_mb = getattr(self.config, 'gpu_memory_per_worker_mb', 1024)
+                if free_memory_mb >= required_memory_mb and usage_percent < self.config.gpu_memory_threshold_percent:
+                    logger.debug(f"GPU {i} has capacity: {free_memory_mb:.0f}MB free, {usage_percent:.1f}% used")
+                    return True
+                else:
+                    logger.debug(f"GPU {i} at capacity: {free_memory_mb:.0f}MB free, {usage_percent:.1f}% used")
+            
+            logger.warning("No GPU devices have available capacity for new worker")
+            return False
+            
         except Exception as e:
             logger.error(f"Error checking GPU capacity: {e}")
-            return False
+            return False  # Fail closed - refuse to scale up if we can't verify capacity
             
     async def _find_available_gpu_device(self) -> Optional[int]:
         """Find an available GPU device for new worker."""
@@ -412,10 +502,10 @@ class AutoscalingDaemon:
     async def _create_worker(self, gpu_device_id: int) -> Optional[WorkerProcess]:
         """Create a new worker process."""
         try:
-            # This would spawn an actual worker process
-            # For now, create a mock worker process
-            current_time = time.time()
+            # Spawn an actual worker process using the worker factory
             process_handle = self.worker_factory(gpu_device_id)
+            
+            current_time = time.time()
             
             worker = WorkerProcess(
                 process_id=len(self._workers) + 1000,  # Simple ID generation
@@ -433,10 +523,47 @@ class AutoscalingDaemon:
             return None
             
     def _default_worker_factory(self, gpu_device_id: int) -> Optional[Process]:
-        """Default factory for creating worker processes."""
-        # This is a placeholder - in production you'd spawn actual worker processes
-        # Example: return Process(target=worker_main, args=(gpu_device_id,))
-        return None
+        """Default factory for creating worker processes.
+        
+        Spawns an actual GPU worker subprocess that can process analysis requests.
+        The worker_main function should be defined in the caller's module or imported.
+        """
+        try:
+            # Import here to avoid circular imports
+            from gpu_worker.worker import GPUWorker
+            from gpu_worker.config import WorkerConfig, EngineBackend, GPUConfig
+            
+            # Create a worker config for this GPU device
+            config = WorkerConfig(
+                engine_backend=EngineBackend.LC0,
+                engine_path="/usr/local/bin/lc0",  # Should be configurable
+                gpu=GPUConfig(device_id=gpu_device_id, max_batch_size=32, memory_limit_mb=2048, backend="cudnn"),
+                default_depth=22,
+                default_time_limit_ms=3000,
+                threads=2,
+                hash_size_mb=512,
+            )
+            
+            # Create the worker instance
+            worker = GPUWorker(config)
+            
+            # Return a Process that runs the worker's main loop
+            return Process(target=self._run_worker, args=(worker,), daemon=True)
+            
+        except ImportError:
+            logger.warning("GPUWorker not available, cannot spawn real worker")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to create real worker process: {e}")
+            return None
+
+    def _run_worker(self, worker):
+        """Run the worker's main processing loop in a separate process."""
+        import asyncio
+        asyncio.run(worker.start())
+        # Keep the process alive to handle requests
+        # The worker will process tasks from its internal queue
+        asyncio.get_event_loop().run_forever()
         
     async def _terminate_worker(self, process_id: int, graceful: bool = True) -> None:
         """Terminate a worker process."""
@@ -448,11 +575,19 @@ class AutoscalingDaemon:
         
         try:
             if graceful and worker.is_busy:
-                logger.info(f"Worker {process_id} is busy, waiting for completion before termination")
-                # In production, you'd wait for the worker to finish its current task
-                # For now, just mark as not busy after a short delay
-                await asyncio.sleep(1.0)
+                logger.info(f"Worker {process_id} is busy, waiting for current task to complete before termination")
+                # Wait for the current task to complete (up to a configurable timeout)
+                timeout = getattr(self.config, 'graceful_shutdown_timeout_seconds', 300)
+                wait_start = time.time()
                 
+                while worker.is_busy and (time.time() - wait_start) < timeout:
+                    await asyncio.sleep(1.0)
+                
+                if worker.is_busy:
+                    logger.warning(f"Worker {process_id} did not complete task within {timeout}s, forcing termination")
+                else:
+                    logger.info(f"Worker {process_id} completed task gracefully")
+            
             # Terminate the process
             if worker.process_handle:
                 worker.process_handle.terminate()

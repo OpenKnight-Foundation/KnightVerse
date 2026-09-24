@@ -48,3 +48,35 @@ def run_round_robin(bot_names: list[str], games_per_pair: int = 1) -> dict[str, 
                 results[b].draws += 1
 
     return results
+
+
+if __name__ == "__main__":
+    import json
+    import time
+    
+    bots = ["Stockfish-16", "LC0-BT4", "Maia-1900", "Random-Bot"]
+    results = run_round_robin(bots, games_per_pair=2)
+    
+    print("\n--- Tournament Results ---")
+    for name, result in results.items():
+        total = result.wins + result.draws + result.losses
+        win_rate = (result.wins / total * 100) if total > 0 else 0
+        print(f"{name}: {result.wins}W {result.draws}D {result.losses}L (Win Rate: {win_rate:.1f}%)")
+    
+    # Output results for CI artifact
+    with open("tournament_results.json", "w") as f:
+        json.dump({
+            "timestamp": time.time(),
+            "bots": bots,
+            "games_per_pair": 2,
+            "results": {
+                name: {
+                    "elo": result.elo,
+                    "wins": result.wins,
+                    "draws": result.draws,
+                    "losses": result.losses,
+                    "win_rate": (result.wins / (result.wins + result.draws + result.losses) * 100) if (result.wins + result.draws + result.losses) > 0 else 0
+                }
+                for name, result in results.items()
+            }
+        }, f, indent=2)

@@ -121,7 +121,7 @@ This starts PostgreSQL, backend, frontend, and (optionally) a local Soroban quic
 ## 🏁 Contributor Roadmap (SCF Grant Readiness)
 We have identified **150 independent tasks** across the frontend, backend, contracts, and AI engine to make KnightVerse a premier platform for the Stellar ecosystem.
 
-- [View the Grant Readiness Task List](./docs/scf_grant_readiness_issues.md)
+- View the Grant Readiness Task List
 - **Contributors**: Please pick any open issue labeled `contribution-ready`.
 - **Status**: Preparing for Stellar Community Fund (SCF) submission.
 

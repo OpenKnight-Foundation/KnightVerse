@@ -47,8 +47,8 @@ export default function PlayGameEngine() {
   const router = useRouter();
   const gameId = params.slug as string;
 
-  const [game] = useState(new Chess());
-  const [position, setPosition] = useState("start");
+  const [game] = useState(new Chess(fen));
+  const [position, setPosition] = useState(fen || "start");
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [whiteTime, setWhiteTime] = useState(600);
   const [blackTime, setBlackTime] = useState(600);
@@ -56,7 +56,9 @@ export default function PlayGameEngine() {
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
-  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
+  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
+    "white",
+  );
   const isMobile = useIsMobile();
   const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
 
@@ -149,7 +151,14 @@ export default function PlayGameEngine() {
     } catch {
       // illegal move from server — ignore
     }
-  }, [lastOpponentMove, game, checkGameStatus, recordCheatMove, playerColor, announceMove]);
+  }, [
+    lastOpponentMove,
+    game,
+    checkGameStatus,
+    recordCheatMove,
+    playerColor,
+    announceMove,
+  ]);
 
   const isMyTurn =
     socketStatus === "connected" &&
@@ -199,7 +208,18 @@ export default function PlayGameEngine() {
         return true;
       } catch {
         return false;
-      }    }, [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor, announceMove],
+      }
+    },
+    [
+      isMyTurn,
+      game,
+      gameStatus,
+      sendMove,
+      checkGameStatus,
+      recordCheatMove,
+      playerColor,
+      announceMove,
+    ],
   );
 
   const handleSanMove = useCallback(
@@ -212,7 +232,11 @@ export default function PlayGameEngine() {
 
         requestAnimationFrame(() => setPosition(game.fen()));
         setMoveHistory((prev: string[]) => [...prev, move.san]);
-        sendMove({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+        sendMove({
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion ?? "q",
+        });
         recordCheatMove(
           move.san,
           move,
@@ -235,7 +259,16 @@ export default function PlayGameEngine() {
         return false;
       }
     },
-    [isMyTurn, game, gameStatus, sendMove, checkGameStatus, recordCheatMove, playerColor, announceMove],
+    [
+      isMyTurn,
+      game,
+      gameStatus,
+      sendMove,
+      checkGameStatus,
+      recordCheatMove,
+      playerColor,
+      announceMove,
+    ],
   );
 
   // Time alert announcements
@@ -319,7 +352,11 @@ export default function PlayGameEngine() {
   }
 
   return (
-    <div className="min-h-screen p-4 md:p-8" role="region" aria-label="Online Chess Game">
+    <div
+      className="min-h-screen p-4 md:p-8"
+      role="region"
+      aria-label="Online Chess Game"
+    >
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <button
@@ -347,8 +384,16 @@ export default function PlayGameEngine() {
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
-          <div className="w-full max-w-[600px] min-w-0 px-2 sm:px-0" role="region" aria-label="Chess board">
-            <div className="flex items-center justify-between mb-3 px-1" role="status" aria-label="Opponent info">
+          <div
+            className="w-full max-w-[600px] min-w-0 px-2 sm:px-0"
+            role="region"
+            aria-label="Chess board"
+          >
+            <div
+              className="flex items-center justify-between mb-3 px-1"
+              role="status"
+              aria-label="Opponent info"
+            >
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center">
                   <FaUser className="text-white text-xs" />
@@ -373,7 +418,13 @@ export default function PlayGameEngine() {
                 evaluation={null}
                 isVictory={gameStatus === "checkmate" && game.turn() === "w"}
                 isTactical={game.isCheck()}
-                commentary={game.isCheck() ? "Stay alert, the king is under pressure." : moveHistory.length ? "I am tracking the position and looking for the next idea." : "Let's find a strong opening move."}
+                commentary={
+                  game.isCheck()
+                    ? "Stay alert, the king is under pressure."
+                    : moveHistory.length
+                      ? "I am tracking the position and looking for the next idea."
+                      : "Let's find a strong opening move."
+                }
                 className="mb-3"
               />
               <ErrorBoundary componentName="Chessboard">
@@ -385,7 +436,11 @@ export default function PlayGameEngine() {
               </ErrorBoundary>
             </div>
 
-            <div className="flex items-center justify-between mt-3 px-1" role="status" aria-label="Your info">
+            <div
+              className="flex items-center justify-between mt-3 px-1"
+              role="status"
+              aria-label="Your info"
+            >
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-blue-600 flex items-center justify-center">
                   <FaUser className="text-white text-xs" />
@@ -395,9 +450,7 @@ export default function PlayGameEngine() {
                   <p className="text-xs text-gray-400 capitalize">
                     {playerColor}
                     {isMyTurn && (
-                      <span className="ml-2 text-emerald-400">
-                        (Your turn)
-                      </span>
+                      <span className="ml-2 text-emerald-400">(Your turn)</span>
                     )}
                   </p>
                 </div>
@@ -443,7 +496,11 @@ export default function PlayGameEngine() {
             </div>
           </div>
 
-          <div className="w-full lg:w-80 space-y-4" role="complementary" aria-label="Game controls">
+          <div
+            className="w-full lg:w-80 space-y-4"
+            role="complementary"
+            aria-label="Game controls"
+          >
             <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4 animate-fade-in">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-300">
@@ -458,7 +515,11 @@ export default function PlayGameEngine() {
               </div>
 
               {gameStatus !== "playing" && (
-                <div className="p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 mb-3 animate-scale-in" role="alert" aria-live="assertive">
+                <div
+                  className="p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 mb-3 animate-scale-in"
+                  role="alert"
+                  aria-live="assertive"
+                >
                   <p className="text-sm font-bold text-yellow-400">
                     {gameStatus === "checkmate" && "Checkmate!"}
                     {gameStatus === "stalemate" && "Stalemate!"}
@@ -469,7 +530,11 @@ export default function PlayGameEngine() {
               )}
 
               {game.isCheck() && gameStatus === "playing" && (
-                <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 mb-3 animate-scale-in" role="alert" aria-live="assertive">
+                <div
+                  className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 mb-3 animate-scale-in"
+                  role="alert"
+                  aria-live="assertive"
+                >
                   <p className="text-sm font-bold text-red-400">Check!</p>
                 </div>
               )}
@@ -479,10 +544,16 @@ export default function PlayGameEngine() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4" role="region" aria-label="Move history">
+            <div
+              className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4"
+              role="region"
+              aria-label="Move history"
+            >
               <button
                 className="flex items-center justify-between w-full text-left"
-                onClick={() => isMobile && setIsMoveHistoryOpen((prev) => !prev)}
+                onClick={() =>
+                  isMobile && setIsMoveHistoryOpen((prev) => !prev)
+                }
                 aria-expanded={isMobile ? isMoveHistoryOpen : true}
               >
                 <h3 className="text-sm font-semibold text-gray-300">Moves</h3>
@@ -490,11 +561,15 @@ export default function PlayGameEngine() {
                   {isMoveHistoryOpen ? "▲" : "▼"}
                 </span>
               </button>
-              <div className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}>
+              <div
+                className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}
+              >
                 {movePairs.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">
                     No moves yet.{" "}
-                    {isMyTurn ? "Your turn to move!" : "Waiting for opponent..."}
+                    {isMyTurn
+                      ? "Your turn to move!"
+                      : "Waiting for opponent..."}
                   </p>
                 ) : (
                   movePairs.map((pair, i) => (

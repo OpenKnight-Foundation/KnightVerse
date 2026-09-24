@@ -103,12 +103,17 @@ import PremoveArrow from "./PremoveArrow";
 
 interface ChessboardComponentProps {
   position: string;
-  onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean | Promise<boolean>;
+  onDrop: (params: {
+    sourceSquare: string;
+    targetSquare: string;
+  }) => boolean | Promise<boolean>;
   width?: number; // Added width as optional prop
   orientation?: "white" | "black"; // Board orientation: white = normal, black = flipped
   lastMove?: { from: string; to: string } | [string, string] | null;
   isMyTurn?: boolean;
   "aria-label"?: string;
+  legalMoves?: string[];
+  onSquareClick?: (square: string) => void;
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
@@ -219,7 +224,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         bK: CyberpunkBlackKing,
       },
     };
-    
+
     return pieceSetAssets[preferences.pieceSet] || pieceSetAssets.neo;
   }, [preferences.pieceSet]);
 
@@ -241,7 +246,8 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
             cursor: "grab",
             pointerEvents: "none",
             transform: `scale(${boardWidth < 400 ? 0.7 : 0.9})`,
-            transition: "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), filter 0.15s ease",
+            transition:
+              "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), filter 0.15s ease",
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
           }}
@@ -559,7 +565,10 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         ref={boardRef}
         className="chessboard-container w-full mx-auto relative"
         role="grid"
-        aria-label={ariaLabel || `Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
+        aria-label={
+          ariaLabel ||
+          `Chess board, ${orientation === "white" ? "White" : "Black"} perspective`
+        }
         aria-roledescription="chessboard"
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -626,16 +635,16 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               (s) => s.square === squareKey,
             );
 
-          // Compute actual board coordinates for the aria-label
-          const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
-          const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
-          const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
-          const isLastMoveSquare = Boolean(
-            lastMove &&
+            // Compute actual board coordinates for the aria-label
+            const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
+            const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
+            const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+            const isLastMoveSquare = Boolean(
+              lastMove &&
               (Array.isArray(lastMove)
                 ? lastMove.includes(squareLabel)
-                : lastMove.from === squareLabel || lastMove.to === squareLabel)
-          );
+                : lastMove.from === squareLabel || lastMove.to === squareLabel),
+            );
 
             const selectionHint = isSelected
               ? ". Piece selected. Press Space on another square to move, or Escape to deselect."
@@ -645,83 +654,86 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 ? ". Press Space to select this piece."
                 : "";
 
-          const selectedShadow = colors.selected
-            ? `inset 0 0 0 3px ${colors.selected}`
-            : "inset 0 0 0 3px rgba(0, 93, 173, 0.75)";
-          const lastMoveShadow = colors.lastMove
-            ? `inset 0 0 0 3px ${colors.lastMove}`
-            : "inset 0 0 0 2px rgba(245, 246, 130, 0.75)";
+            const selectedShadow = colors.selected
+              ? `inset 0 0 0 3px ${colors.selected}`
+              : "inset 0 0 0 3px rgba(0, 93, 173, 0.75)";
+            const lastMoveShadow = colors.lastMove
+              ? `inset 0 0 0 3px ${colors.lastMove}`
+              : "inset 0 0 0 2px rgba(245, 246, 130, 0.75)";
 
-          return (
-            <div
-              key={`${rowIndex}-${colIndex}`}
-              data-square={`${rowIndex}-${colIndex}`}
-              role="gridcell"
-              aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
-              aria-selected={isSelected}
-              aria-current={isFocused ? ("true" as const) : undefined}
-              tabIndex={0}
-              onFocus={() => setFocusedSquare(squareKey)}
-              onBlur={() =>
-                setFocusedSquare((prev) =>
-                  prev === squareKey ? null : prev,
-                )
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleSquareClick(rowIndex, colIndex);
+            return (
+              <div
+                key={`${rowIndex}-${colIndex}`}
+                data-square={`${rowIndex}-${colIndex}`}
+                role="gridcell"
+                aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
+                aria-selected={isSelected}
+                aria-current={isFocused ? ("true" as const) : undefined}
+                tabIndex={0}
+                onFocus={() => setFocusedSquare(squareKey)}
+                onBlur={() =>
+                  setFocusedSquare((prev) => (prev === squareKey ? null : prev))
                 }
-              }}
-              style={{
-                backgroundColor: highlightedSquare
-                  ? highlightedSquare.color
-                  : isLight
-                  ? colors.dark
-                  : colors.light,
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                cursor: piece ? "grab" : "default",
-                position: "relative",
-                outline: "none",
-                boxShadow: isSelected
-                  ? selectedShadow
-                  : isFocused
-                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
-                  : isLastMoveSquare
-                  ? lastMoveShadow
-                  : isHovered
-                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
-                  : "none",
-                transition: "background-color 0.2s ease, box-shadow 0.1s ease",
-              }}
-              onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
-              onClick={() => handleSquareClick(rowIndex, colIndex)}
-              onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
-              draggable={!!piece}
-              onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
-              onDragEnd={handleDragEnd}
-              onDrop={(e) => handleDrop(e, rowIndex, colIndex)}
-              onDragOver={handleDragOver}
-            >
-              {piece && (
-                <div
-                  style={{
-                    transition: "transform 0.2s ease-out",
-                    transform: `scale(${isSelected ? 1.1 : 1})`,
-                  }}
-                >
-                  {getPieceImage(piece)}
-                </div>
-              )}
-            </div>
-          );
-        }),
-      )}
-    </div>
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleSquareClick(rowIndex, colIndex);
+                    if (onSquareClick) onSquareClick(squareLabel);
+                  }
+                }}
+                style={{
+                  backgroundColor: highlightedSquare
+                    ? highlightedSquare.color
+                    : isLight
+                      ? colors.dark
+                      : colors.light,
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  cursor: piece ? "grab" : "default",
+                  position: "relative",
+                  outline: "none",
+                  boxShadow: isSelected
+                    ? selectedShadow
+                    : isFocused
+                      ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                      : isLastMoveSquare
+                        ? lastMoveShadow
+                        : isHovered
+                          ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
+                          : "none",
+                  transition:
+                    "background-color 0.2s ease, box-shadow 0.1s ease",
+                }}
+                onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
+                onClick={() => {
+                  handleSquareClick(rowIndex, colIndex);
+                  if (onSquareClick) onSquareClick(squareLabel);
+                }}
+                onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
+                draggable={!!piece}
+                onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, rowIndex, colIndex)}
+                onDragOver={handleDragOver}
+              >
+                {piece && (
+                  <div
+                    style={{
+                      transition: "transform 0.2s ease-out",
+                      transform: `scale(${isSelected ? 1.1 : 1})`,
+                    }}
+                  >
+                    {getPieceImage(piece)}
+                  </div>
+                )}
+              </div>
+            );
+          }),
+        )}
+      </div>
     </div>
   );
 };

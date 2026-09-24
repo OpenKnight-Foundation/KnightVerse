@@ -542,6 +542,7 @@ impl Board {
         if piece_opt.is_none() {
             return None;
         }
+
         let piece = piece_opt.unwrap();
         let piece_color = piece.color;
         
@@ -612,6 +613,12 @@ impl Board {
                 while current_file >= 0 && current_file < 8 && 
                       current_rank >= 0 && current_rank < 8 && 
                       (current_file != attacker_file as i8 || current_rank != attacker_rank as i8) {
+                while current_file >= 0
+                    && current_file < 8
+                    && current_rank >= 0
+                    && current_rank < 8
+                    && (current_file != attacker_file as i8 || current_rank != attacker_rank as i8)
+                {
                     let square = Square {
                         value: ((current_rank as u8) * 8 + (current_file as u8)) as u8,
                     };
@@ -664,6 +671,10 @@ impl Board {
                     
                     // Add all squares between king and attacker to the ray
                     while current_rank >= 0 && current_rank < 8 && current_rank != attacker_rank as i8 {
+                    while current_rank >= 0
+                        && current_rank < 8
+                        && current_rank != attacker_rank as i8
+                    {
                         let square = Square {
                             value: ((current_rank as u8) * 8 + (king_file as u8)) as u8,
                         };
@@ -678,6 +689,10 @@ impl Board {
                     
                     // Add all squares between king and attacker to the ray
                     while current_file >= 0 && current_file < 8 && current_file != attacker_file as i8 {
+                    while current_file >= 0
+                        && current_file < 8
+                        && current_file != attacker_file as i8
+                    {
                         let square = Square {
                             value: ((king_rank as u8) * 8 + (current_file as u8)) as u8,
                         };

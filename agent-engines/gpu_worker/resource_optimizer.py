@@ -74,6 +74,8 @@ class AutoscalingConfig:
     redis_queue_key: str = "ai_task_queue"
     monitoring_interval_seconds: float = 10.0
     gpu_memory_threshold_percent: float = 90.0
+    gpu_memory_per_worker_mb: int = 1024  # Minimum GPU memory required per worker
+    graceful_shutdown_timeout_seconds: int = 300  # 5 minutes to wait for in-flight tasks
 
 
 @dataclass
@@ -85,6 +87,9 @@ class WorkerProcess:
     last_active: float
     is_busy: bool = False
     process_handle: Optional[Process] = None
+    current_task_started_at: Optional[float] = None
+    current_task_id: Optional[str] = None
+    processing_durations: List[float] = field(default_factory=list)
 
 
 # Prometheus Metrics for Autoscaling
@@ -93,6 +98,10 @@ QUEUE_LENGTH = Gauge('ai_autoscaler_queue_length', 'Length of AI task queue')
 QUEUE_LATENCY = Histogram('ai_autoscaler_queue_latency_seconds', 'Queue latency in seconds')
 SCALING_EVENTS = Counter('ai_autoscaler_scaling_events_total', 'Total scaling events', ['event_type'])
 GPU_MEMORY_UTILIZATION = Gauge('ai_autoscaler_gpu_memory_utilization_percent', 'GPU memory utilization', ['gpu_device'])
+
+# Additional metrics for worker processing time tracking
+WORKER_PROCESSING_DURATION = Histogram('ai_worker_processing_duration_seconds', 'Worker processing duration', ['worker_id'])
+WORKER_TASKS_COMPLETED = Counter('ai_worker_tasks_completed_total', 'Total tasks completed by worker', ['worker_id'])
 
 
 class AutoscalingDaemon:
@@ -412,10 +421,10 @@ class AutoscalingDaemon:
     async def _create_worker(self, gpu_device_id: int) -> Optional[WorkerProcess]:
         """Create a new worker process."""
         try:
-            # This would spawn an actual worker process
-            # For now, create a mock worker process
-            current_time = time.time()
+            # Spawn an actual worker process using the worker factory
             process_handle = self.worker_factory(gpu_device_id)
+            
+            current_time = time.time()
             
             worker = WorkerProcess(
                 process_id=len(self._workers) + 1000,  # Simple ID generation
@@ -433,10 +442,47 @@ class AutoscalingDaemon:
             return None
             
     def _default_worker_factory(self, gpu_device_id: int) -> Optional[Process]:
-        """Default factory for creating worker processes."""
-        # This is a placeholder - in production you'd spawn actual worker processes
-        # Example: return Process(target=worker_main, args=(gpu_device_id,))
-        return None
+        """Default factory for creating worker processes.
+        
+        Spawns an actual GPU worker subprocess that can process analysis requests.
+        The worker_main function should be defined in the caller's module or imported.
+        """
+        try:
+            # Import here to avoid circular imports
+            from gpu_worker.worker import GPUWorker
+            from gpu_worker.config import WorkerConfig, EngineBackend, GPUConfig
+            
+            # Create a worker config for this GPU device
+            config = WorkerConfig(
+                engine_backend=EngineBackend.LC0,
+                engine_path="/usr/local/bin/lc0",  # Should be configurable
+                gpu=GPUConfig(device_id=gpu_device_id, max_batch_size=32, memory_limit_mb=2048, backend="cudnn"),
+                default_depth=22,
+                default_time_limit_ms=3000,
+                threads=2,
+                hash_size_mb=512,
+            )
+            
+            # Create the worker instance
+            worker = GPUWorker(config)
+            
+            # Return a Process that runs the worker's main loop
+            return Process(target=self._run_worker, args=(worker,), daemon=True)
+            
+        except ImportError:
+            logger.warning("GPUWorker not available, cannot spawn real worker")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to create real worker process: {e}")
+            return None
+
+    def _run_worker(self, worker):
+        """Run the worker's main processing loop in a separate process."""
+        import asyncio
+        asyncio.run(worker.start())
+        # Keep the process alive to handle requests
+        # The worker will process tasks from its internal queue
+        asyncio.get_event_loop().run_forever()
         
     async def _terminate_worker(self, process_id: int, graceful: bool = True) -> None:
         """Terminate a worker process."""
@@ -448,11 +494,19 @@ class AutoscalingDaemon:
         
         try:
             if graceful and worker.is_busy:
-                logger.info(f"Worker {process_id} is busy, waiting for completion before termination")
-                # In production, you'd wait for the worker to finish its current task
-                # For now, just mark as not busy after a short delay
-                await asyncio.sleep(1.0)
+                logger.info(f"Worker {process_id} is busy, waiting for current task to complete before termination")
+                # Wait for the current task to complete (up to a configurable timeout)
+                timeout = getattr(self.config, 'graceful_shutdown_timeout_seconds', 300)
+                wait_start = time.time()
                 
+                while worker.is_busy and (time.time() - wait_start) < timeout:
+                    await asyncio.sleep(1.0)
+                
+                if worker.is_busy:
+                    logger.warning(f"Worker {process_id} did not complete task within {timeout}s, forcing termination")
+                else:
+                    logger.info(f"Worker {process_id} completed task gracefully")
+            
             # Terminate the process
             if worker.process_handle:
                 worker.process_handle.terminate()

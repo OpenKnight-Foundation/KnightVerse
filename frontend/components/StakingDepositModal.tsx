@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, Loader2, X } from "lucide-react";
-import { fetchNativeBalance, fetchTokenPrices, type StellarNetwork, type SupportedToken } from "@/services/stellarMarketService";
+import { fetchTokenPrices, fetchWalletBalances, type StellarNetwork, type SupportedToken } from "@/services/stellarMarketService";
 
 type StakingDepositModalProps = { open: boolean; address?: string; network?: StellarNetwork; onClose: () => void; onConfirm: (details: { token: SupportedToken; amount: number; total: number }) => Promise<void> };
 const tokens: SupportedToken[] = ["XLM", "USDC", "EURC"];
@@ -12,7 +12,7 @@ export default function StakingDepositModal({ open, address, network = "mainnet"
   const [token, setToken] = useState<SupportedToken>("XLM");
   const [stake, setStake] = useState("");
   const [prices, setPrices] = useState<Record<SupportedToken, number> | null>(null);
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balances, setBalances] = useState<Record<SupportedToken, number> | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
@@ -20,14 +20,15 @@ export default function StakingDepositModal({ open, address, network = "mainnet"
   const fee = Number.isFinite(amount) && amount > 0 ? amount * 0.025 : 0;
   const total = amount > 0 ? amount + fee + bond : 0;
   const price = prices?.[token] ?? 0;
+  const balance = balances?.[token] ?? null;
   const insufficient = balance !== null && total > balance;
   const valid = Number.isFinite(amount) && amount > 0 && !insufficient && Boolean(address);
 
   useEffect(() => {
     if (!open) return;
     setError(""); setLoading(true);
-    Promise.all([fetchTokenPrices(), address ? fetchNativeBalance(address, network) : Promise.resolve(null)])
-      .then(([nextPrices, nextBalance]) => { setPrices(nextPrices); setBalance(nextBalance); })
+    Promise.all([fetchTokenPrices(), address ? fetchWalletBalances(address, network) : Promise.resolve(null)])
+      .then(([nextPrices, nextBalances]) => { setPrices(nextPrices); setBalances(nextBalances); })
       .catch(() => setError("Live pricing or wallet balance is temporarily unavailable."))
       .finally(() => setLoading(false));
   }, [open, address, network]);

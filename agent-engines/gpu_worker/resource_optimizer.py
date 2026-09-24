@@ -74,6 +74,7 @@ class AutoscalingConfig:
     scale_up_queue_threshold: int = 50
     scale_up_latency_threshold_ms: float = 500.0
     scale_down_idle_timeout_seconds: int = 300  # 5 minutes
+    graceful_shutdown_timeout_seconds: int = 60  # 1 minute
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
@@ -490,10 +491,24 @@ class AutoscalingDaemon:
         
         try:
             if graceful and worker.is_busy:
-                logger.info(f"Worker {process_id} is busy, waiting for completion before termination")
-                # In production, you'd wait for the worker to finish its current task
-                # For now, just mark as not busy after a short delay
-                await asyncio.sleep(1.0)
+                logger.info(f"Worker {process_id} is busy, waiting up to "
+                           f"{self.config.graceful_shutdown_timeout_seconds}s for completion.")
+                
+                try:
+                    # Wait for the worker to become idle
+                    async def wait_for_idle():
+                        while worker.is_busy:
+                            await asyncio.sleep(1.0)
+                    
+                    await asyncio.wait_for(
+                        wait_for_idle(),
+                        timeout=self.config.graceful_shutdown_timeout_seconds
+                    )
+                    logger.info(f"Worker {process_id} has finished its task.")
+                    
+                except asyncio.TimeoutError:
+                    logger.warning(f"Worker {process_id} did not finish within the graceful "
+                                   f"shutdown timeout. Proceeding with termination.")
                 
             # Terminate the process
             if worker.process_handle:

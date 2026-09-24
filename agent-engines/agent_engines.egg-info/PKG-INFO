@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: agent-engines
 Version: 0.1.0
-Summary: AI engine infrastructure for XLMate chess platform
+Summary: AI engine infrastructure for KnightVerse chess platform
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: pydantic>=2.0
@@ -9,6 +9,7 @@ Requires-Dist: asyncio-extras>=1.3; python_version < "3.12"
 Requires-Dist: psutil>=5.9
 Requires-Dist: chess>=1.10
 Requires-Dist: numpy>=1.24
+Requires-Dist: prometheus-client>=0.17.0
 Provides-Extra: gpu
 Requires-Dist: pynvml>=11.5; extra == "gpu"
 Provides-Extra: dev
@@ -18,7 +19,7 @@ Requires-Dist: pytest-cov>=4.0; extra == "dev"
 
 # agent-engines
 
-GPU-oriented engine infrastructure for the XLMate chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
+GPU-oriented engine infrastructure for the KnightVerse chess platform. The module provides an asyncio-based worker pool that wraps UCI-compatible engines, with first-class support for Leela Chess Zero (`lc0`), CPU fallback support for Stockfish, **Natural Language Agent interface**, **Stockfish 16.1 WASM integration**, and **intelligent resource orchestration**.
 
 ## Overview
 
@@ -355,7 +356,7 @@ pytest --cov=gpu_worker --cov-report=html
 
 ## Soroban Contract Deployment
 
-XLMate includes a comprehensive CI/CD pipeline for deploying Soroban smart contracts to Stellar networks.
+KnightVerse includes a comprehensive CI/CD pipeline for deploying Soroban smart contracts to Stellar networks.
 
 ### Automated Deployment
 

@@ -18,6 +18,11 @@ try:
 except ImportError:
     redis = None
 
+try:
+    from pynvml import *
+except ImportError:
+    nvml = None
+
 import prometheus_client
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -125,6 +130,31 @@ class AutoscalingDaemon:
         self._running = False
         self._monitoring_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
+
+        if nvml:
+            try:
+                nvmlInit()
+                self._gpu_handles = [nvmlDeviceGetHandleByIndex(i) for i in range(nvmlDeviceGetCount())]
+                logger.info(f"Initialized NVML for {len(self._gpu_handles)} GPUs.")
+            except NVMLError as e:
+                logger.error(f"Failed to initialize NVML: {e}")
+                self._gpu_handles = []
+        else:
+            self._gpu_handles = []
+    async def _get_gpu_metrics(self, device_id: int) -> (float, float):
+        """Get GPU utilization and memory usage for a specific device."""
+        if not self._gpu_handles or device_id >= len(self._gpu_handles):
+            return 0.0, 0.0
+        try:
+            handle = self._gpu_handles[device_id]
+            utilization = nvmlDeviceGetUtilizationRates(handle).gpu
+            memory_info = nvmlDeviceGetMemoryInfo(handle)
+            memory_used_mb = memory_info.used / (1024 * 1024)
+            return float(utilization), memory_used_mb
+        except NVMLError as e:
+            logger.error(f"Failed to get GPU metrics for device {device_id}: {e}")
+            return 0.0, 0.0
+
         
     async def start(self) -> None:
         """Start the autoscaling daemon."""
@@ -259,9 +289,21 @@ class AutoscalingDaemon:
         memory_used_mb = memory.used / (1024 * 1024)
         memory_available_mb = memory.available / (1024 * 1024)
         
-        # Get GPU metrics (simplified - would need proper GPU monitoring)
+        # Get GPU metrics
         gpu_utilization = 0.0
         gpu_memory_used_mb = 0.0
+        if self._gpu_handles:
+            # For simplicity, we'll average the metrics across all GPUs.
+            # A more sophisticated approach might involve per-GPU tracking.
+            total_utilization = 0
+            total_mem_used = 0
+            for i in range(len(self._gpu_handles)):
+                util, mem_used = await self._get_gpu_metrics(i)
+                total_utilization += util
+                total_mem_used += mem_used
+            gpu_utilization = total_utilization / len(self._gpu_handles)
+            gpu_memory_used_mb = total_mem_used
+
         
         # Count active workers
         active_workers = len([w for w in self._workers.values() if w.is_busy])
@@ -379,34 +421,31 @@ class AutoscalingDaemon:
             
     async def _has_available_gpu_capacity(self) -> bool:
         """Check if there's available GPU memory capacity for new workers."""
+        if not self._gpu_handles:
+            return True  # No GPUs, so no limit
         try:
-            # This would need proper GPU monitoring implementation
-            # For now, return True if we're under the memory threshold
-            # In production, you'd check actual GPU memory usage per device
-            return True
-        except Exception as e:
+            for i in range(len(self._gpu_handles)):
+                handle = self._gpu_handles[i]
+                memory_info = nvmlDeviceGetMemoryInfo(handle)
+                if (memory_info.used / memory_info.total) * 100 < self.config.gpu_memory_threshold_percent:
+                    return True
+            return False
+        except NVMLError as e:
             logger.error(f"Error checking GPU capacity: {e}")
             return False
             
     async def _find_available_gpu_device(self) -> Optional[int]:
-        """Find an available GPU device for new worker."""
-        # Simple round-robin assignment for now
-        # In production, you'd check actual GPU utilization and memory
-        used_devices = {w.gpu_device_id for w in self._workers.values()}
-        
-        # Try devices 0-7 (common GPU setup)
-        for device_id in range(8):
-            if device_id not in used_devices:
-                return device_id
-                
-        # If all devices are used, assign to the least loaded one
-        if self._workers:
-            device_counts = {}
-            for worker in self._workers.values():
-                device_counts[worker.gpu_device_id] = device_counts.get(worker.gpu_device_id, 0) + 1
-            return min(device_counts, key=device_counts.get)
-            
-        return 0  # Default to device 0
+        """Find the least utilized GPU device."""
+        if not self._gpu_handles:
+            return 0  # Default to device 0 if no GPUs are detected
+
+        device_utilization = []
+        for i in range(len(self._gpu_handles)):
+            util, _ = await self._get_gpu_metrics(i)
+            device_utilization.append((i, util))
+
+        # Sort by utilization and return the device with the lowest utilization
+        return min(device_utilization, key=lambda item: item[1])[0]
         
     async def _get_idle_workers(self) -> List[WorkerProcess]:
         """Get list of workers that are not busy."""

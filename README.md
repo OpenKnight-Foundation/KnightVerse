@@ -125,6 +125,10 @@ We have identified **150 independent tasks** across the frontend, backend, contr
 - **Contributors**: Please pick any open issue labeled `contribution-ready`.
 - **Status**: Preparing for Stellar Community Fund (SCF) submission.
 
+## Code of Conduct
+
+Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
+
 ## Helpful Links
 - Stellar Developer Docs: https://developers.stellar.org/
 - Soroban Docs & Tutorials: https://soroban.stellar.org/docs

@@ -196,6 +196,7 @@ export const endpoints = {
   /** Players */
   players: {
     online: () => `${API_BASE}/v1/players/online`,
+    export: () => `${API_BASE}/v1/players/me/export`,
   },
 
   /** Tournaments */

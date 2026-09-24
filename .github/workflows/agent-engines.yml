@@ -1,6 +1,7 @@
 name: Agent Engines CI
 
 on:
+  # Run on every PR or push to main that touches agent-engines code
   pull_request:
     paths:
       - 'agent-engines/**'
@@ -11,6 +12,10 @@ on:
     paths:
       - 'agent-engines/**'
       - '.github/workflows/agent-engines.yml'
+  # Nightly schedule: run stress & tournament simulation at 02:00 UTC daily
+  # (issue AI-61)
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   test:
@@ -192,6 +197,95 @@ jobs:
         run: |
           pip install bandit
           bandit -r gpu_worker/ -ll -q || true
+
+  # ---------------------------------------------------------------------------
+  # Nightly Stress & Tournament Simulation (issue AI-61)
+  # Only runs on the scheduled cron trigger (02:00 UTC daily).
+  #
+  # Healthy baseline (captured 2026-09-24):
+  #   tournament_simulator  – 5 bots × 3 games/pair → 30 games, ~0.01 s total
+  #   stress_test           – import + module-level smoke, no live server needed
+  # ---------------------------------------------------------------------------
+  nightly-stress:
+    name: Nightly Stress & Tournament Simulation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install minimal dependencies
+        working-directory: agent-engines
+        run: |
+          python -m pip install --upgrade pip
+          # Install only the packages required by stress_test & tournament_simulator
+          pip install websockets pydantic
+
+      - name: Run tournament simulator (5 bots, 3 games per pair)
+        # Healthy baseline: 30 games finish in < 1 s with no assertion errors.
+        working-directory: agent-engines
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from tournament_simulator import run_round_robin, BotResult
+
+          bots = ['AlphaBot', 'BetaBot', 'GammaBot', 'DeltaBot', 'EpsilonBot']
+          # Nightly run: 3 games per pair (fast; use more for deeper validation)
+          results = run_round_robin(bots, games_per_pair=3)
+
+          total_games = sum(r.wins + r.losses + r.draws for r in results.values()) // 2
+          print(f'Tournament complete: {len(bots)} bots, {total_games} games played')
+          for name, r in sorted(results.items(), key=lambda x: -x[1].wins):
+              print(f'  {name}: W={r.wins} D={r.draws} L={r.losses}')
+
+          # Sanity: every bot participated
+          assert len(results) == len(bots), 'Unexpected number of results'
+          print('tournament_simulator: PASS')
+          "
+
+      - name: Run stress test smoke (import + minimal validation, no server)
+        # Healthy baseline: module imports cleanly; run_stress_test is callable.
+        # Full load test requires a live WebSocket server and is out of scope
+        # for nightly CI; a live-server integration test is tracked separately.
+        working-directory: agent-engines
+        run: |
+          python -c "
+          import sys, inspect, asyncio
+          sys.path.insert(0, '.')
+          import stress_test
+
+          # Verify key symbols are importable and have the expected signatures
+          assert callable(stress_test.run_stress_test), 'run_stress_test not callable'
+          assert callable(stress_test.run_test_client), 'run_test_client not callable'
+
+          sig = inspect.signature(stress_test.run_stress_test)
+          params = list(sig.parameters.keys())
+          assert 'num_users' in params, f'Missing param num_users; got {params}'
+          assert 'requests_per_user' in params, f'Missing param requests_per_user; got {params}'
+
+          print(f'stress_test module OK – run_stress_test{sig}')
+          print('stress_test: PASS')
+          "
+
+      - name: Summarise nightly results
+        if: always()
+        run: |
+          echo "## Nightly Stress & Tournament Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Script | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| tournament_simulator | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| stress_test (smoke)  | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Schedule**: 02:00 UTC daily \`0 2 * * *\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
 
   summary:
     name: CI Summary

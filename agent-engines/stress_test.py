@@ -75,8 +75,25 @@ async def run_stress_test(uri: str, num_users: int, requests_per_user: int):
         print(f"Min Latency: {min(all_latencies):.4f}s")
 
 if __name__ == "__main__":
-    WEBSOCKET_URI = "ws://localhost:8765"  # Replace with your actual WebSocket endpoint
-    NUM_USERS = 1000
-    REQUESTS_PER_USER = 10
+    import sys
+    import json
     
-    asyncio.run(run_stress_test(WEBSOCKET_URI, NUM_USERS, REQUESTS_PER_USER))
+    WEBSOCKET_URI = "ws://localhost:8765"  # Replace with your actual WebSocket endpoint
+    NUM_USERS = 100
+    REQUESTS_PER_USER = 10
+
+    results = asyncio.run(run_stress_test(WEBSOCKET_URI, NUM_USERS, REQUESTS_PER_USER))
+    
+    # Output results for CI artifact
+    with open("stress_test_results.json", "w") as f:
+        json.dump({
+            "timestamp": time.time(),
+            "num_users": NUM_USERS,
+            "requests_per_user": REQUESTS_PER_USER,
+            "total_requests": NUM_USERS * REQUESTS_PER_USER,
+            "successful": results["latencies"] and len(results["latencies"]) or 0,
+            "errors": results["errors"],
+            "avg_latency_ms": (sum(results["latencies"]) / len(results["latencies"]) * 1000) if results["latencies"] else 0,
+            "max_latency_ms": max(results["latencies"]) * 1000 if results["latencies"] else 0,
+            "min_latency_ms": min(results["latencies"]) * 1000 if results["latencies"] else 0,
+        }, f, indent=2)

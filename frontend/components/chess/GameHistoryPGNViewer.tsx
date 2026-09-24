@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Chess } from "chess.js";
 import ChessboardComponent from "./ChessboardComponent";
+import { downloadScoresheetPdf } from "@/lib/scoresheetPdf";
 
 // ── Mock PGN ──────────────────────────────────────────────────────────────────
 
@@ -22,35 +23,22 @@ export const MOCK_PGN = `[Event "KnightVerse Rated Game"]
 [TimeControl "300+3"]
 
 1. e4 { [%clk 0:05:00] } e5 { [%clk 0:05:00] }
-2. Nf3 { [%clk 0:04:58] } Nc6 { [%clk 0:04:57] }
-3. Bb5 { [%clk 0:04:55] } a6 { [%clk 0:04:54] }
-4. Ba4 { [%clk 0:04:52] } Nf6 { [%clk 0:04:51] }
-5. O-O { [%clk 0:04:50] } Be7 { [%clk 0:04:49] }
-6. Re1 { [%clk 0:04:47] } b5 { [%clk 0:04:46] }
-7. Bb3 { [%clk 0:04:45] } d6 { [%clk 0:04:43] }
-8. c3 { [%clk 0:04:43] } O-O { [%clk 0:04:41] }
-9. h3 { [%clk 0:04:41] } Nb8 { [%clk 0:04:39] }
-10. d4 { [%clk 0:04:38] } Nbd7 { [%clk 0:04:37] }
-11. Nbd2 { [%clk 0:04:36] } Bb7 { [%clk 0:04:35] }
-12. Bc2 { [%clk 0:04:34] } Re8 { [%clk 0:04:33] }
-13. Nf1 { [%clk 0:04:32] } Bf8 { [%clk 0:04:30] }
-14. Ng3 { [%clk 0:04:30] } g6 { [%clk 0:04:28] }
-15. a4 { [%clk 0:04:28] } c5 { [%clk 0:04:26] }
-16. d5 { [%clk 0:04:26] } c4 { [%clk 0:04:24] }
-17. b4 { [%clk 0:04:24] } cxb3 { [%clk 0:04:22] }
-18. Bxb3 { [%clk 0:04:22] } Nc5 { [%clk 0:04:20] }
-19. Bc2 { [%clk 0:04:20] } Rc8 { [%clk 0:04:18] }
-20. axb5 { [%clk 0:04:18] } axb5 { [%clk 0:04:16] }
-21. Nf5 { [%clk 0:04:15] } gxf5 { [%clk 0:04:13] }
-22. exf5 { [%clk 0:04:14] } Kh8 { [%clk 0:04:11] }
-23. Qd2 { [%clk 0:04:12] } Ng8 { [%clk 0:04:09] }
-24. Bh6 { [%clk 0:04:10] } Bxh6 { [%clk 0:04:07] }
-25. Qxh6 { [%clk 0:04:09] } Nf6 { [%clk 0:04:05] }
-26. f6 { [%clk 0:04:07] } Rg8 { [%clk 0:04:03] }
-27. Ng5 { [%clk 0:04:05] } Rg6 { [%clk 0:04:01] }
-28. Qh4 { [%clk 0:04:03] } Rcg8 { [%clk 0:03:59] }
-29. Re3 { [%clk 0:04:01] } Rxg5 { [%clk 0:03:56] }
-30. Rg3 { [%clk 0:03:59] } 1-0`;
+2. Nf3 { [%clk 0:04:58] } d6 { [%clk 0:04:57] }
+3. d4 { [%clk 0:04:55] } Bg4 { [%clk 0:04:54] }
+4. dxe5 { [%clk 0:04:52] } Bxf3 { [%clk 0:04:51] }
+5. Qxf3 { [%clk 0:04:50] } dxe5 { [%clk 0:04:49] }
+6. Bc4 { [%clk 0:04:47] } Nf6 { [%clk 0:04:46] }
+7. Qb3 { [%clk 0:04:45] } Qe7 { [%clk 0:04:43] }
+8. Nc3 { [%clk 0:04:43] } c6 { [%clk 0:04:41] }
+9. Bg5 { [%clk 0:04:41] } b5 { [%clk 0:04:39] }
+10. Nxb5 { [%clk 0:04:38] } cxb5 { [%clk 0:04:37] }
+11. Bxb5+ { [%clk 0:04:36] } Nbd7 { [%clk 0:04:35] }
+12. O-O-O { [%clk 0:04:34] } Rd8 { [%clk 0:04:33] }
+13. Rxd7 { [%clk 0:04:32] } Rxd7 { [%clk 0:04:30] }
+14. Rd1 { [%clk 0:04:30] } Qe6 { [%clk 0:04:28] }
+15. Bxd7+ { [%clk 0:04:28] } Nxd7 { [%clk 0:04:26] }
+16. Qb8+ { [%clk 0:04:26] } Nxb8 { [%clk 0:04:24] }
+17. Rd8# { [%clk 0:04:24] } 1-0`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -322,6 +310,24 @@ export function GameHistoryPGNViewer({ pgn = MOCK_PGN }: GameHistoryPGNViewerPro
   const { fens, moves, headers } = parsed;
   const currentFen = fens[currentIndex];
 
+  const handleExportPdf = (): void => {
+    downloadScoresheetPdf({
+      metadata: {
+        white: headers.White ?? "White",
+        black: headers.Black ?? "Black",
+        whiteElo: headers.WhiteElo,
+        blackElo: headers.BlackElo,
+        date: headers.Date,
+        result: headers.Result,
+        event: headers.Event,
+        site: headers.Site,
+        timeControl: headers.TimeControl,
+      },
+      moves: moves.map((move) => move.san),
+      finalFen: fens[fens.length - 1],
+    });
+  };
+
   // The move that brought us to currentIndex (index 0 = no move yet)
   const currentMove = currentIndex > 0 ? moves[currentIndex - 1] : null;
   const captured = getCapturedPieces(moves, currentIndex);
@@ -336,8 +342,21 @@ export function GameHistoryPGNViewer({ pgn = MOCK_PGN }: GameHistoryPGNViewerPro
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-gray-700">
-        <h2 className="text-sm font-semibold text-white">Game Replay</h2>
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-400">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-white">Game Replay</h2>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            aria-label="Export this game as a PDF scoresheet"
+            className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold
+                       bg-indigo-600 text-white hover:bg-indigo-500
+                       transition-colors focus:outline-none focus-visible:ring-2
+                       focus-visible:ring-indigo-400"
+          >
+            Export as PDF
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs text-gray-400">
           {headers.White && <span>⬜ {headers.White}</span>}
           {headers.Black && <span>⬛ {headers.Black}</span>}
           {headers.Result && (

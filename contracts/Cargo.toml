@@ -8,16 +8,8 @@ members = [
     "referral_splitter",
     "model_attestation",
     "sponsorship_escrow",
+    "title_badge",
 ]
-
-# title_badge is intentionally excluded: it pins soroban-sdk = "0.10.1" (every
-# other contract here uses 21.0.0, and 0.10.1 isn't on crates.io any more —
-# this is what breaks `cargo test`/`cargo build` for the whole workspace), and
-# its source itself doesn't compile independent of that — lib.rs and
-# storage.rs are corrupted (mismatched braces, a stray "Erro::" typo for
-# "Error::", `Ok()` instead of `Ok(())`, malformed turbofish generics, an
-# `admin`-checking branch in `revoke` that references an undefined variable).
-# It needs a rewrite against the current soroban-sdk, not a version bump.
 
 [profile.release]
 opt-level = "z"

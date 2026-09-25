@@ -476,9 +476,23 @@ class AutoscalingDaemon:
             return False  # Fail closed - refuse to scale up if we can't verify capacity
             
     async def _find_available_gpu_device(self) -> Optional[int]:
-        """Find an available GPU device for new worker."""
-        # Simple round-robin assignment for now
-        # In production, you'd check actual GPU utilization and memory
+        """Find the least utilized GPU device for a new worker."""
+        if PYNVML_AVAILABLE:
+            _init_nvml()
+            if _NVML_INITIALIZED:
+                try:
+                    device_count = pynvml.nvmlDeviceGetCount()
+                    if device_count > 0:
+                        utilization = [
+                            (i, pynvml.nvmlDeviceGetUtilizationRates(
+                                pynvml.nvmlDeviceGetHandleByIndex(i)).gpu)
+                            for i in range(device_count)
+                        ]
+                        return min(utilization, key=lambda item: item[1])[0]
+                except Exception as e:
+                    logger.warning(f"Failed to query GPU utilization via NVML: {e}")
+
+        # Without NVML, fall back to spreading workers across device ids
         used_devices = {w.gpu_device_id for w in self._workers.values()}
         
         # Try devices 0-7 (common GPU setup)

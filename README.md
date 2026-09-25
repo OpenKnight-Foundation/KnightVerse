@@ -157,7 +157,7 @@ Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
 ## Deployed Addresses (Testnet)
 | Contract | ID |
 |----------|----|
-| Game     | `CBGZ...` *(see `contracts/README.md` for full IDs)* |
+| Game     | *Not yet published. Add the full contract ID here once deployed.* |
 
 ## Helpful Links
 - Stellar Developer Docs: https://developers.stellar.org/

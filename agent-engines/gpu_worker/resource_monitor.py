@@ -45,6 +45,10 @@ class ResourceMonitor:
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         
+        # Track real processing durations for accurate wait time estimates
+        self._processing_durations: List[float] = []
+        self._max_duration_samples = 100  # Rolling window of last 100 task durations
+        
         # Redis configuration for queue monitoring
         self._redis_client: Optional[Any] = None
         if redis_config and redis is not None:
@@ -59,6 +63,13 @@ class ResourceMonitor:
             except Exception as e:
                 logger.error(f"Failed to initialize Redis client: {e}")
                 self._redis_client = None
+
+    def record_task_completion(self, duration_seconds: float) -> None:
+        """Record a completed task's processing duration for wait time estimation."""
+        self._processing_durations.append(duration_seconds)
+        # Keep only the last N samples for rolling average
+        if len(self._processing_durations) > self._max_duration_samples:
+            self._processing_durations = self._processing_durations[-self._max_duration_samples:]
 
     async def start(self) -> None:
         """Start the background monitoring loop if not already running."""
@@ -281,9 +292,19 @@ class ResourceMonitor:
             queue_length = self._redis_client.llen(self._queue_key)
             stats["queue_length"] = queue_length
             
-            # Estimate wait time based on queue length and processing rate
-            # This is a simplified estimation - in production you'd track actual processing times
-            estimated_wait_time_ms = queue_length * 100  # Assume 100ms per task average
+            # Estimate wait time based on REAL processing durations (rolling average)
+            # This replaces the queue-length-based estimate with actual measured durations
+            if self._processing_durations:
+                # Use exponential moving average for responsiveness
+                avg_duration = sum(self._processing_durations) / len(self._processing_durations)
+                # Estimated wait = queue_length * avg_processing_time (assuming parallel workers)
+                # If we have multiple workers, divide by worker count
+                worker_count = max(1, stats.get("active_workers", 1))
+                estimated_wait_time_ms = (queue_length / worker_count) * avg_duration * 1000
+            else:
+                # Fallback: if no real data yet, use a conservative estimate
+                estimated_wait_time_ms = queue_length * 100  # Assume 100ms per task average
+                
             stats["estimated_wait_time_ms"] = estimated_wait_time_ms
             
             # Get queue age (time since oldest item was added)
@@ -292,10 +313,24 @@ class ResourceMonitor:
                     # Try to get timestamp from oldest item if items contain timestamps
                     oldest_item = self._redis_client.lindex(self._queue_key, -1)
                     if oldest_item:
-                        # In a real implementation, you'd parse the timestamp from the item
-                        # For now, estimate based on queue length
-                        current_time = time.time()
-                        stats["oldest_item_age_seconds"] = queue_length * 0.1  # Rough estimate
+                        # Parse timestamp from the item if available
+                        try:
+                            import json
+                            item_data = json.loads(oldest_item)
+                            enqueued_at = item_data.get('enqueued_at')
+                            if enqueued_at:
+                                import time
+                                current_time = time.time()
+                                stats["oldest_item_age_seconds"] = current_time - float(enqueued_at)
+                            else:
+                                # Estimate based on real average processing time
+                                if self._processing_durations:
+                                    avg_duration = sum(self._processing_durations) / len(self._processing_durations)
+                                    stats["oldest_item_age_seconds"] = queue_length * avg_duration
+                                else:
+                                    stats["oldest_item_age_seconds"] = 0
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            stats["oldest_item_age_seconds"] = 0
                 except Exception as e:
                     logger.debug(f"Could not determine queue age: {e}")
                     stats["oldest_item_age_seconds"] = 0

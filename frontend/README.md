@@ -114,6 +114,10 @@ frontend/
 
 ---
 
+## Environment Variables
+
+See [.env.example](./.env.example) for all configurable environment variables. The frontend reads variables prefixed with `NEXT_PUBLIC_` at build time.
+
 ## Learn More
 
 - [Next.js Documentation](https://nextjs.org/docs)

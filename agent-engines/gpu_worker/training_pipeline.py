@@ -21,6 +21,15 @@ import chess
 import chess.pgn
 import numpy as np
 
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TORCH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -266,6 +275,7 @@ class LoRAModel:
         lora_rank: int = DEFAULT_LORA_RANK,
         lora_alpha: int = DEFAULT_LORA_ALPHA,
         lora_dropout: float = 0.1,
+        learning_rate: float = DEFAULT_LR,
     ) -> None:
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
@@ -287,6 +297,36 @@ class LoRAModel:
 
         # Gradient storage
         self._grads: dict[str, np.ndarray] = {}
+
+        # Real autograd: PyTorch parameters and optimizer for backpropagation.
+        # These mirror the numpy arrays above and are used in step() to compute
+        # gradients via torch.autograd rather than the hand-rolled approximation.
+        if _TORCH_AVAILABLE:
+            self._pt_embeddings = nn.Parameter(
+                torch.from_numpy(self.embeddings.copy())
+            )
+            self._pt_lora_A = nn.Parameter(
+                torch.from_numpy(self.lora_A.copy())
+            )
+            self._pt_lora_B = nn.Parameter(
+                torch.from_numpy(self.lora_B.copy())
+            )
+            self._pt_output_weight = nn.Parameter(
+                torch.from_numpy(self.output_weight.copy())
+            )
+            self._pt_output_bias = nn.Parameter(
+                torch.from_numpy(self.output_bias.copy())
+            )
+            self.optimizer: optim.Optimizer = optim.Adam(
+                [
+                    self._pt_embeddings,
+                    self._pt_lora_A,
+                    self._pt_lora_B,
+                    self._pt_output_weight,
+                    self._pt_output_bias,
+                ],
+                lr=learning_rate,
+            )
 
     def forward(self, token_ids: np.ndarray) -> np.ndarray:
         """Forward pass: token IDs -> logits over vocabulary."""
@@ -326,10 +366,47 @@ class LoRAModel:
         labels: np.ndarray,
         lr: float = DEFAULT_LR,
     ) -> float:
-        """Single training step with gradient computation and parameter update."""
+        """Single training step using real PyTorch autograd backpropagation.
+
+        Uses torch.autograd to compute exact gradients through the embedding
+        lookup, LoRA adaptation, and output projection, then updates all
+        parameters via Adam optimiser.  Falls back to the hand-rolled
+        approximation when PyTorch is not available.
+        """
+        if _TORCH_AVAILABLE:
+            # Real autograd: backpropagate through the evaluation head
+            self.optimizer.zero_grad()
+
+            ids = torch.from_numpy(token_ids).long()
+            tgt = torch.from_numpy(labels).long()
+
+            # Forward pass using PyTorch parameters so autograd can track ops
+            x = self._pt_embeddings[ids]                        # (B, S, D)
+            lora_out = x @ self._pt_lora_A @ self._pt_lora_B   # (B, S, D)
+            h = x + lora_out
+            logits = h @ self._pt_output_weight + self._pt_output_bias  # (B, S, V)
+
+            B, S, V = logits.shape
+            loss = nn.functional.cross_entropy(
+                logits.reshape(-1, V), tgt.reshape(-1)
+            )
+
+            loss.backward()
+            self.optimizer.step()
+
+            # Sync updated PyTorch parameters back to the numpy arrays so that
+            # forward() / compute_loss() / save_adapter() remain consistent.
+            with torch.no_grad():
+                self.embeddings = self._pt_embeddings.detach().numpy()
+                self.lora_A = self._pt_lora_A.detach().numpy()
+                self.lora_B = self._pt_lora_B.detach().numpy()
+                self.output_weight = self._pt_output_weight.detach().numpy()
+                self.output_bias = self._pt_output_bias.detach().numpy()
+
+            return loss.item()
+
+        # Fallback: hand-rolled approximation (only output-layer grads)
         loss = self.compute_loss(token_ids, labels)
-        # Simplified gradient update (approximation for demo)
-        # In production, use autograd via PyTorch
         logits = self.forward(token_ids)
         B, S, V = logits.shape
 

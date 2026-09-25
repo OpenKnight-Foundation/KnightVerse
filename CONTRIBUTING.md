@@ -10,6 +10,7 @@ Thank you for your interest in contributing to KnightVerse! We are building the 
 4.  **Develop**: Follow our coding standards (Rust for contracts/backend, TypeScript for frontend).
 5.  **Test**: Ensure all tests pass (`cargo test`, `npm test`).
 6.  **Submit PR**: Open a Pull Request targeting the `main` branch.
+    Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) to structure your description.
 
 ## Module Guides
 
@@ -21,6 +22,10 @@ Thank you for your interest in contributing to KnightVerse! We are building the 
 ## Security
 
 If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md). Do NOT open a public issue for security bugs.
+
+## Code of Conduct
+
+Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before contributing.
 
 ## Community & Support
 

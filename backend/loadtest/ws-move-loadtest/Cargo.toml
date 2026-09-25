@@ -1,0 +1,21 @@
+[package]
+name = "ws-move-loadtest"
+version = "0.1.0"
+edition = "2021"
+description = "Load-test harness for the KnightVerse WebSocket move-submission endpoint"
+publish = false
+
+# Intentionally its own workspace. The harness pulls in client-side networking
+# crates the server never needs, and keeping it out of `backend/Cargo.toml`
+# means it can neither perturb the server dependency graph nor force a
+# `backend/Cargo.lock` regeneration.
+[workspace]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonwebtoken = "9.3.1"
+uuid = { version = "1", features = ["v4"] }

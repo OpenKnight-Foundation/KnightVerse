@@ -1,3 +1,4 @@
+pub mod admin_action;
 pub mod game;
 pub mod player;
 pub mod prelude;

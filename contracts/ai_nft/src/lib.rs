@@ -311,6 +311,64 @@ impl AINFTContract {
     pub fn metadata_version(env: Env) -> u64 {
         env.storage().instance().get(&METADATA_VERSION).unwrap_or(0)
     }
+
+    // ── Burn (SC-61) ────────────────────────────────────────────────────────
+
+    /// Permanently retire an AI NFT. Only the current owner may burn it.
+    /// Removes the NFT's owner, metadata, and minter-registry entries and
+    /// decrements the total supply. The `nft_id` is not reused.
+    pub fn burn(env: Env, owner: Address, nft_id: u64) -> Result<(), ContractError> {
+        Self::check_not_paused(&env);
+        owner.require_auth();
+
+        let mut owners: Map<u64, Address> = env
+            .storage()
+            .instance()
+            .get(&NFT_OWNERS)
+            .ok_or(ContractError::NFTNotFound)?;
+        let current_owner = owners.get(nft_id).ok_or(ContractError::NFTNotFound)?;
+        if current_owner != owner {
+            return Err(ContractError::NotAuthorized);
+        }
+
+        // Remove owner entry
+        owners.remove(nft_id);
+        env.storage().instance().set(&NFT_OWNERS, &owners);
+
+        // Remove metadata entry
+        let mut nft_metadata: Map<u64, AINFTMetadata> = env
+            .storage()
+            .instance()
+            .get(&NFT_METADATA)
+            .ok_or(ContractError::NFTNotFound)?;
+        nft_metadata.remove(nft_id);
+        env.storage().instance().set(&NFT_METADATA, &nft_metadata);
+
+        // Remove minter registry entry
+        let mut minter_registry: Map<u64, Address> = env
+            .storage()
+            .instance()
+            .get(&MINTER_REGISTRY)
+            .unwrap_or(Map::new(&env));
+        minter_registry.remove(nft_id);
+        env.storage()
+            .instance()
+            .set(&MINTER_REGISTRY, &minter_registry);
+
+        // Decrement total supply
+        let supply: u64 = env.storage().instance().get(&NFT_COUNTER).unwrap_or(0);
+        if supply > 0 {
+            env.storage().instance().set(&NFT_COUNTER, &(supply - 1));
+        }
+
+        // Emit burn event
+        env.events().publish(
+            (symbol_short!("ai_nft"), symbol_short!("burn")),
+            (nft_id, owner),
+        );
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -523,5 +581,96 @@ mod tests {
         // And transfer succeeds
         client.transfer(&nft_id, &new_owner);
         assert_eq!(client.owner_of(&nft_id), new_owner);
+    }
+
+    // ── Burn / SC-61 Tests ────────────────────────────────────────────────────
+
+    /// The owner can burn their own NFT; storage is cleaned up and supply decrements.
+    #[test]
+    fn test_burn_removes_nft_and_decrements_supply() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[7u8; 32]);
+        let personality = String::from_str(&env, "burnable_bot");
+        let nft_id = client.mint(&minter, &metadata_hash, &personality);
+
+        assert_eq!(client.total_supply(), 1u64);
+
+        client.burn(&minter, &nft_id);
+
+        assert_eq!(client.total_supply(), 0u64);
+        assert!(client.try_owner_of(&nft_id).is_err());
+        assert!(client.try_metadata(&nft_id).is_err());
+    }
+
+    /// A non-owner calling burn is rejected.
+    #[test]
+    fn test_burn_rejects_non_owner() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[8u8; 32]);
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "protected_bot"));
+
+        let result = client.try_burn(&attacker, &nft_id);
+        assert!(result.is_err(), "burn should fail when caller is not the owner");
+
+        // NFT should be untouched
+        assert_eq!(client.owner_of(&nft_id), minter);
+        assert_eq!(client.total_supply(), 1u64);
+    }
+
+    /// Burning a nonexistent NFT fails with NFTNotFound.
+    #[test]
+    fn test_burn_nonexistent_nft_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let result = client.try_burn(&caller, &999u64);
+        assert!(result.is_err(), "burning a nonexistent NFT should fail");
+    }
+
+    /// burn is blocked when the contract is paused.
+    #[test]
+    fn test_pause_blocks_burn() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, AINFTContract);
+        let client = AINFTContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[9u8; 32]);
+        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "pausable_bot"));
+
+        client.pause(&admin);
+        let result = client.try_burn(&minter, &nft_id);
+        assert!(result.is_err(), "burn should fail when paused");
     }
 }

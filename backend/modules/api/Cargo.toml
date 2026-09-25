@@ -45,6 +45,10 @@ redis = { version = "0.24", features = ["tokio-comp", "json"] }
 deadpool-redis = "0.14"
 tokio = { version = "1", features = ["full"] }
 
+# For the optional OpenAI chat-moderation pass (BE-76). Already in the
+# workspace graph via `st_core`, so this adds no new crate to Cargo.lock.
+reqwest = { version = "0.11", features = ["json"] }
+
 # For Prometheus metrics
 actix-web-prom = "0.7"
 once_cell = "1.19"

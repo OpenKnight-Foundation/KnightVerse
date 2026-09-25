@@ -752,6 +752,27 @@ impl Handler<WsMessage> for WsSession {
     }
 }
 
+/// Disconnect a spectator whose bounded outbound queue overflowed (see the
+/// backpressure policy in `redis_broadcast.rs`).
+impl Handler<SpectatorDisconnect> for WsSession {
+    type Result = ();
+
+    fn handle(&mut self, msg: SpectatorDisconnect, ctx: &mut ws::WebsocketContext<Self>) {
+        warn!(
+            "Disconnecting backpressured spectator from game {}: outbound queue overflowed",
+            msg.game_id
+        );
+        if let Some(subscription) = self.redis_sub_task.take() {
+            subscription.abort();
+        }
+        ctx.close(Some(ws::CloseReason {
+            code: ws::CloseCode::Again,
+            description: Some("spectator outbound queue overflowed".to_string()),
+        }));
+        ctx.stop();
+    }
+}
+
 /// WebSocket route handler with auth and reconnection support.
 ///
 /// Spectator vs. player is selected via `?role=spectator` (default: player).

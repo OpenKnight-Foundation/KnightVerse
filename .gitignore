@@ -9,3 +9,7 @@ GITHUB_ISSUES.md
 
 /*/report.md
 node_modules
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/

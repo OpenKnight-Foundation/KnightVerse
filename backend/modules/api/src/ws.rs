@@ -854,7 +854,7 @@ impl Handler<SpectatorDisconnect> for WsSession {
             subscription.abort();
         }
         ctx.close(Some(ws::CloseReason {
-            code: 1013,
+            code: ws::CloseCode::Again,
             description: Some("spectator outbound queue overflowed".to_string()),
         }));
         ctx.stop();

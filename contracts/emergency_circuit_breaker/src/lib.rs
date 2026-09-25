@@ -24,6 +24,7 @@ pub struct MatchEscrowData {
 /// fat-fingered `transfer_admin` call can be noticed and cancelled before
 /// it takes effect.
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingAdmin {
     pub candidate: Address,
     pub effective_at: u64,
@@ -539,7 +540,10 @@ impl PausableContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        Address, Env,
+    };
 
     #[test]
     fn test_initialize() {
@@ -701,9 +705,98 @@ mod test {
         client.initialize(&admin);
         client.pause(&admin);
 
-        // Admin transfer should work even when paused
+        // Admin transfer should work even when paused, but only after the timelock
         client.transfer_admin(&admin, &new_admin);
+        assert_eq!(client.get_admin(), admin);
+
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+        client.accept_admin_transfer(&new_admin);
         assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin_transfer(), None);
+    }
+
+    #[test]
+    fn test_admin_transfer_waits_for_timelock() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.transfer_admin(&admin, &new_admin);
+        let effective_at = 1_000 + ADMIN_TRANSFER_TIMELOCK_SECS;
+        assert_eq!(
+            client.get_pending_admin_transfer(),
+            Some(PendingAdmin {
+                candidate: new_admin.clone(),
+                effective_at,
+            })
+        );
+
+        env.ledger().set_timestamp(effective_at - 1);
+        assert_eq!(
+            client.try_accept_admin_transfer(&new_admin),
+            Err(Ok(ContractError::TimelockNotElapsed))
+        );
+        assert_eq!(client.get_admin(), admin);
+
+        env.ledger().set_timestamp(effective_at);
+        client.accept_admin_transfer(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+    }
+
+    #[test]
+    fn test_admin_transfer_rejects_other_candidate() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        let intruder = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.transfer_admin(&admin, &new_admin);
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+
+        assert!(client.try_accept_admin_transfer(&intruder).is_err());
+        assert_eq!(client.get_admin(), admin);
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        assert_eq!(
+            client.try_cancel_admin_transfer(&admin),
+            Err(Ok(ContractError::NoPendingAdminTransfer))
+        );
+
+        client.transfer_admin(&admin, &new_admin);
+        client.cancel_admin_transfer(&admin);
+        assert_eq!(client.get_pending_admin_transfer(), None);
+
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+        assert_eq!(
+            client.try_accept_admin_transfer(&new_admin),
+            Err(Ok(ContractError::NoPendingAdminTransfer))
+        );
+        assert_eq!(client.get_admin(), admin);
     }
 
     #[test]

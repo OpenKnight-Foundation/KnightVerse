@@ -27,12 +27,21 @@ Target audience: Chess enthusiasts, AI researchers, competitive gamers, and deve
 KnightVerse/
 ├── contracts/          # Soroban smart contracts (Rust)
 ├── backend/            # Rust/Actix server
-├── frontend/           # TypeScript frontend
-├── ai/                 # Python/PyTorch AI integration
-├── docker/             # Dockerfiles & compose
-├── docs/               # Additional documentation
+├── frontend/           # Next.js web app (the live frontend)
+├── agent-engines/      # Python engine workers & AI agents
+├── docker-compose.yml  # Local services
+│
+│   # Not built, imported, or deployed (see each folder's README):
+├── apps/web/           # Unused: earlier sound/analysis/offline components
+├── src/                # Unused: leaderboard, spectator chat, AI tutor drafts
+├── pers-store/         # Unused: standalone persistence/verification drafts
 └── README.md
 ```
+
+`apps/web/`, `src/` and `pers-store/` are **not** part of any build: nothing in
+`frontend/`, `backend/`, `contracts/` or CI imports them. Make changes in
+`frontend/` (or `backend/`) instead. If you want to revive something from these
+folders, port it into the live app.
 
 ## Setup Instructions (End-to-End)
 
@@ -52,7 +61,7 @@ cd KnightVerse
 ```
 
 ### 2. Environment Setup
-Create `.env` files in `/backend` and `/contracts` (copy from `.env.example` if present). Key variables:
+Create `.env` files in `/backend`, `/contracts`, and `/frontend` (copy from `.env.example` if present). Key variables:
 ```env
 # Backend
 DATABASE_URL=postgres://user:pass@localhost:5432/knightverse
@@ -61,7 +70,16 @@ HORIZON_URL=https://horizon-testnet.stellar.org
 SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443  # Update for Futurenet if needed
 
 # Contracts
-NETWORK=testnet
+STELLAR_NETWORK=testnet
+HORIZON_URL=https://horizon-testnet.stellar.org
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
+DEPLOYER_ACCOUNT=your-stellar-account-alias
+STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+
+# Frontend
+NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
+NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
 ```
 Fund your Stellar testnet account at https://laboratory.stellar.org/#account-creator?network=testnet
 
@@ -100,8 +118,10 @@ Access at `http://localhost:8080` (adjust port as needed).
 ```bash
 cd ../frontend
 npm install    # or yarn install
-npm run dev    # Starts at http://localhost:5173 (Vite/React/etc.)
+npm run dev    # Starts at http://localhost:3000 (Next.js 15 with Turbopack)
 ```
+
+See [frontend/.env.example](./frontend/.env.example) for required environment variables.
 
 ### 6. Full Stack with Docker (Recommended for Dev)
 ```bash
@@ -121,9 +141,23 @@ This starts PostgreSQL, backend, frontend, and (optionally) a local Soroban quic
 ## 🏁 Contributor Roadmap (SCF Grant Readiness)
 We have identified **150 independent tasks** across the frontend, backend, contracts, and AI engine to make KnightVerse a premier platform for the Stellar ecosystem.
 
-- [View the Grant Readiness Task List](./docs/scf_grant_readiness_issues.md)
+- View the Grant Readiness Task List
 - **Contributors**: Please pick any open issue labeled `contribution-ready`.
 - **Status**: Preparing for Stellar Community Fund (SCF) submission.
+
+## Code of Conduct
+
+Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
+
+## Toolchain
+- **Rust**: stable (minimum edition 2021)
+- **soroban-sdk**: `21.0.0`
+- **stellar-cli / soroban-cli**: `21.x` (compatible with SDK 21)
+
+## Deployed Addresses (Testnet)
+| Contract | ID |
+|----------|----|
+| Game     | *Not yet published. Add the full contract ID here once deployed.* |
 
 ## Helpful Links
 - Stellar Developer Docs: https://developers.stellar.org/
@@ -144,3 +178,5 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to get started with 
 Built with ❤️ on Stellar — fast, affordable, and ready for real-world gaming.
 
 Questions? reach out!
+
+

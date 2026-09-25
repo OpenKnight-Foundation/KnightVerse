@@ -58,11 +58,7 @@ impl IdempotencyRecord {
         }
     }
 
-    pub fn new_completed(
-        status_code: u16,
-        headers: Vec<(String, String)>,
-        body: String,
-    ) -> Self {
+    pub fn new_completed(status_code: u16, headers: Vec<(String, String)>, body: String) -> Self {
         Self {
             status: IdempotencyStatus::Completed,
             status_code: Some(status_code),
@@ -124,7 +120,9 @@ impl IdempotencyStorage {
                         let get_res: Result<Option<String>, _> =
                             cmd("GET").arg(key).query_async(&mut conn).await;
                         if let Ok(Some(cached_json)) = get_res {
-                            if let Ok(record) = serde_json::from_str::<IdempotencyRecord>(&cached_json) {
+                            if let Ok(record) =
+                                serde_json::from_str::<IdempotencyRecord>(&cached_json)
+                            {
                                 return LockResult::Exists(record);
                             }
                         }
@@ -159,12 +157,7 @@ impl IdempotencyStorage {
     }
 
     /// Save completed response payload into storage with TTL
-    pub async fn save_completed(
-        &self,
-        key: &str,
-        record: IdempotencyRecord,
-        ttl_secs: u64,
-    ) {
+    pub async fn save_completed(&self, key: &str, record: IdempotencyRecord, ttl_secs: u64) {
         match self {
             Self::Redis(pool) => {
                 if let Ok(mut conn) = pool.get().await {
@@ -177,7 +170,10 @@ impl IdempotencyStorage {
                             .query_async(&mut conn)
                             .await;
                         if let Err(e) = res {
-                            warn!("Failed to save completed idempotency record in Redis: {}", e);
+                            warn!(
+                                "Failed to save completed idempotency record in Redis: {}",
+                                e
+                            );
                         }
                     }
                 }
@@ -387,7 +383,9 @@ where
                             cached_headers,
                             body_str,
                         );
-                        storage.save_completed(&redis_key, completed_record, ttl).await;
+                        storage
+                            .save_completed(&redis_key, completed_record, ttl)
+                            .await;
                         debug!("Saved completed idempotency record for key: {}", redis_key);
                     }
 
@@ -435,8 +433,9 @@ where
                                 res_builder.insert_header((
                                     header::HeaderName::from_bytes(k.as_bytes())
                                         .unwrap_or(header::CONTENT_TYPE),
-                                    header::HeaderValue::from_str(&v)
-                                        .unwrap_or_else(|_| header::HeaderValue::from_static("application/json")),
+                                    header::HeaderValue::from_str(&v).unwrap_or_else(|_| {
+                                        header::HeaderValue::from_static("application/json")
+                                    }),
                                 ));
                             }
                         }

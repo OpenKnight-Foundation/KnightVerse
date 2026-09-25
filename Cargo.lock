@@ -509,6 +509,18 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "emergency_circuit_breaker",
+<<<<<<< HEAD
+=======
+ "rand",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "gasless_relayer"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+>>>>>>> 5f6dda2c9c4229300622fcf92233996a143898b8
  "rand",
  "soroban-sdk",
 ]
@@ -1323,6 +1335,14 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sponsorship_escrow"
+version = "0.1.0"
+dependencies = [
+ "emergency_circuit_breaker",
+ "soroban-sdk",
 ]
 
 [[package]]

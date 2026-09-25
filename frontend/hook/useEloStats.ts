@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
 import { computeEloStats, filterByTimeRange } from "@/lib/eloStatsUtils";
 
-export type TimeRange = "7d" | "30d" | "90d" | "all";
+export type TimeRange = "7d" | "30d" | "90d" | "1y" | "all";
 
 export interface EloStats {
   currentElo: number;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 import type { ChessVariant } from "@/lib/chessVariants";
 
-import { API_BASE, WS_BASE, endpoints } from "@/lib/api";
+import { API_BASE, endpoints } from "@/lib/api";
 
 
 export type MatchmakingStatus =
@@ -133,11 +133,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
         sessionIdRef.current = sessionId;
 
         const ws = new WebSocket(
-
-          `${WS_BASE}/v1/matchmaking/ws?session=${sessionId}`,
-
-          endpoints.matchmaking.ws(sessionId)
-
+          endpoints.matchmaking.ws(sessionId),
         );
         matchmakingWsRef.current = ws;
 

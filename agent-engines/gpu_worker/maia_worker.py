@@ -114,7 +114,10 @@ class MaiaModel:
     """ONNX Runtime wrapper for a single Maia checkpoint."""
 
     def __init__(self, model_path: str, target_elo: int) -> None:
-        if not _ONNX_AVAILABLE:
+        # Check the (patchable) `ort` name rather than the _ONNX_AVAILABLE
+        # flag frozen at import time, so tests can exercise this class by
+        # patching `ort` without a real onnxruntime install.
+        if ort is None:
             raise RuntimeError("onnxruntime is required for Maia inference")
 
         self.target_elo = target_elo

@@ -1,12 +1,11 @@
-use std::collections::HashMap;
 use uuid::Uuid;
 use chrono::Utc;
 use log::info;
 
 // Import all the modules we need to test
 use metrics::{MetricsCollector, GameMetrics, UserMetrics, TournamentMetrics};
-use tournament::{Tournament, TournamentFormat, BracketConfig, TournamentStatus};
-use validation::{RealTimeMoveValidator, MoveValidationRequest, ValidationError};
+use tournament::{BracketFormat, BracketService, TournamentParticipant, TournamentStatus};
+use validation::{RealTimeMoveValidator, MoveValidationRequest};
 use archiving::{PGNArchiver, PGNGame, ArchiveRequest, ArchiveNetwork, ArchiveMetadata, GameMetadata, TimeControlCategory, GameType};
 
 #[tokio::main]
@@ -66,51 +65,39 @@ async fn test_metrics_integration() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn test_tournament_integration() -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing Tournament Integration");
-    
-    let config = BracketConfig {
-        tournament_id: Uuid::new_v4(),
-        format: TournamentFormat::Swiss,
-        total_rounds: 3,
-        pairings_per_round: 0,
-        auto_pair: true,
-        pair_immediately: false,
-        allow_byes: true,
-        color_alternation: true,
-        rating_sort: true,
-    };
-    
-    let mut tournament = Tournament::new(
-        "Integration Test Tournament".to_string(),
-        TournamentFormat::Swiss,
-        config,
-        "5+0".to_string(),
-    );
-    
+
     // Add participants
     let player1 = Uuid::new_v4();
     let player2 = Uuid::new_v4();
     let player3 = Uuid::new_v4();
-    
-    tournament.add_participant(player1, "Alice".to_string(), 1500)?;
-    tournament.add_participant(player2, "Bob".to_string(), 1600)?;
-    tournament.add_participant(player3, "Charlie".to_string(), 1400)?;
-    
-    assert_eq!(tournament.participants.len(), 3);
-    assert_eq!(tournament.status, TournamentStatus::Registration);
-    
+
+    let participants = vec![
+        TournamentParticipant { id: player1, name: "Alice".to_string(), elo: 1500, seed: 0 },
+        TournamentParticipant { id: player2, name: "Bob".to_string(), elo: 1600, seed: 0 },
+        TournamentParticipant { id: player3, name: "Charlie".to_string(), elo: 1400, seed: 0 },
+    ];
+
+    let mut bracket = BracketService::create_bracket(
+        Uuid::new_v4(),
+        "Integration Test Tournament",
+        participants,
+        BracketFormat::SingleElimination,
+    )?;
+
+    assert_eq!(bracket.participants.len(), 3);
+    assert_eq!(bracket.status, TournamentStatus::Registration);
+
     // Start tournament
-    tournament.start_tournament()?;
-    assert_eq!(tournament.status, TournamentStatus::InProgress);
-    assert_eq!(tournament.current_round, 1);
-    
-    // Check that pairings were generated
-    assert!(!tournament.pairings.is_empty());
-    
-    // Get tournament stats
-    let stats = tournament.get_tournament_stats();
-    assert_eq!(stats.total_participants, 3);
-    assert_eq!(stats.active_participants, 3);
-    
+    BracketService::start_tournament(&mut bracket)?;
+    assert_eq!(bracket.status, TournamentStatus::InProgress);
+
+    // Check that matches were generated
+    assert!(!bracket.matches.is_empty());
+
+    // Get tournament standings
+    let standings = BracketService::get_standings(&bracket);
+    assert_eq!(standings.len(), 3);
+
     info!("✅ Tournament integration test passed");
     Ok(())
 }
@@ -232,21 +219,22 @@ async fn test_end_to_end_workflow() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = MetricsCollector::new();
     
     // 2. Create and start a tournament
-    let config = BracketConfig::default();
-    let mut tournament = Tournament::new(
-        "E2E Test Tournament".to_string(),
-        TournamentFormat::Swiss,
-        config,
-        "3+0".to_string(),
-    );
-    
     let player1_id = Uuid::new_v4();
     let player2_id = Uuid::new_v4();
-    
-    tournament.add_participant(player1_id, "Player1".to_string(), 1500)?;
-    tournament.add_participant(player2_id, "Player2".to_string(), 1600)?;
-    
-    tournament.start_tournament()?;
+
+    let participants = vec![
+        TournamentParticipant { id: player1_id, name: "Player1".to_string(), elo: 1500, seed: 0 },
+        TournamentParticipant { id: player2_id, name: "Player2".to_string(), elo: 1600, seed: 0 },
+    ];
+
+    let mut bracket = BracketService::create_bracket(
+        Uuid::new_v4(),
+        "E2E Test Tournament",
+        participants,
+        BracketFormat::SingleElimination,
+    )?;
+
+    BracketService::start_tournament(&mut bracket)?;
     
     // 3. Record metrics for tournament creation
     metrics.inc_tournaments_created();
@@ -298,7 +286,7 @@ async fn test_end_to_end_workflow() -> Result<(), Box<dyn std::error::Error>> {
         annotations: None,
         metadata: GameMetadata {
             game_id: Uuid::new_v4(),
-            tournament_id: Some(tournament.id),
+            tournament_id: Some(bracket.id),
             created_at: Utc::now(),
             completed_at: Utc::now(),
             duration_seconds: 180,
@@ -341,12 +329,12 @@ async fn test_end_to_end_workflow() -> Result<(), Box<dyn std::error::Error>> {
     
     // 8. Verify all components are working
     let exported_metrics = metrics.export()?;
-    assert!(exported.contains("games_created_total"));
-    assert!(exported.contains("moves_made_total"));
-    assert!(exported.contains("tournaments_created_total"));
-    
-    assert_eq!(tournament.status, TournamentStatus::InProgress);
-    assert_eq!(tournament.participants.len(), 2);
+    assert!(exported_metrics.contains("games_created_total"));
+    assert!(exported_metrics.contains("moves_made_total"));
+    assert!(exported_metrics.contains("tournaments_created_total"));
+
+    assert_eq!(bracket.status, TournamentStatus::InProgress);
+    assert_eq!(bracket.participants.len(), 2);
     
     info!("✅ End-to-end workflow test passed");
     Ok(())

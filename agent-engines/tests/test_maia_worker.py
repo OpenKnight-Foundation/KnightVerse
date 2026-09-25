@@ -50,9 +50,11 @@ class TestFENEncoding:
         board = chess.Board()
         tensor = _encode_board_tensor(board)
 
-        assert tensor[0, 7, 0] == 1.0
-        assert tensor[0, 7, 1] == 1.0
-        assert tensor[0, 7, 4] == 1.0
+        # Row 0 is rank 8 (the far side of the board), row 7 is rank 1, so
+        # white's pawns on rank 2 land on row 6.
+        assert tensor[0, 6, 0] == 1.0
+        assert tensor[0, 6, 1] == 1.0
+        assert tensor[0, 6, 4] == 1.0
 
         white_pawns = np.sum(tensor[0, :, :])
         assert white_pawns == 8.0
@@ -61,8 +63,9 @@ class TestFENEncoding:
         board = chess.Board()
         tensor = _encode_board_tensor(board)
 
-        assert tensor[6, 0, 0] == 1.0
-        assert tensor[6, 0, 4] == 1.0
+        # Black's pawns on rank 7 land on row 1 (row 0 is rank 8).
+        assert tensor[6, 1, 0] == 1.0
+        assert tensor[6, 1, 4] == 1.0
 
         black_pawns = np.sum(tensor[6, :, :])
         assert black_pawns == 8.0
@@ -85,7 +88,8 @@ class TestFENEncoding:
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
         board = chess.Board(fen)
         tensor = _encode_board_tensor(board)
-        assert tensor[0, 6, 4] == 1.0
+        # The e2-pawn moved to e4 (rank 4 -> row 7-3 = 4).
+        assert tensor[0, 4, 4] == 1.0
         assert tensor[12, :, :].sum() == 0.0
 
 

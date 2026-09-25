@@ -41,7 +41,7 @@ export function TransactionButton({
       await onTransaction();
       setState("success");
       setTimeout(() => setState("idle"), 2000);
-    } catch (error) {
+    } catch {
       setState("error");
       setTimeout(() => setState("idle"), 3000);
     }

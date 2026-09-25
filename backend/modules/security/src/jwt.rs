@@ -4,8 +4,10 @@ use actix_web::{
     error::{Error, ErrorUnauthorized},
     HttpMessage,
 };
+use deadpool_redis::Pool;
 use futures_util::future::{ok, LocalBoxFuture, Ready};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use std::task::{Context, Poll};
@@ -28,7 +30,8 @@ pub struct Claims {
     pub exp: usize,
     /// Issued at time (Unix timestamp)
     pub iat: usize,
-    /// JWT ID for reconnection tokens (optional)
+    /// JWT ID for token revocation and replay detection. Older tokens may omit it.
+    #[serde(default)]
     pub jti: Option<String>,
     /// Token type (access or reconnect)
     pub token_type: TokenType,
@@ -123,7 +126,7 @@ impl JwtService {
             username: username.to_string(),
             exp: now + self.expiration_time,
             iat: now,
-            jti: None,
+            jti: Some(Uuid::new_v4().to_string()),
             token_type: TokenType::Access,
         };
 
@@ -187,17 +190,29 @@ impl JwtService {
 }
 
 /// Middleware for JWT authentication
+#[derive(Clone)]
 pub struct JwtAuthMiddleware {
     secret_key: Rc<String>,
     expiration_time: usize,
+    redis_pool: Option<Pool>,
 }
 
 impl JwtAuthMiddleware {
     /// Create a new JWT auth middleware
     pub fn new(secret_key: String, expiration_time: usize) -> Self {
+        Self::new_with_redis(secret_key, expiration_time, None)
+    }
+
+    /// Create a new JWT auth middleware that also checks Redis-backed token revocation.
+    pub fn new_with_redis(
+        secret_key: String,
+        expiration_time: usize,
+        redis_pool: Option<Pool>,
+    ) -> Self {
         JwtAuthMiddleware {
             secret_key: Rc::new(secret_key),
             expiration_time,
+            redis_pool,
         }
     }
 }
@@ -219,6 +234,7 @@ where
             service,
             secret_key: self.secret_key.clone(),
             expiration_time: self.expiration_time,
+            redis_pool: self.redis_pool.clone(),
         })
     }
 }
@@ -227,6 +243,7 @@ pub struct JwtAuthMiddlewareService<S> {
     service: S,
     secret_key: Rc<String>,
     expiration_time: usize,
+    redis_pool: Option<Pool>,
 }
 
 impl<S, B> Service<ServiceRequest> for JwtAuthMiddlewareService<S>
@@ -246,8 +263,8 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let secret_key = self.secret_key.clone();
         let expiration_time = self.expiration_time;
+        let redis_pool = self.redis_pool.clone();
 
-        // Extract authorization header
         let auth_header = req.headers().get("Authorization").cloned();
 
         match auth_header {
@@ -261,19 +278,31 @@ where
                     }
                 };
 
-                // Extract token from Bearer scheme
                 if let Some(token) = JwtService::extract_token_from_header(&header_str) {
-                    // Validate token
                     let jwt_service = JwtService::new((*secret_key).clone(), expiration_time);
                     match jwt_service.validate_token(&token) {
                         Ok(claims) => {
-                            // Store claims in request extensions
-                            req.extensions_mut().insert(claims);
-                            let fut = self.service.call(req);
-                            Box::pin(async move {
-                                let res = fut.await?;
+                            let claims_for_check = claims.clone();
+                            let redis_pool_for_check = redis_pool.clone();
+                            req.extensions_mut().insert(claims.clone());
+                            let service = self.service.call(req);
+                            return Box::pin(async move {
+                                if let Some(pool) = redis_pool_for_check {
+                                    if let Some(jti) = claims_for_check.jti.clone() {
+                                        let key = format!("token_blacklist:{}", jti);
+                                        let mut conn = pool
+                                            .get()
+                                            .await
+                                            .map_err(|_| ErrorUnauthorized("Redis unavailable"))?;
+                                        let exists: bool = conn.exists(&key).await.unwrap_or(false);
+                                        if exists {
+                                            return Err(ErrorUnauthorized("Token revoked"));
+                                        }
+                                    }
+                                }
+                                let res = service.await?;
                                 Ok(res.map_into_boxed_body())
-                            })
+                            });
                         }
                         Err(_) => {
                             Box::pin(

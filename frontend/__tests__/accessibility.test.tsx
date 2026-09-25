@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderHook, act } from "@testing-library/react";
 import React from "react";
+
+import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
+
+// Board components read useGamePreferences(), which requires its provider.
+const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
+  rtlRender(ui, { wrapper: GamePreferencesProvider, ...options });
 import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
 import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
 

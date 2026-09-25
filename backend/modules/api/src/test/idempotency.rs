@@ -1,8 +1,5 @@
 use crate::idempotency::IdempotencyMiddleware;
-use actix_web::{
-    http::StatusCode,
-    test, web, App, HttpMessage, HttpResponse,
-};
+use actix_web::{http::StatusCode, test, web, App, HttpMessage, HttpResponse};
 use security::jwt::{Claims, TokenType};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -13,23 +10,19 @@ async fn test_idempotent_first_request_executes() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/staking/stake",
-                web::post().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Ok().json(serde_json::json!({
-                            "status": "staked",
-                            "amount": 100
-                        }))
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/staking/stake",
+        web::post().to(move || {
+            let c = count_clone.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                HttpResponse::Ok().json(serde_json::json!({
+                    "status": "staked",
+                    "amount": 100
+                }))
+            }
+        }),
+    ))
     .await;
 
     let req = test::TestRequest::post()
@@ -52,23 +45,19 @@ async fn test_idempotent_duplicate_request_returns_cached_response() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/tournaments/t-123/register",
-                web::post().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        let count = c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Created().json(serde_json::json!({
-                            "status": "registered",
-                            "execution_id": count
-                        }))
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/tournaments/t-123/register",
+        web::post().to(move || {
+            let c = count_clone.clone();
+            async move {
+                let count = c.fetch_add(1, Ordering::SeqCst);
+                HttpResponse::Created().json(serde_json::json!({
+                    "status": "registered",
+                    "execution_id": count
+                }))
+            }
+        }),
+    ))
     .await;
 
     // First request
@@ -94,10 +83,7 @@ async fn test_idempotent_duplicate_request_returns_cached_response() {
 
     let resp2 = test::call_service(&app, req2).await;
     assert_eq!(resp2.status(), StatusCode::CREATED);
-    assert_eq!(
-        resp2.headers().get("Idempotency-Replayed").unwrap(),
-        "true"
-    );
+    assert_eq!(resp2.headers().get("Idempotency-Replayed").unwrap(), "true");
 
     let body2 = test::read_body(resp2).await;
     let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
@@ -116,15 +102,14 @@ async fn test_idempotent_concurrent_request_returns_409_conflict() {
     let pending_key = "idempotency:anon:pending-concurrent-key";
     middleware.storage.try_lock(pending_key, 120).await;
 
-    let app = test::init_service(
-        App::new().wrap(middleware).route(
+    let app =
+        test::init_service(App::new().wrap(middleware).route(
             "/api/v1/escrow/release",
             web::post().to(|| async {
                 HttpResponse::Ok().json(serde_json::json!({"status": "released"}))
             }),
-        ),
-    )
-    .await;
+        ))
+        .await;
 
     // Concurrent request arriving while key is still PENDING
     let req = test::TestRequest::post()
@@ -146,23 +131,19 @@ async fn test_idempotency_keys_scoped_per_user() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/staking/deposit",
-                web::post().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        let count = c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Ok().json(serde_json::json!({
-                            "status": "deposited",
-                            "execution_count": count
-                        }))
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/staking/deposit",
+        web::post().to(move || {
+            let c = count_clone.clone();
+            async move {
+                let count = c.fetch_add(1, Ordering::SeqCst);
+                HttpResponse::Ok().json(serde_json::json!({
+                    "status": "deposited",
+                    "execution_count": count
+                }))
+            }
+        }),
+    ))
     .await;
 
     // User A (user_id: 101)
@@ -217,30 +198,26 @@ async fn test_server_error_5xx_not_cached_as_completed() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/escrow/transfer",
-                web::post().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        let count = c.fetch_add(1, Ordering::SeqCst);
-                        if count == 0 {
-                            // First attempt fails with 500
-                            HttpResponse::InternalServerError().json(serde_json::json!({
-                                "error": "Database temporarily unavailable"
-                            }))
-                        } else {
-                            // Retry succeeds
-                            HttpResponse::Ok().json(serde_json::json!({
-                                "status": "transfer_complete"
-                            }))
-                        }
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/escrow/transfer",
+        web::post().to(move || {
+            let c = count_clone.clone();
+            async move {
+                let count = c.fetch_add(1, Ordering::SeqCst);
+                if count == 0 {
+                    // First attempt fails with 500
+                    HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Database temporarily unavailable"
+                    }))
+                } else {
+                    // Retry succeeds
+                    HttpResponse::Ok().json(serde_json::json!({
+                        "status": "transfer_complete"
+                    }))
+                }
+            }
+        }),
+    ))
     .await;
 
     // First request returns 500
@@ -272,22 +249,18 @@ async fn test_get_requests_bypass_idempotency_middleware() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/staking/info",
-                web::get().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        let count = c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Ok().json(serde_json::json!({
-                            "pool_size": 1000 + count
-                        }))
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/staking/info",
+        web::get().to(move || {
+            let c = count_clone.clone();
+            async move {
+                let count = c.fetch_add(1, Ordering::SeqCst);
+                HttpResponse::Ok().json(serde_json::json!({
+                    "pool_size": 1000 + count
+                }))
+            }
+        }),
+    ))
     .await;
 
     let req1 = test::TestRequest::get()
@@ -313,20 +286,16 @@ async fn test_x_idempotency_key_header_support() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .route(
-                "/api/v1/staking/claim",
-                web::put().to(move || {
-                    let c = count_clone.clone();
-                    async move {
-                        c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Ok().json(serde_json::json!({"claimed": true}))
-                    }
-                }),
-            ),
-    )
+    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
+        "/api/v1/staking/claim",
+        web::put().to(move || {
+            let c = count_clone.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                HttpResponse::Ok().json(serde_json::json!({"claimed": true}))
+            }
+        }),
+    ))
     .await;
 
     let req1 = test::TestRequest::put()

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { FaTrophy, FaStar, FaCheck, FaTimes, FaRedo, FaArrowLeft } from "react-icons/fa";
@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useTrackedTransaction } from "@/hook/useTrackedTransaction";
 import PuzzleRushView from "@/components/PuzzleRushView";
+import { fetchWithRetry, endpoints } from "@/lib/api";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -25,7 +26,7 @@ interface Puzzle {
   hint?: string;
 }
 
-// Mock puzzle data with FENs
+// Mock puzzle data — used only in development when USE_MOCK_PUZZLES=true
 const MOCK_PUZZLES: Puzzle[] = [
   {
     id: 1,
@@ -85,8 +86,56 @@ export default function PuzzlesPage() {
   const [isClaiming, setIsClaiming] = useState(false);
   const [showRush, setShowRush] = useState(false);
 
+  // Real data state (#FE-68)
+  const useMockPuzzles =
+    process.env.NODE_ENV === "development" &&
+    process.env.NEXT_PUBLIC_USE_MOCK_PUZZLES === "true";
+  const [puzzles, setPuzzles] = useState<Puzzle[]>(useMockPuzzles ? MOCK_PUZZLES : []);
+  const [puzzlesLoading, setPuzzlesLoading] = useState(!useMockPuzzles);
+  const [puzzlesError, setPuzzlesError] = useState<string | null>(null);
+
   const { address, status: walletStatus } = useAppContext();
   const { addToast } = useToast();
+
+  // Fetch puzzles from the backend (#FE-68)
+  useEffect(() => {
+    if (useMockPuzzles) return;
+
+    let cancelled = false;
+
+    async function loadPuzzles() {
+      setPuzzlesLoading(true);
+      setPuzzlesError(null);
+      try {
+        const res = await fetchWithRetry(endpoints.puzzles.list());
+        if (!res.ok) {
+          throw new Error(`Failed to load puzzles (HTTP ${res.status})`);
+        }
+        const data = (await res.json()) as { puzzles: Puzzle[] };
+        if (!cancelled) {
+          setPuzzles(data.puzzles);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "Failed to load puzzles";
+          setPuzzlesError(message);
+          addToast({
+            severity: "error",
+            title: "Could not load puzzles",
+            detail: message,
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setPuzzlesLoading(false);
+        }
+      }
+    }
+
+    void loadPuzzles();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useMockPuzzles]);
 
   const { execute: executeClaim } = useTrackedTransaction({
     type: "claim",
@@ -119,14 +168,26 @@ export default function PuzzlesPage() {
     setShowHint(false);
   };
 
-  const handleSolutionSubmit = useCallback(() => {
+  const handleSolutionSubmit = useCallback(async () => {
     if (!selectedPuzzle) return;
 
-    // Simulate solution validation
+    // Validate solution locally first.
     const isSolutionCorrect = currentMove === selectedPuzzle.solution.length - 1;
     setIsCorrect(isSolutionCorrect);
 
     if (isSolutionCorrect) {
+      // Submit to backend (#FE-68)
+      try {
+        const moves = selectedPuzzle.solution.map((m) => `${m.from}${m.to}${m.promotion ?? ""}`);
+        await fetchWithRetry(endpoints.puzzles.submit(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ puzzle_id: selectedPuzzle.id, moves }),
+        });
+      } catch {
+        // Non-blocking: reward flow continues even if submit fails
+      }
+
       // Mark puzzle as completed
       setCompletedPuzzles((prev: Set<number>) => new Set([...prev, selectedPuzzle.id]));
 
@@ -153,7 +214,7 @@ export default function PuzzlesPage() {
     if (currentMove < selectedPuzzle.solution.length - 1) {
       setCurrentMove(currentMove + 1);
     } else {
-      handleSolutionSubmit();
+      void handleSolutionSubmit();
     }
   };
 
@@ -194,9 +255,9 @@ export default function PuzzlesPage() {
     }
   }, [walletStatus, address, addToast, executeClaim]);
 
-  const completionRate = Math.round((completedPuzzles.size / MOCK_PUZZLES.length) * 100);
-
-  if (showRush) return <PuzzleRushView onExit={() => setShowRush(false)} />;
+  const completionRate = puzzles.length > 0
+    ? Math.round((completedPuzzles.size / puzzles.length) * 100)
+    : 0;
 
   // Chess game instance for the selected puzzle
   const [puzzleGame] = useState(() => new Chess());
@@ -227,7 +288,7 @@ export default function PuzzlesPage() {
             if (currentMove < selectedPuzzle.solution.length - 1) {
               setCurrentMove((prev: number) => prev + 1);
             } else {
-              handleSolutionSubmit();
+              void handleSolutionSubmit();
             }
           }
           return true;
@@ -239,6 +300,8 @@ export default function PuzzlesPage() {
     },
     [selectedPuzzle, puzzleGame, currentMove, handleSolutionSubmit],
   );
+
+  if (showRush) return <PuzzleRushView onExit={() => setShowRush(false)} />;
 
   if (selectedPuzzle) {
     return (
@@ -439,42 +502,66 @@ export default function PuzzlesPage() {
 
         {/* Puzzle Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {MOCK_PUZZLES.map((puzzle, idx) => {
-            const isCompleted = completedPuzzles.has(puzzle.id);
-            return (
-              <div
-                key={puzzle.id}
-                className={`bg-gray-800/60 p-6 rounded-xl border transition-all duration-300 hover:scale-[1.03] cursor-pointer animate-slide-up ${
-                  isCompleted 
-                    ? 'border-emerald-500/30 bg-emerald-500/5' 
-                    : 'border-gray-700/50 hover:border-gray-600/50'
-                }`}
-                style={{ animationDelay: `${idx * 0.05}s` }}
-                onClick={() => handlePuzzleSelect(puzzle)}
-                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePuzzleSelect(puzzle); } }}
-                role="button"
-                tabIndex={0}
-                aria-label={`${puzzle.title} — ${puzzle.difficulty} difficulty${isCompleted ? ', completed' : ''}`}
+          {puzzlesLoading ? (
+            <div className="col-span-full flex justify-center items-center py-16" aria-live="polite" aria-busy="true">
+              <svg className="animate-spin h-8 w-8 text-emerald-400 mr-3" viewBox="0 0 24 24" aria-hidden="true">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="text-gray-400">Loading puzzles…</span>
+            </div>
+          ) : puzzlesError ? (
+            <div className="col-span-full text-center py-16" role="alert">
+              <p className="text-red-400 font-medium mb-3">⚠ {puzzlesError}</p>
+              <button
+                onClick={() => { setPuzzlesError(null); setPuzzlesLoading(true); }}
+                className="px-4 py-2 text-sm bg-gray-700/60 hover:bg-gray-600/60 rounded-lg text-white transition-colors"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-white">{puzzle.title}</h3>
-                  {isCompleted && <FaCheck className="text-emerald-400 text-xl" />}
+                Retry
+              </button>
+            </div>
+          ) : puzzles.length === 0 ? (
+            <div className="col-span-full text-center py-16 text-gray-500">
+              No puzzles available. Check back soon!
+            </div>
+          ) : (
+            puzzles.map((puzzle, idx) => {
+              const isCompleted = completedPuzzles.has(puzzle.id);
+              return (
+                <div
+                  key={puzzle.id}
+                  className={`bg-gray-800/60 p-6 rounded-xl border transition-all duration-300 hover:scale-[1.03] cursor-pointer animate-slide-up ${
+                    isCompleted
+                      ? 'border-emerald-500/30 bg-emerald-500/5'
+                      : 'border-gray-700/50 hover:border-gray-600/50'
+                  }`}
+                  style={{ animationDelay: `${idx * 0.05}s` }}
+                  onClick={() => handlePuzzleSelect(puzzle)}
+                  onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePuzzleSelect(puzzle); } }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${puzzle.title} — ${puzzle.difficulty} difficulty${isCompleted ? ', completed' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-white">{puzzle.title}</h3>
+                    {isCompleted && <FaCheck className="text-emerald-400 text-xl" />}
+                  </div>
+
+                  <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-sm mb-3 ${getDifficultyColor(puzzle.difficulty)}`}>
+                    {getDifficultyIcon(puzzle.difficulty)}
+                    <span className="capitalize">{puzzle.difficulty}</span>
+                  </div>
+
+                  <p className="text-gray-300 text-sm mb-4">{puzzle.description}</p>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">Puzzle #{puzzle.id}</span>
+                    <span className="text-xs text-emerald-400 font-medium">+0.01 XLM</span>
+                  </div>
                 </div>
-                
-                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-sm mb-3 ${getDifficultyColor(puzzle.difficulty)}`}>
-                  {getDifficultyIcon(puzzle.difficulty)}
-                  <span className="capitalize">{puzzle.difficulty}</span>
-                </div>
-                
-                <p className="text-gray-300 text-sm mb-4">{puzzle.description}</p>
-                
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Puzzle #{puzzle.id}</span>
-                  <span className="text-xs text-emerald-400 font-medium">+0.01 XLM</span>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
         {/* Instructions */}

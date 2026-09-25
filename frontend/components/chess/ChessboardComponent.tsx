@@ -12,15 +12,29 @@ import { useBoardTheme } from "@/context/ThemeContext";
 import { Chess } from "chess.js";
 
 function parseFen(fen: string): (string | null)[][] {
-  const board = new Chess(fen);
-  return board.board().map((row) =>
-    row.map((cell) => {
-      if (!cell) return null;
-      const color = cell.color === "w" ? "w" : "b";
-      const piece = cell.type.toUpperCase();
-      return `${color}${piece}`;
-    }),
-  );
+  const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const validFen = !fen || fen === "start" ? START_FEN : fen;
+  try {
+    const board = new Chess(validFen);
+    return board.board().map((row) =>
+      row.map((cell) => {
+        if (!cell) return null;
+        const color = cell.color === "w" ? "w" : "b";
+        const piece = cell.type.toUpperCase();
+        return `${color}${piece}`;
+      }),
+    );
+  } catch {
+    const board = new Chess(START_FEN);
+    return board.board().map((row) =>
+      row.map((cell) => {
+        if (!cell) return null;
+        const color = cell.color === "w" ? "w" : "b";
+        const piece = cell.type.toUpperCase();
+        return `${color}${piece}`;
+      }),
+    );
+  }
 }
 
 function formatPieceName(piece: string): string {
@@ -41,27 +55,65 @@ function formatPieceName(piece: string): string {
   return pieceMap[piece] || "Unknown Piece";
 }
 
-import WhiteKing from "./chesspieces/white-king.svg";
-import WhiteQueen from "./chesspieces/white-queen.svg";
-import WhiteBishop from "./chesspieces/white-bishop.svg";
-import WhiteKnight from "./chesspieces/white-knight.svg";
-import WhiteRook from "./chesspieces/white-rook.svg";
-import WhitePawn from "./chesspieces/white-pawn.svg";
-import BlackKing from "./chesspieces/black-king.svg";
-import BlackQueen from "./chesspieces/black-queen.svg";
-import BlackBishop from "./chesspieces/black-bishop.svg";
-import BlackKnight from "./chesspieces/black-knight.svg";
-import BlackRook from "./chesspieces/black-rook.svg";
-import BlackPawn from "./chesspieces/black-pawn.svg";
+import { useGamePreferences } from "@/context/GamePreferencesContext";
+
+// Import standard piece set assets
+import StandardWhiteKing from "./chesspieces/white-king.svg";
+import StandardWhiteQueen from "./chesspieces/white-queen.svg";
+import StandardWhiteBishop from "./chesspieces/white-bishop.svg";
+import StandardWhiteKnight from "./chesspieces/white-knight.svg";
+import StandardWhiteRook from "./chesspieces/white-rook.svg";
+import StandardWhitePawn from "./chesspieces/white-pawn.svg";
+import StandardBlackKing from "./chesspieces/black-king.svg";
+import StandardBlackQueen from "./chesspieces/black-queen.svg";
+import StandardBlackBishop from "./chesspieces/black-bishop.svg";
+import StandardBlackKnight from "./chesspieces/black-knight.svg";
+import StandardBlackRook from "./chesspieces/black-rook.svg";
+import StandardBlackPawn from "./chesspieces/black-pawn.svg";
+
+// Import all Neo piece set assets
+import NeoWhiteKing from "./chesspieces/neo/white-king.svg";
+import NeoWhiteQueen from "./chesspieces/neo/white-queen.svg";
+import NeoWhiteBishop from "./chesspieces/neo/white-bishop.svg";
+import NeoWhiteKnight from "./chesspieces/neo/white-knight.svg";
+import NeoWhiteRook from "./chesspieces/neo/white-rook.svg";
+import NeoWhitePawn from "./chesspieces/neo/white-pawn.svg";
+import NeoBlackKing from "./chesspieces/neo/black-king.svg";
+import NeoBlackQueen from "./chesspieces/neo/black-queen.svg";
+import NeoBlackBishop from "./chesspieces/neo/black-bishop.svg";
+import NeoBlackKnight from "./chesspieces/neo/black-knight.svg";
+import NeoBlackRook from "./chesspieces/neo/black-rook.svg";
+import NeoBlackPawn from "./chesspieces/neo/black-pawn.svg";
+
+// Import custom King piece set assets
+import StauntonWhiteKing from "./chesspieces/staunton/white-king.svg";
+import StauntonBlackKing from "./chesspieces/staunton/black-king.svg";
+
+import AlphaWhiteKing from "./chesspieces/alpha/white-king.svg";
+import AlphaBlackKing from "./chesspieces/alpha/black-king.svg";
+
+import MedievalWhiteKing from "./chesspieces/medieval/white-king.svg";
+import MedievalBlackKing from "./chesspieces/medieval/black-king.svg";
+
+import CyberpunkWhiteKing from "./chesspieces/cyberpunk/white-king.svg";
+import CyberpunkBlackKing from "./chesspieces/cyberpunk/black-king.svg";
 
 import { PremoveService, PreMove } from "@/services/premoveService";
+import PremoveArrow from "./PremoveArrow";
 
 interface ChessboardComponentProps {
   position: string;
-  onDrop: (params: { sourceSquare: string; targetSquare: string }) => boolean;
+  onDrop: (params: {
+    sourceSquare: string;
+    targetSquare: string;
+  }) => boolean | Promise<boolean>;
   width?: number; // Added width as optional prop
   orientation?: "white" | "black"; // Board orientation: white = normal, black = flipped
   lastMove?: { from: string; to: string } | [string, string] | null;
+  isMyTurn?: boolean;
+  "aria-label"?: string;
+  legalMoves?: string[];
+  onSquareClick?: (square: string) => void;
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
@@ -69,7 +121,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   onDrop,
   orientation = "white",
   lastMove,
+  "aria-label": ariaLabel,
+  legalMoves,
+  onSquareClick,
 }) => {
+  const { preferences } = useGamePreferences();
   const [premoves, setPremoves] = useState<PreMove[]>([]);
   const premoveService = useRef(new PremoveService());
 
@@ -79,7 +135,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     setPremoves([]);
   };
 
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(typeof window !== "undefined");
   const [boardWidth] = useState(560);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [hoveredSquare, setHoveredSquare] = useState<string | null>(null);
@@ -117,23 +173,62 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   }, []);
 
   // Memoize piece image mapping - prevents recreation on every render
-  const pieceImages: Record<string, string> = useMemo(
-    () => ({
-      wP: WhitePawn,
-      wR: WhiteRook,
-      wN: WhiteKnight,
-      wB: WhiteBishop,
-      wQ: WhiteQueen,
-      wK: WhiteKing,
-      bP: BlackPawn,
-      bR: BlackRook,
-      bN: BlackKnight,
-      bB: BlackBishop,
-      bQ: BlackQueen,
-      bK: BlackKing,
-    }),
-    [],
-  );
+  const pieceImages: Record<string, string> = useMemo(() => {
+    // Piece set assets mapping
+    const standardPieces = {
+      wP: StandardWhitePawn,
+      wR: StandardWhiteRook,
+      wN: StandardWhiteKnight,
+      wB: StandardWhiteBishop,
+      wQ: StandardWhiteQueen,
+      wK: StandardWhiteKing,
+      bP: StandardBlackPawn,
+      bR: StandardBlackRook,
+      bN: StandardBlackKnight,
+      bB: StandardBlackBishop,
+      bQ: StandardBlackQueen,
+      bK: StandardBlackKing,
+    };
+
+    const pieceSetAssets: Record<string, Record<string, string>> = {
+      neo: {
+        wP: NeoWhitePawn,
+        wR: NeoWhiteRook,
+        wN: NeoWhiteKnight,
+        wB: NeoWhiteBishop,
+        wQ: NeoWhiteQueen,
+        wK: NeoWhiteKing,
+        bP: NeoBlackPawn,
+        bR: NeoBlackRook,
+        bN: NeoBlackKnight,
+        bB: NeoBlackBishop,
+        bQ: NeoBlackQueen,
+        bK: NeoBlackKing,
+      },
+      staunton: {
+        ...standardPieces,
+        wK: StauntonWhiteKing,
+        bK: StauntonBlackKing,
+      },
+      alpha: {
+        ...standardPieces,
+        wK: AlphaWhiteKing,
+        bK: AlphaBlackKing,
+      },
+      medieval: {
+        ...standardPieces,
+        wK: MedievalWhiteKing,
+        bK: MedievalBlackKing,
+      },
+      cyberpunk: {
+        ...standardPieces,
+        wK: CyberpunkWhiteKing,
+        bK: CyberpunkBlackKing,
+      },
+    };
+
+    return pieceSetAssets[preferences.pieceSet] || pieceSetAssets.neo;
+  }, [preferences.pieceSet]);
 
   const getPieceImage = useCallback(
     (piece: string) => {
@@ -141,7 +236,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       const isWhite = piece.startsWith("w");
       return (
         <div
-          className="piece-container group"
+          className="piece-container group will-change-transform"
           style={{
             width: "100%",
             height: "100%",
@@ -153,7 +248,10 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
             cursor: "grab",
             pointerEvents: "none",
             transform: `scale(${boardWidth < 400 ? 0.7 : 0.9})`,
-            transition: "all 0.2s ease",
+            transition:
+              "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), filter 0.15s ease",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
           }}
         >
           <div
@@ -162,11 +260,13 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               height: boardWidth < 400 ? "80%" : "90%",
               position: "relative",
               transform: "scale(1)",
-              transition: "transform 0.2s ease",
+              transition: "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)",
               aspectRatio: "1/1",
               minHeight: "40px",
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
             }}
-            className="group-hover:transform group-hover:scale-110"
+            className="group-hover:transform group-hover:scale-110 will-change-transform"
           >
             <Image
               src={pieceImages[piece]}
@@ -270,18 +370,17 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [highlightedSquares, setHighlightedSquares] = useState<
     { square: string; color: string }[]
   >([]);
-  const [arrows, setArrows] = useState<[string, string][]>([]);
 
   const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
     e.preventDefault();
     const square = `${row},${col}`;
     const color = e.shiftKey
-      ? "red"
+      ? "rgba(239, 68, 68, 0.6)"
       : e.altKey
-        ? "blue"
+        ? "rgba(59, 130, 246, 0.6)"
         : e.ctrlKey
-          ? "yellow"
-          : "green";
+          ? "rgba(234, 179, 8, 0.6)"
+          : "rgba(34, 197, 94, 0.6)";
 
     setHighlightedSquares((prev) =>
       prev.some((s) => s.square === square)
@@ -297,6 +396,21 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
   }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setHoveredSquare(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, targetRow: number, targetCol: number) => {
+      e.preventDefault();
+      const data = e.dataTransfer.getData("text/plain");
+      if (!data) return;
+      const [sourceRow, sourceCol] = data.split(",").map(Number);
+      attemptMove(sourceRow, sourceCol, targetRow, targetCol);
+    },
+    [attemptMove],
+  );
 
   const focusSquare = useCallback((row: number, col: number) => {
     const key = `${row},${col}`;
@@ -453,7 +567,10 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         ref={boardRef}
         className="chessboard-container w-full mx-auto relative"
         role="grid"
-        aria-label={`Chess board, ${orientation === "white" ? "White" : "Black"} perspective`}
+        aria-label={
+          ariaLabel ||
+          `Chess board, ${orientation === "white" ? "White" : "Black"} perspective`
+        }
         aria-roledescription="chessboard"
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -478,12 +595,14 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           transformOrigin: "center center",
         }}
       >
-        {premoves.map(() => {
-          // const fromSquare = premove.from;
-          // const toSquare = premove.to;
-          // const color = index === 0 ? "blue" : "purple";
-          // return <PremoveArrow key={index} from={fromSquare} to={toSquare} color={color} />;
-        })}
+        {premoves.map((premove, index) => (
+          <PremoveArrow
+            key={`arrow-${index}-${premove.from}-${premove.to}`}
+            from={premove.from}
+            to={premove.to}
+            color={index === 0 ? "#3b82f6" : "#a855f7"}
+          />
+        ))}
         {premoves.map((premove) => {
           const toSquare = premove.to;
           const piece = premove.piece;
@@ -518,16 +637,20 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               (s) => s.square === squareKey,
             );
 
-          // Compute actual board coordinates for the aria-label
-          const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
-          const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
-          const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
-          const isLastMoveSquare = Boolean(
-            lastMove &&
+            // Compute actual board coordinates for the aria-label
+            const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
+            const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
+            const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+            const isLastMoveSquare = Boolean(
+              lastMove &&
               (Array.isArray(lastMove)
                 ? lastMove.includes(squareLabel)
-                : lastMove.from === squareLabel || lastMove.to === squareLabel)
-          );
+                : lastMove.from === squareLabel || lastMove.to === squareLabel),
+            );
+
+            const isLegalTarget =
+              preferences.showLegalMoveDots === "enabled" &&
+              Boolean(legalMoves?.includes(squareLabel));
 
             const selectionHint = isSelected
               ? ". Piece selected. Press Space on another square to move, or Escape to deselect."
@@ -537,78 +660,101 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 ? ". Press Space to select this piece."
                 : "";
 
-          const selectedShadow = colors.selected
-            ? `inset 0 0 0 3px ${colors.selected}`
-            : "inset 0 0 0 3px rgba(0, 93, 173, 0.75)";
-          const lastMoveShadow = colors.lastMove
-            ? `inset 0 0 0 3px ${colors.lastMove}`
-            : "inset 0 0 0 2px rgba(245, 246, 130, 0.75)";
+            const selectedShadow = colors.selected
+              ? `inset 0 0 0 3px ${colors.selected}`
+              : "inset 0 0 0 3px rgba(0, 93, 173, 0.75)";
+            const lastMoveShadow = colors.lastMove
+              ? `inset 0 0 0 3px ${colors.lastMove}`
+              : "inset 0 0 0 2px rgba(245, 246, 130, 0.75)";
 
-          return (
-            <div
-              key={`${rowIndex}-${colIndex}`}
-              data-square={`${rowIndex}-${colIndex}`}
-              role="gridcell"
-              aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
-              aria-selected={isSelected}
-              aria-current={isFocused ? ("true" as const) : undefined}
-              tabIndex={0}
-              onFocus={() => setFocusedSquare(squareKey)}
-              onBlur={() =>
-                setFocusedSquare((prev) =>
-                  prev === squareKey ? null : prev,
-                )
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleSquareClick(rowIndex, colIndex);
+            return (
+              <div
+                key={`${rowIndex}-${colIndex}`}
+                data-square={`${rowIndex}-${colIndex}`}
+                role="gridcell"
+                aria-label={`${squareLabel}${piece ? ", " + formatPieceName(piece) : ", empty"}${selectionHint}${focusHint}`}
+                aria-selected={isSelected}
+                aria-current={isFocused ? ("true" as const) : undefined}
+                tabIndex={0}
+                onFocus={() => setFocusedSquare(squareKey)}
+                onBlur={() =>
+                  setFocusedSquare((prev) => (prev === squareKey ? null : prev))
                 }
-              }}
-              style={{
-                backgroundColor: isLight ? colors.dark : colors.light,
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                cursor: piece ? "grab" : "default",
-                position: "relative",
-                outline: "none",
-                boxShadow: isSelected
-                  ? selectedShadow
-                  : isFocused
-                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
-                  : isLastMoveSquare
-                  ? lastMoveShadow
-                  : isHovered
-                  ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
-                  : "none",
-                transition: "background-color 0.2s ease, box-shadow 0.1s ease",
-              }}
-              onClick={() => handleSquareClick(rowIndex, colIndex)}
-              onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
-              draggable={!!piece}
-              onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
-              onDragEnd={handleDragEnd}
-              onDrop={(e) => handleDrop(e, rowIndex, colIndex)}
-              onDragOver={handleDragOver}
-            >
-              {piece && (
-                <div
-                  style={{
-                    transition: "transform 0.2s ease-out",
-                    transform: `scale(${isSelected ? 1.1 : 1})`,
-                  }}
-                >
-                  {getPieceImage(piece)}
-                </div>
-              )}
-            </div>
-          );
-        }),
-      )}
-    </div>
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleSquareClick(rowIndex, colIndex);
+                    if (onSquareClick) onSquareClick(squareLabel);
+                  }
+                }}
+                style={{
+                  backgroundColor: highlightedSquare
+                    ? highlightedSquare.color
+                    : isLight
+                      ? colors.dark
+                      : colors.light,
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  cursor: piece ? "grab" : "default",
+                  position: "relative",
+                  outline: "none",
+                  boxShadow: isSelected
+                    ? selectedShadow
+                    : isFocused
+                      ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                      : isLastMoveSquare
+                        ? lastMoveShadow
+                        : isHovered
+                          ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
+                          : "none",
+                  transition:
+                    "background-color 0.2s ease, box-shadow 0.1s ease",
+                }}
+                onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
+                onClick={() => {
+                  handleSquareClick(rowIndex, colIndex);
+                  if (onSquareClick) onSquareClick(squareLabel);
+                }}
+                onTouchStart={(e) => handleTouchStart(e, rowIndex, colIndex)}
+                draggable={!!piece}
+                onDragStart={(e) => handleDragStart(e, rowIndex, colIndex)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, rowIndex, colIndex)}
+                onDragOver={handleDragOver}
+              >
+                {piece && (
+                  <div
+                    style={{
+                      transition: "transform 0.2s ease-out",
+                      transform: `scale(${isSelected ? 1.1 : 1})`,
+                    }}
+                  >
+                    {getPieceImage(piece)}
+                  </div>
+                )}
+                {isLegalTarget && (
+                  <div
+                    data-testid="legal-move-dot"
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      width: piece ? "90%" : "30%",
+                      height: piece ? "90%" : "30%",
+                      borderRadius: "50%",
+                      background: piece ? "transparent" : "rgba(0, 0, 0, 0.25)",
+                      border: piece ? "4px solid rgba(0, 0, 0, 0.25)" : "none",
+                      pointerEvents: "none",
+                    }}
+                  />
+                )}
+              </div>
+            );
+          }),
+        )}
+      </div>
     </div>
   );
 };

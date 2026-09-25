@@ -1,8 +1,7 @@
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::Error;
-use futures::future::{ok, LocalBoxFuture, Ready};
+use actix_web::{Error, HttpMessage};
+use futures_util::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
-use tracing::Span;
 use uuid::Uuid;
 
 pub struct RequestIdMiddleware;
@@ -59,10 +58,8 @@ where
 
         Box::pin(async move {
             let mut res = fut.await?;
-            res.headers_mut().insert(
-                "X-Request-ID".parse().unwrap(),
-                request_id.parse().unwrap(),
-            );
+            res.headers_mut()
+                .insert("X-Request-ID".parse().unwrap(), request_id.parse().unwrap());
             Ok(res)
         })
     }
@@ -75,11 +72,10 @@ mod tests {
 
     #[actix_web::test]
     async fn test_request_id_generated_when_missing() {
-        let app = test::init_service(
-            App::new()
-                .wrap(RequestIdMiddleware)
-                .route("/", actix_web::web::get().to(|| async { HttpResponse::Ok() })),
-        )
+        let app = test::init_service(App::new().wrap(RequestIdMiddleware).route(
+            "/",
+            actix_web::web::get().to(|| async { HttpResponse::Ok() }),
+        ))
         .await;
 
         let req = test::TestRequest::get().uri("/").to_request();
@@ -95,11 +91,10 @@ mod tests {
 
     #[actix_web::test]
     async fn test_request_id_passed_through() {
-        let app = test::init_service(
-            App::new()
-                .wrap(RequestIdMiddleware)
-                .route("/", actix_web::web::get().to(|| async { HttpResponse::Ok() })),
-        )
+        let app = test::init_service(App::new().wrap(RequestIdMiddleware).route(
+            "/",
+            actix_web::web::get().to(|| async { HttpResponse::Ok() }),
+        ))
         .await;
 
         let req = test::TestRequest::get()
@@ -108,17 +103,21 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
 
-        let request_id = resp.headers().get("X-Request-ID").unwrap().to_str().unwrap();
+        let request_id = resp
+            .headers()
+            .get("X-Request-ID")
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert_eq!(request_id, "custom-id-123");
     }
 
     #[actix_web::test]
     async fn test_request_id_returned_in_response() {
-        let app = test::init_service(
-            App::new()
-                .wrap(RequestIdMiddleware)
-                .route("/", actix_web::web::get().to(|| async { HttpResponse::Ok() })),
-        )
+        let app = test::init_service(App::new().wrap(RequestIdMiddleware).route(
+            "/",
+            actix_web::web::get().to(|| async { HttpResponse::Ok() }),
+        ))
         .await;
 
         let req = test::TestRequest::get().uri("/").to_request();

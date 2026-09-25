@@ -32,6 +32,10 @@ def _make_analysis(
     error: str | None = None,
     pv_san: list[str] | None = None,
 ) -> EngineAnalysis:
+    # Convenience factory for building an EngineAnalysis with sensible
+    # defaults, so individual tests only need to specify the fields that
+    # matter for what they're checking (e.g. just `error=` for a failure
+    # case, or just `score_cp=` for a scoring case).
     return EngineAnalysis(
         engine_name=name,
         score_cp=score_cp,
@@ -43,6 +47,8 @@ def _make_analysis(
 
 
 async def _run(coro):
+    # Small awaitable pass-through helper. (Not currently used by any test
+    # below, but available for inline-awaiting a coroutine if needed.)
     return await coro
 
 
@@ -52,6 +58,11 @@ async def _run(coro):
 
 
 class TestConsensusBuilding:
+    # These tests exercise `EnsembleEvaluator._build_consensus` directly
+    # (a pure function over a list of EngineAnalysis) rather than going
+    # through the async engine-dispatch path, so they run fast and don't
+    # need any mocking.
+
     def test_full_agreement(self):
         """All engines agree on best move and score."""
         analyses = [
@@ -62,6 +73,7 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=120.0
         )
+        # 3/3 engines picked the same move => full consensus.
         assert result.consensus_score == 1.0
         assert result.best_move_agreement is True
         assert result.recommended_move == "e4"
@@ -77,6 +89,8 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=150.0
         )
+        # 2 of 3 engines agree on "e4" => consensus score of 2/3, and the
+        # majority move should still be surfaced as the recommendation.
         assert result.consensus_score == pytest.approx(2 / 3)
         assert result.best_move_agreement is False
         assert result.recommended_move == "e4"
@@ -91,6 +105,9 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=200.0
         )
+        # Three different moves among three engines => only 1/3 "agree"
+        # with whichever move ends up chosen, and the result should be
+        # flagged divergent.
         assert result.consensus_score == pytest.approx(1 / 3)
         assert result.divergent is True
 
@@ -104,6 +121,10 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=100.0
         )
+        # All three engines agree on the move itself, but their centipawn
+        # evaluations differ by a large margin (200 - 50 = 150), so the
+        # result should still be marked divergent based on eval spread
+        # even though move agreement is 100%.
         assert result.best_move_agreement is True
         assert result.divergent is True
         assert result.evaluation_delta == 150
@@ -118,6 +139,9 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=50.0
         )
+        # Only one engine actually produced a usable result, so its move
+        # is still used as the recommendation, but consensus_score can't
+        # be meaningfully computed with fewer than 2 valid results.
         assert result.recommended_move == "e4"
         assert result.consensus_score == 0.0  # can't compute without 2+
 
@@ -130,6 +154,8 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=10.0
         )
+        # No engine produced a usable analysis, so there's nothing to
+        # recommend and consensus is trivially 0.
         assert result.recommended_move is None
         assert result.consensus_score == 0.0
 
@@ -142,6 +168,8 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=80.0
         )
+        # Delta should be the spread between max and min score_cp values
+        # across engines: 100 - (-50) = 150.
         assert result.evaluation_delta == 150
 
     def test_no_cp_scores(self):
@@ -153,6 +181,9 @@ class TestConsensusBuilding:
         result = EnsembleEvaluator._build_consensus(
             chess.STARTING_FEN, analyses, total_ms=60.0
         )
+        # With no numeric scores available at all (e.g. mate-only scores),
+        # the eval delta should default to 0 rather than erroring, while
+        # move-based recommendation logic still works independently.
         assert result.evaluation_delta == 0.0
         assert result.recommended_move == "e4"
 
@@ -163,6 +194,11 @@ class TestConsensusBuilding:
 
 
 class TestAsyncDispatch:
+    # These tests patch out `_analyse_with_engine` on the evaluator
+    # instance with a fake async function, so no real chess engine
+    # subprocess is ever spawned. This lets us control timing, errors,
+    # and per-engine behavior precisely.
+
     @pytest.mark.asyncio
     async def test_parallel_execution(self):
         """Verify engines are queried concurrently."""
@@ -174,6 +210,8 @@ class TestAsyncDispatch:
         results = []
 
         async def fake_analyse(name, cfg, board, depth, timeout):
+            # Record which engines were actually invoked, so we can
+            # confirm both engines got dispatched (not just one).
             results.append(name)
             return _make_analysis(name)
 
@@ -191,6 +229,8 @@ class TestAsyncDispatch:
         )
 
         async def selective_analyse(name, cfg, board, depth, timeout):
+            # Simulate one specific engine (lc0) crashing with an
+            # exception while the others behave normally.
             if name == "lc0":
                 raise RuntimeError("LC0 crashed")
             return _make_analysis(name)
@@ -211,6 +251,7 @@ class TestAsyncDispatch:
         )
 
         async def slow_analyse(name, cfg, board, depth, timeout):
+            # Simulate stockfish timing out while lc0 responds normally.
             if name == "stockfish":
                 raise asyncio.TimeoutError("timed out")
             return _make_analysis(name)
@@ -230,11 +271,14 @@ class TestAsyncDispatch:
         )
 
         async def fail_analyse(name, cfg, board, depth, timeout):
+            # Every engine raises, simulating e.g. missing binaries.
             raise OSError(f"{name} not found")
 
         evaluator._analyse_with_engine = fail_analyse  # type: ignore
 
         result = await evaluator.analyze(chess.Board())
+        # With zero successful analyses, there's no move to recommend and
+        # every per-engine result should carry an error.
         assert result.recommended_move is None
         assert all(a.error is not None for a in result.analyses)
 
@@ -246,6 +290,8 @@ class TestAsyncDispatch:
 
 class TestEngineAnalysis:
     def test_defaults(self):
+        # Confirms the dataclass's default field values when only the
+        # required `engine_name` is provided.
         ea = EngineAnalysis(engine_name="test")
         assert ea.score_cp is None
         assert ea.score_mate is None
@@ -254,6 +300,7 @@ class TestEngineAnalysis:
         assert ea.error is None
 
     def test_with_values(self):
+        # Confirms fields round-trip correctly when explicitly populated.
         ea = EngineAnalysis(
             engine_name="stockfish",
             score_cp=50,
@@ -273,6 +320,8 @@ class TestEngineAnalysis:
 
 class TestConsensusResult:
     def test_defaults(self):
+        # Confirms ConsensusResult's default values for an empty
+        # analyses list — i.e. before any consensus has been computed.
         cr = ConsensusResult(fen=chess.STARTING_FEN, analyses=[])
         assert cr.consensus_score == 0.0
         assert cr.best_move_agreement is False
@@ -288,6 +337,10 @@ class TestConsensusResult:
 class TestAnalyzeFen:
     @pytest.mark.asyncio
     async def test_analyze_fen(self):
+        # Verifies the `analyze_fen` convenience method (which presumably
+        # builds a chess.Board from a FEN string internally and delegates
+        # to `analyze`) correctly threads the FEN through to the result
+        # and returns the mocked engine's recommended move.
         evaluator = EnsembleEvaluator(engine_configs={"stockfish": {}})
 
         async def fake_analyse(name, cfg, board, depth, timeout):

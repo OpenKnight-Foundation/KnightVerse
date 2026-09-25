@@ -1,13 +1,22 @@
 import unittest
 import asyncio
 from unittest.mock import Mock, patch
-from main import AgentEngineOrchestrator, EngineConfig, EngineType
-from gpu_worker.resource_optimizer import ResourceOptimizer, ResourceTier, ResourceLimits
-from gpu_worker.deployment_pipeline import (
-    DeploymentPipelineOrchestrator,
-    PipelineConfig,
-    DeploymentTarget
-)
+
+import pytest
+
+try:
+    from main import AgentEngineOrchestrator, EngineConfig, EngineType
+    from gpu_worker.resource_optimizer import ResourceOptimizer, ResourceTier, ResourceLimits
+    from gpu_worker.deployment_pipeline import (
+        DeploymentPipelineOrchestrator,
+        PipelineConfig,
+        DeploymentTarget
+    )
+except ImportError as e:
+    pytest.skip(
+        f"deployment_pipeline's dependencies aren't installed by `pip install -e .[dev]` ({e})",
+        allow_module_level=True,
+    )
 
 
 class TestResourceOptimizer(unittest.TestCase):

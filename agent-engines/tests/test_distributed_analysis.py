@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from gpu_worker.config import WorkerConfig
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.models import FullGameAnalysisRequest
 from gpu_worker.pool import WorkerPool
@@ -15,6 +16,14 @@ async def test_full_game_analysis():
     """Test that a full game analysis is correctly distributed and reassembled."""
 
     class MockAnalysisWorker(GPUAnalysisWorker):
+        async def start(self):
+            # Skip spawning a real engine bridge — this worker never
+            # touches it, `analyze` below is fully mocked.
+            pass
+
+        async def shutdown(self):
+            pass
+
         async def analyze(self, request):
             # Simulate analysis
             await asyncio.sleep(0.1)
@@ -30,10 +39,11 @@ async def test_full_game_analysis():
             }
 
     pool = WorkerPool(
-        configs=[{"engine_backend": "stockfish", "engine_path": "/usr/local/bin/stockfish"}] * 2,
+        configs=[WorkerConfig(engine_backend="stockfish", engine_path="/usr/local/bin/stockfish")] * 2,
         maia_configs=[],
         worker_factory=lambda config, book: MockAnalysisWorker(config),
     )
+    await pool.start_all()
     orchestrator = DecentralizedOrchestrator(pool)
 
     fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * 5
@@ -43,4 +53,4 @@ async def test_full_game_analysis():
 
     assert len(result.results) == 5
     for i, analysis_result in enumerate(result.results):
-        assert analysis_result["request_id"] != request.id
+        assert analysis_result.request_id != request.id

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -25,7 +25,7 @@ pub enum ReportReason {
 }
 
 /// Represents a player report
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PlayerReport {
     /// Unique report ID
     pub id: u64,
@@ -39,6 +39,23 @@ pub struct PlayerReport {
     pub evidence_game_id: Option<String>,
     /// Timestamp when the report was filed
     pub timestamp: Instant,
+}
+
+impl Serialize for PlayerReport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("PlayerReport", 6)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("reporter", &self.reporter)?;
+        state.serialize_field("reported", &self.reported)?;
+        state.serialize_field("reason", &self.reason)?;
+        state.serialize_field("evidence_game_id", &self.evidence_game_id)?;
+        state.serialize_field("timestamp_nanos", &self.timestamp.elapsed().as_nanos())?;
+        state.end()
+    }
 }
 
 /// Represents a player's report history
@@ -79,14 +96,33 @@ impl ReportStorage {
         let mut histories = self.histories.lock().map_err(|e| e.to_string())?;
 
         // Check if reporter is shadow banned
-        if let Some(history) = histories.get(reporter) {
-            if history.shadow_banned {
-                return Err("You are not allowed to file reports".to_string());
+        {
+            if let Some(history) = histories.get(reporter) {
+                if history.shadow_banned {
+                    return Err("You are not allowed to file reports".to_string());
+                }
             }
         }
 
         // Rate limit check: max 3 reports per hour
         let now = Instant::now();
+
+        // Duplicate checks must happen before the mutable report-history entry is created
+        // so we do not hold overlapping mutable and immutable borrows on the same map.
+        {
+            if let Some(history) = histories.get(reported) {
+                for existing in &history.reports_received {
+                    if existing.reporter == reporter
+                        && existing.evidence_game_id == evidence_game_id
+                    {
+                        return Err(
+                            "You have already reported this player for this game".to_string()
+                        );
+                    }
+                }
+            }
+        }
+
         let reporter_history = histories
             .entry(reporter.to_string())
             .or_insert_with(PlayerReportHistory::default);
@@ -101,17 +137,6 @@ impl ReportStorage {
                 "Rate limit exceeded: maximum {} reports per hour",
                 MAX_REPORTS_PER_HOUR
             ));
-        }
-
-        // Check for duplicate reports (same reporter, same reported, same game)
-        if let Some(history) = histories.get(reported) {
-            for existing in &history.reports_received {
-                if existing.reporter == reporter
-                    && existing.evidence_game_id == evidence_game_id
-                {
-                    return Err("You have already reported this player for this game".to_string());
-                }
-            }
         }
 
         // Generate report ID
@@ -207,12 +232,25 @@ pub struct ReportResponse {
 }
 
 /// API response for the admin reports endpoint
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AdminReportsResponse {
     /// Total number of reports
     pub total: usize,
     /// List of reports
     pub reports: Vec<PlayerReport>,
+}
+
+impl Serialize for AdminReportsResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("AdminReportsResponse", 2)?;
+        state.serialize_field("total", &self.total)?;
+        state.serialize_field("reports", &self.reports)?;
+        state.end()
+    }
 }
 
 #[cfg(test)]

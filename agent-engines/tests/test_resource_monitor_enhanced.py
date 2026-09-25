@@ -73,10 +73,18 @@ def gpu_stats_provider():
                     "device_id": 1,
                     "name": "NVIDIA GeForce RTX 4090",
                     "utilization_pct": 85.0,
-                    "memory_used_mb": 22000.0,
+                    # This fixture is shared by two tests with opposing
+                    # requirements at the default 90% threshold: one needs
+                    # this device to NOT exceed 90% used, the other needs it
+                    # to NOT have the >10% free margin a worker needs — i.e.
+                    # exactly 90% used / 10% free. 22000 (~89.52% used) was
+                    # actually just under that line, leaving 10.48% free —
+                    # enough margin to (incorrectly, per the second test)
+                    # allocate a worker.
+                    "memory_used_mb": 22118.4,
                     "memory_total_mb": 24576.0,
-                    "memory_free_mb": 2576.0,
-                    "memory_utilization_pct": 89.52,
+                    "memory_free_mb": 2457.6,
+                    "memory_utilization_pct": 90.0,
                     "temperature_c": 82.0,
                     "available_for_worker": False  # Over threshold
                 }
@@ -191,7 +199,7 @@ class TestResourceMonitorEnhanced:
         assert result["threshold_exceeded"] is True
         assert len(result["devices_over_threshold"]) == 1
         assert result["devices_over_threshold"][0]["device_id"] == 1
-        assert result["devices_over_threshold"][0]["memory_percent"] == 89.52
+        assert abs(result["devices_over_threshold"][0]["memory_percent"] - 90.0) < 0.01
         
     def test_gpu_memory_threshold_specific_device(self, gpu_stats_provider):
         """Test GPU memory threshold checking for specific device."""
@@ -229,9 +237,9 @@ class TestResourceMonitorEnhanced:
         
         # Check device 1
         device_1 = available_memory[1]
-        assert device_1["available_mb"] == 2576.0
-        assert abs(device_1["available_percent"] - 10.48) < 0.1
-        assert device_1["used_mb"] == 22000.0
+        assert abs(device_1["available_mb"] - 2457.6) < 0.01
+        assert abs(device_1["available_percent"] - 10.0) < 0.1
+        assert device_1["used_mb"] == 22118.4
         assert device_1["total_mb"] == 24576.0
         assert device_1["can_allocate_worker"] is False
         

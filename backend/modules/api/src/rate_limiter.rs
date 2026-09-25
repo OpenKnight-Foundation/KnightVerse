@@ -5,7 +5,7 @@ use actix_web::{
 };
 use deadpool_redis::Pool;
 use std::{
-    future::{ready, Ready, Future},
+    future::{ready, Future, Ready},
     pin::Pin,
     rc::Rc,
     task::{Context, Poll},
@@ -26,6 +26,7 @@ use tracing::warn;
 ///             .service(login)
 ///     )
 /// ```
+#[derive(Clone)]
 pub struct RedisRateLimiter {
     pool: Pool,
     requests_per_window: u64,
@@ -119,7 +120,10 @@ where
                         "Redis rate limiter connection failed: {}. Allowing request.",
                         e
                     );
-                    return service.call(req).await.map(ServiceResponse::map_into_boxed_body);
+                    return service
+                        .call(req)
+                        .await
+                        .map(ServiceResponse::map_into_boxed_body);
                 }
             };
 
@@ -132,7 +136,10 @@ where
                 Ok(c) => c,
                 Err(e) => {
                     warn!("Redis INCR failed: {}. Allowing request.", e);
-                    return service.call(req).await.map(ServiceResponse::map_into_boxed_body);
+                    return service
+                        .call(req)
+                        .await
+                        .map(ServiceResponse::map_into_boxed_body);
                 }
             };
 

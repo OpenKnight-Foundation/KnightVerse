@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
-use db::db::db::DbPool;
-use sea_orm::{ConnectionTrait, DatabaseBackend, MockDatabase, Statement};
+use crate::DbPool;
+use sea_orm::{ConnectionTrait, DatabaseBackend, DbBackend, MockDatabase, Statement};
 
 // =============================================================================
 // Construction helpers
@@ -77,6 +77,21 @@ fn update_metrics_is_infallible() {
 // Mock query routing
 // =============================================================================
 
+/// Takes the transaction log out of both connections of a pool.
+///
+/// `into_transaction_log` consumes the connection, so the `Arc`s the pool hands
+/// back have to be unwrapped first. `into_connections` consumes the pool, so it
+/// is the only owner at that point and unwrapping always succeeds.
+fn transaction_logs(pool: DbPool) -> (Vec<sea_orm::Transaction>, Vec<sea_orm::Transaction>) {
+    let (primary, replica) = pool.into_connections();
+    let primary = Arc::try_unwrap(primary).expect("pool holds the only primary reference");
+    let replica = Arc::try_unwrap(replica).expect("pool holds the only replica reference");
+    (
+        primary.into_transaction_log(),
+        replica.into_transaction_log(),
+    )
+}
+
 /// Queries issued via `pool.replica()` reach only the replica connection.
 #[tokio::test]
 async fn query_on_replica_does_not_touch_primary() {
@@ -100,13 +115,13 @@ async fn query_on_replica_does_not_touch_primary() {
         ))
         .await;
 
-    let (primary_conn, replica_conn) = pool.into_connections();
+    let (primary_log, replica_log) = transaction_logs(pool);
     assert!(
-        primary_conn.into_transaction_log().is_empty(),
+        primary_log.is_empty(),
         "primary should NOT have been touched when querying replica"
     );
     assert!(
-        !replica_conn.into_transaction_log().is_empty(),
+        !replica_log.is_empty(),
         "replica should have received the query"
     );
 }
@@ -133,13 +148,13 @@ async fn query_on_primary_does_not_touch_replica() {
         ))
         .await;
 
-    let (primary_conn, replica_conn) = pool.into_connections();
+    let (primary_log, replica_log) = transaction_logs(pool);
     assert!(
-        !primary_conn.into_transaction_log().is_empty(),
+        !primary_log.is_empty(),
         "primary should have received the query"
     );
     assert!(
-        replica_conn.into_transaction_log().is_empty(),
+        replica_log.is_empty(),
         "replica should NOT have been touched when querying primary"
     );
 }

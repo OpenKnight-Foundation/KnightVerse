@@ -1,0 +1,8 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Medieval Black King - Ornate historical fantasy design -->
+  <path d="M50 5L55 15L50 20L45 15L50 5Z" fill="#8B4513" stroke="#1a1a1a" stroke-width="1"/>
+  <path d="M30 20L70 20L75 35L80 45L75 55L80 75L70 95H30L20 75L25 55L20 45L25 35L30 20Z" fill="#2d2d2d" stroke="#1a1a1a" stroke-width="2"/>
+  <path d="M40 35L60 35L58 50L50 55L42 50L40 35Z" fill="#1a1a1a"/>
+  <path d="M35 60L65 60L60 85H40L35 60Z" fill="#1a1a1a" stroke="#8B4513" stroke-width="1"/>
+  <circle cx="50" cy="72" r="5" fill="#8B4513"/>
+</svg>

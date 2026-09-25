@@ -10,6 +10,7 @@ import chess
 import pytest
 
 from gpu_worker.config import WorkerConfig
+from gpu_worker.elo_scaling import EngineParams
 from gpu_worker.models import AnalysisRequest, AnalysisResult
 from gpu_worker.tablebase_prober import TablebaseProber, WdlResult
 
@@ -436,11 +437,12 @@ async def test_worker_skip_tablebase_over_7_pieces(monkeypatch: pytest.MonkeyPat
     async def _configure_bridge(self, b, p):  # type: ignore[assignment]
         return None
 
+    default_engine_params = EngineParams(skill_level=20, depth=20, multi_pv=1, elo=2850)
     worker._elo_middleware = type(
         "EM",
         (),
         {
-            "apply": lambda self, r: (r, {}),
+            "apply": lambda self, r: (r, default_engine_params),
             "configure_bridge": _configure_bridge,
         },
     )()

@@ -13,13 +13,19 @@
 
 import React from "react";
 import {
-  render,
+  render as rtlRender,
   screen,
   fireEvent,
   waitFor,
   act,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
+
+// Board components read useGamePreferences(), which requires its provider.
+const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
+  rtlRender(ui, { wrapper: GamePreferencesProvider, ...options });
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { axe } from "vitest-axe";
 import type { AxeMatchers } from "vitest-axe";

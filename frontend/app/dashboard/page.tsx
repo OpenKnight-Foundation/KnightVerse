@@ -19,6 +19,7 @@ import { useAuth } from "@/context/authContext";
 import { useEloStats, type TimeRange } from "@/hook/useEloStats";
 import { cn } from "@/lib/utils";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { API_BASE } from "@/lib/api";
 
 const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
   ssr: false,
@@ -26,6 +27,15 @@ const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
     <div className="rounded-xl border border-gray-700/30 bg-gray-800/40 p-6 shadow-lg shadow-black/10">
       <LoadingSkeleton className="h-5 w-48 mb-4" />
       <LoadingSkeleton className="h-[390px] w-full" />
+    </div>
+  ),
+});
+const AnalyticsCharts = dynamic(() => import("@/components/dashboard/AnalyticsCharts"), {
+  ssr: false,
+  loading: () => (
+    <div className="grid gap-6 xl:grid-cols-2">
+      <LoadingSkeleton className="h-[320px] w-full rounded-2xl" />
+      <LoadingSkeleton className="h-[320px] w-full rounded-2xl" />
     </div>
   ),
 });
@@ -44,12 +54,11 @@ const PerformanceBreakdown = dynamic(() => import("@/components/dashboard/Perfor
   ),
 });
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-
 const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
   { label: "7D", value: "7d" },
   { label: "30D", value: "30d" },
   { label: "90D", value: "90d" },
+  { label: "1Y", value: "1y" },
   { label: "ALL", value: "all" },
 ];
 
@@ -189,6 +198,8 @@ export default function DashboardPage() {
       </section>
 
       <EloChart data={filteredData} title="Interactive ELO trajectory" height={390} />
+
+      <AnalyticsCharts data={filteredData} range={range} />
 
       <section className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
         <RecentMatches data={filteredData} />

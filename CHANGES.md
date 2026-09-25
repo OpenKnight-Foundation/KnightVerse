@@ -25,3 +25,4 @@
 | `REDIS_URL` | **Yes** | e.g. `redis://localhost:6379` |
 | `DATABASE_URL` | Yes (already) | |
 | `JWT_EXPIRATION_SECS` | No | Default 3600 |
+

@@ -88,7 +88,7 @@ def worker_configs():
 def maia_configs():
     """Maia configurations for testing."""
     return [
-        MaiaConfig(path=f"/path/to/maia/{elo}", elo=elo)
+        MaiaConfig(name=f"maia_{elo}", path=f"/path/to/maia/{elo}", elo=elo)
         for elo in [1100, 1500, 1900]
     ]
 
@@ -235,6 +235,8 @@ class TestAutoscalingIntegration:
                     
                     # Mock the daemon's scale_to_target to work with the pool
                     daemon._scale_to_target = AsyncMock()
+                    # Capacity checks fail closed without NVML; act as a GPU host.
+                    daemon._has_available_gpu_capacity = AsyncMock(return_value=True)
                     await daemon.start()
                     
                     # Initial state: should have 2 workers
@@ -486,10 +488,17 @@ class TestAutoscalingIntegration:
                         fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                         depth=20  # Deeper analysis
                     )
-                    long_requests.append(pool.submit(request))
+                    # submit() is a coroutine that awaits the full analysis
+                    # inline, so it must be scheduled as a Task to actually
+                    # start running in the background — a bare append() of
+                    # the coroutine object never executes it.
+                    long_requests.append(asyncio.create_task(pool.submit(request)))
                 
-                # Let requests start processing
-                await asyncio.sleep(0.1)
+                # Let requests start processing. Keep this short: with
+                # min_workers=2 and 5 requests at 0.05s of mock analysis
+                # each, total work is ~0.15s, and shutdown_time below needs
+                # a healthy chunk of that still pending when shutdown begins.
+                await asyncio.sleep(0.02)
                 
                 # Initiate graceful shutdown
                 shutdown_start = time.time()
@@ -501,8 +510,12 @@ class TestAutoscalingIntegration:
                 
                 shutdown_time = time.time() - shutdown_start
                 
-                # Should have waited for requests to complete
-                assert shutdown_time >= 0.1  # At least processing time
+                # Should have waited for requests to complete. Autoscaling
+                # can spin up enough workers to run all 5 requests in a
+                # single ~0.05s round rather than several serial rounds, so
+                # this only asserts "clearly more than instant", not the
+                # full worst-case serial time.
+                assert shutdown_time >= 0.03
                 assert shutdown_time < 3.0   # But not too long
                 
                 # Pool should be properly shutdown
@@ -549,14 +562,18 @@ class TestAutoscalingIntegration:
         # Test worker creation failure
         def failing_worker_factory(config, opening_book):
             raise Exception("Worker creation failed")
-            
+
         pool = AutoscalingWorkerPool(
             base_configs=worker_configs,
             maia_configs=maia_configs,
-            worker_factory=failing_worker_factory,
+            worker_factory=mock_worker_factory,
             enable_autoscaling=True
         )
-        
+
+        # Simulate the factory failing only for a subsequent dynamic add,
+        # after the pool already has its initial workers.
+        pool._worker_factory = failing_worker_factory
+
         # Should handle worker creation failures gracefully
         success = await pool.add_worker(worker_configs[0], gpu_device_id=2)
         assert success is False

@@ -1,8 +1,14 @@
 "use client";
 import React, { useEffect } from "react";
+import type { Move } from "chess.js";
+
+export type MoveNode = Partial<Move> & {
+  san: string;
+  variations?: MoveNode[][];
+};
 
 interface MoveTreeProps {
-  history: any[];
+  history: MoveNode[];
   onMoveClick: (index: number) => void;
   currentMoveIndex: number;
 }
@@ -38,7 +44,7 @@ const MoveTree: React.FC<MoveTreeProps> = ({
     };
   }, [history, currentMoveIndex, onMoveClick]);
 
-  const renderMoves = (moves: any[], parentIndex: number = -1) => {
+  const renderMoves = (moves: MoveNode[], parentIndex: number = -1) => {
     return moves.map((move, index) => {
       const moveIndex = parentIndex === -1 ? index : parentIndex;
       return (
@@ -56,7 +62,7 @@ const MoveTree: React.FC<MoveTreeProps> = ({
           </div>
           {move.variations && move.variations.length > 0 && (
             <div style={{ marginLeft: '20px', display: 'inline' }}>
-              {move.variations.map((variation: any, i: number) => (
+              {move.variations.map((variation: MoveNode[], i: number) => (
                 <div key={i} style={{ display: 'inline' }}>
                   ( {renderMoves(variation, moveIndex)} )
                 </div>
@@ -64,7 +70,7 @@ const MoveTree: React.FC<MoveTreeProps> = ({
             </div>
           )}
         </div>
-      )
+      );
     });
   };
 

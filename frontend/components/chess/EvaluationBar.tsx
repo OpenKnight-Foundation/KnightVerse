@@ -1,17 +1,16 @@
 "use client";
 import React from "react";
-import { motion } from "framer-motion";
 
 interface EvaluationBarProps {
   evaluation: number | null;
-  mate: number | null;
-  isFlipped: boolean;
+  mate?: number | null;
+  isFlipped?: boolean;
 }
 
 export function EvaluationBar({
   evaluation,
-  mate,
-  isFlipped,
+  mate = null,
+  isFlipped = false,
 }: EvaluationBarProps) {
   const score = evaluation ?? 0;
 
@@ -23,14 +22,7 @@ export function EvaluationBar({
   }
 
   const displayScore = mate ? `#M${Math.abs(mate)}` : (score / 100).toFixed(2);
-
   const barHeight = mate ? 100 : whitePercentage;
-
-  const spring = {
-    type: "spring",
-    stiffness: 50,
-    damping: 15,
-  };
 
   return (
     <div
@@ -38,17 +30,13 @@ export function EvaluationBar({
         isFlipped ? "flex-col-reverse" : "flex-col"
       }`}
     >
-      <motion.div
-        className="w-full bg-white"
-        initial={{ height: "50%" }}
-        animate={{ height: `${barHeight}%` }}
-        transition={spring}
+      <div
+        className="w-full bg-white transition-all duration-300 ease-out"
+        style={{ height: `${barHeight}%` }}
       />
-      <motion.div
-        className="w-full bg-gray-900"
-        initial={{ height: "50%" }}
-        animate={{ height: `${100 - barHeight}%` }}
-        transition={spring}
+      <div
+        className="w-full bg-gray-900 transition-all duration-300 ease-out"
+        style={{ height: `${100 - barHeight}%` }}
       />
 
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

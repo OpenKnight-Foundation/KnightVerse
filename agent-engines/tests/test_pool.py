@@ -10,7 +10,7 @@ from gpu_worker.pool import WorkerPool
 
 
 class FakePoolWorker:
-    def __init__(self, config: WorkerConfig) -> None:
+    def __init__(self, config: WorkerConfig, opening_book=None) -> None:
         self.config = config
         self.worker_id = f"worker-{config.gpu.device_id}"
         self.load = 0
@@ -53,7 +53,7 @@ async def test_pool_dispatches_to_least_loaded_worker() -> None:
         WorkerConfig(gpu=GPUConfig(device_id=0), max_concurrent_analyses=2),
         WorkerConfig(gpu=GPUConfig(device_id=1), max_concurrent_analyses=2),
     ]
-    pool = WorkerPool(configs, worker_factory=FakePoolWorker)
+    pool = WorkerPool(configs, [], worker_factory=FakePoolWorker)
     await pool.start_all()
 
     requests = [

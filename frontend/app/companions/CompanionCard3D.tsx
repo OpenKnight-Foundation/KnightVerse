@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState } from "react";
+import Image from "next/image";
 
 export interface AICompanion {
   id: string;
   name: string;
   level: number;
   exp: number;
-  tacticalStyle: 'Aggressive' | 'Defensive' | 'Tactical' | 'Endgame Master';
+  tacticalStyle: "Aggressive" | "Defensive" | "Tactical" | "Endgame Master";
   winRate: number;
   winStreak: number;
   image: string;
@@ -20,7 +21,11 @@ interface CompanionCard3DProps {
   onRent: (companionId: string) => void;
 }
 
-export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({ companion, onMint, onRent }) => {
+export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
+  companion,
+  onMint,
+  onRent,
+}) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
@@ -32,7 +37,7 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({ companion, onM
     const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
 
@@ -60,15 +65,19 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({ companion, onM
   };
 
   return (
-    <div style={{ perspective: '1000px' }} className="w-full max-w-sm cursor-pointer select-none">
+    <div
+      style={{ perspective: "1000px" }}
+      className="w-full max-w-sm cursor-pointer select-none"
+    >
       <div
         ref={cardRef}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         style={{
           transform: `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`,
-          transition: rotateX === 0 && rotateY === 0 ? 'transform 0.5s ease-out' : 'none',
-          transformStyle: 'preserve-3d',
+          transition:
+            rotateX === 0 && rotateY === 0 ? "transform 0.5s ease-out" : "none",
+          transformStyle: "preserve-3d",
         }}
         className="relative rounded-2xl border border-slate-700 bg-slate-900/80 p-5 shadow-2xl backdrop-blur-md overflow-hidden text-white"
       >
@@ -84,22 +93,29 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({ companion, onM
           <span className="px-3 py-1 text-xs font-semibold uppercase tracking-wider bg-indigo-500/20 text-indigo-400 rounded-full border border-indigo-500/30">
             {companion.tacticalStyle}
           </span>
-          <span className="text-sm font-mono text-slate-400">Mint ID: #{companion.id}</span>
+          <span className="text-sm font-mono text-slate-400">
+            Mint ID: #{companion.id}
+          </span>
         </div>
 
         <div className="relative h-48 w-full rounded-xl overflow-hidden mb-4 bg-slate-800 border border-slate-700/50 flex items-center justify-center">
-          <img
+          <Image
             src={companion.image}
             alt={companion.name}
-            className="h-full w-full object-cover transform scale-105 hover:scale-110 transition-transform duration-500"
+            fill
+            className="object-cover transform scale-105 hover:scale-110 transition-transform duration-500"
           />
           <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg text-xs font-medium">
             Win Rate: {companion.winRate}%
           </div>
         </div>
 
-        <h3 className="text-xl font-bold mb-1 tracking-tight">{companion.name}</h3>
-        <p className="text-xs text-slate-400 mb-4">Level {companion.level} • {companion.winStreak} Win Streak</p>
+        <h3 className="text-xl font-bold mb-1 tracking-tight">
+          {companion.name}
+        </h3>
+        <p className="text-xs text-slate-400 mb-4">
+          Level {companion.level} • {companion.winStreak} Win Streak
+        </p>
 
         <div className="mb-5">
           <div className="flex justify-between text-xs font-medium text-slate-400 mb-1">

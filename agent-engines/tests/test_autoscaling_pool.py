@@ -27,6 +27,7 @@ def worker_config():
 def maia_config():
     """Fixture providing Maia configuration for testing."""
     return MaiaConfig(
+        name="maia_1500",
         path="/path/to/maia/model",
         elo=1500
     )
@@ -342,11 +343,16 @@ class TestAutoscalingWorkerPool:
         # Simulate pending tasks
         pool._reservations[0] = 2
         
-        # Clear reservations after delay
+        # Clear reservations after delay. wait_for_pending_tasks blocks on a
+        # Condition, which only wakes on notify() — so, like real task
+        # completion elsewhere in the pool, this must acquire the condition
+        # and notify, not just mutate the reservation count directly.
         async def clear_reservations():
             await asyncio.sleep(0.1)
-            pool._reservations[0] = 0
-            
+            async with pool._condition:
+                pool._reservations[0] = 0
+                pool._condition.notify_all()
+
         asyncio.create_task(clear_reservations())
         
         start_time = time.time()

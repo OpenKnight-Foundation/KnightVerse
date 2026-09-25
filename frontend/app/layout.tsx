@@ -10,6 +10,8 @@ import { BoardThemeProvider } from "@/context/ThemeContext";
 import { SoundProvider } from "@/context/SoundContext";
 import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 import { AuthProvider } from "@/context/authContext";
+import { WebSocketScalingProvider } from "@/context/webSocketScalingContext";
+import FeatureFlagBootstrap from "@/components/FeatureFlagBootstrap";
 
 export const metadata: Metadata = {
   title: "KnightVerse",
@@ -34,15 +36,21 @@ export default function RootLayout({
           <AuthProvider>
             <AppProvider>
               <MatchmakingProvider>
-                <ToastProvider>
-                  <TransactionProvider>
-                    <BoardThemeProvider>
-                      <SoundProvider>
-                        <ClientRoot>{children}</ClientRoot>
-                      </SoundProvider>
-                    </BoardThemeProvider>
-                  </TransactionProvider>
-                </ToastProvider>
+                <WebSocketScalingProvider>
+                  <ToastProvider>
+                    <TransactionProvider>
+                      <BoardThemeProvider>
+                        <SoundProvider>
+                          <GamePreferencesProvider>
+                            <FeatureFlagBootstrap>
+                              <ClientRoot>{children}</ClientRoot>
+                            </FeatureFlagBootstrap>
+                          </GamePreferencesProvider>
+                        </SoundProvider>
+                      </BoardThemeProvider>
+                    </TransactionProvider>
+                  </ToastProvider>
+                </WebSocketScalingProvider>
               </MatchmakingProvider>
             </AppProvider>
           </AuthProvider>

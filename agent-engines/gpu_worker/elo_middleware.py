@@ -37,7 +37,7 @@ from typing import Optional
 
 from pydantic import ConfigDict
 
-from gpu_worker.elo_scaling import EngineParams, elo_to_engine_params
+from gpu_worker.elo_scaling import EngineParams, GameMode, elo_to_engine_params
 from gpu_worker.models import AnalysisRequest
 from gpu_worker.uci_bridge import AsyncUciBridge
 
@@ -50,16 +50,24 @@ logger = logging.getLogger("KnightVerse.EloMiddleware")
 
 
 class EloAnalysisRequest(AnalysisRequest):
-    """Extended :class:`AnalysisRequest` that carries an optional ELO field.
+    """Extended :class:`AnalysisRequest` that carries ELO and game-mode fields.
 
     The ``opponent_elo`` field is set by the matchmaking layer when a human
     player is matched against the AI engine.  The middleware reads this field
     to scale the engine's difficulty dynamically.
+
+    ``game_mode`` says what kind of game the request belongs to.  It is
+    ``None`` by default, meaning the caller has not opted into mid-game
+    strength modulation, and the worker uses the rating-derived parameters
+    unchanged.  Setting it to :attr:`~gpu_worker.elo_scaling.GameMode.CASUAL`
+    or ``TRAINING`` enables the dynamic controller; ``RANKED`` and
+    ``TOURNAMENT`` explicitly keep it switched off.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     opponent_elo: Optional[int] = None
+    game_mode: Optional[GameMode] = None
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +151,13 @@ class EloScalingMiddleware:
         if self.override_existing or _num_pv_is_default:
             base_fields["num_pv"] = params.multi_pv
 
-        # Preserve the opponent_elo so downstream systems can log it.
-        scaled = EloAnalysisRequest(**base_fields, opponent_elo=elo)
+        # Preserve the opponent_elo and game mode so downstream systems (the
+        # dynamic scaling controller, logging, replays) still see them.
+        scaled = EloAnalysisRequest(
+            **base_fields,
+            opponent_elo=elo,
+            game_mode=getattr(request, "game_mode", None),
+        )
 
         logger.info(
             "ELO middleware: elo=%d → skill=%d depth=%d num_pv=%d request_id=%s",

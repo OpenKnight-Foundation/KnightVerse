@@ -1,9 +1,12 @@
 import { EXTENDED_MOCK_ELO_DATA } from "@/constants/mockEloData";
 import {
+  buildColorWinBreakdown,
+  buildOpeningWinRates,
   computeEloStats,
   computeStreak,
   computeVolatility,
   filterByTimeRange,
+  formatRatingDelta,
   getRankTier,
 } from "@/lib/eloStatsUtils";
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
@@ -21,11 +24,37 @@ describe("filterByTimeRange", () => {
     expect(filterByTimeRange(EXTENDED_MOCK_ELO_DATA, "7d")).toHaveLength(8);
     expect(filterByTimeRange(EXTENDED_MOCK_ELO_DATA, "30d")).toHaveLength(31);
     expect(filterByTimeRange(EXTENDED_MOCK_ELO_DATA, "90d")).toHaveLength(90);
+    expect(filterByTimeRange(EXTENDED_MOCK_ELO_DATA, "1y")).toHaveLength(90);
     expect(filterByTimeRange(EXTENDED_MOCK_ELO_DATA, "all")).toHaveLength(90);
   });
 
   it("returns an empty list for empty data", () => {
     expect(filterByTimeRange([], "30d")).toEqual([]);
+  });
+});
+
+describe("analytics helpers", () => {
+  it("formats rating deltas consistently", () => {
+    expect(formatRatingDelta(12)).toBe("+12");
+    expect(formatRatingDelta(-8)).toBe("-8");
+    expect(formatRatingDelta(0)).toBe("0");
+  });
+
+  it("builds color-specific win rate summaries", () => {
+    const breakdown = buildColorWinBreakdown(SAMPLE_DATA);
+
+    expect(breakdown).toHaveLength(2);
+    expect(breakdown[0]).toMatchObject({ label: "White", games: 3, wins: 2, winRate: 66.66666666666666 });
+    expect(breakdown[1]).toMatchObject({ label: "Black", games: 2, wins: 1, winRate: 50 });
+  });
+
+  it("builds opening win-rate data from sample history", () => {
+    const openingData = buildOpeningWinRates(SAMPLE_DATA);
+
+    expect(openingData.length).toBeGreaterThan(0);
+    expect(openingData[0]).toHaveProperty("opening");
+    expect(openingData[0]).toHaveProperty("winRate");
+    expect(openingData[0].winRate).toBeGreaterThanOrEqual(0);
   });
 });
 

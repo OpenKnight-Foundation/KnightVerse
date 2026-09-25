@@ -20,15 +20,12 @@ export interface GameNotification {
   onDecline?: () => void;
 }
 
-const AUTO_DISMISS_MS = 15000;
-
 /** Minimal stacking notification center for challenges, tournaments, and mentions. */
 export function ToastNotificationCenter() {
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
 
   const dismiss = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   }, []);
 
   return (

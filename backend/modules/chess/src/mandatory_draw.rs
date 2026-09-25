@@ -37,7 +37,8 @@ impl PositionTracker {
     /// Record a position and check for repetition
     /// Returns the count of times this position has occurred
     pub fn record_position(&mut self, position_hash: &str) -> u32 {
-        let count = self.position_counts
+        let count = self
+            .position_counts
             .entry(position_hash.to_string())
             .and_modify(|c| *c += 1)
             .or_insert(1);

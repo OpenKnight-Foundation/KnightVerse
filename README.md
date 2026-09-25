@@ -27,12 +27,14 @@ Target audience: Chess enthusiasts, AI researchers, competitive gamers, and deve
 KnightVerse/
 ├── contracts/          # Soroban smart contracts (Rust)
 ├── backend/            # Rust/Actix server
-├── frontend/           # Next.js/TypeScript frontend
-├── agent-engines/      # Python/PyTorch AI infrastructure
-├── apps/               # Additional applications
-├── src/                # Shared source code
-├── pers-store/         # Persistent storage utilities
-├── docker-compose.yml  # Docker Compose for local development
+├── frontend/           # Next.js web app (the live frontend)
+├── agent-engines/      # Python engine workers & AI agents
+├── docker-compose.yml  # Local services
+│
+│   # Not built, imported, or deployed (see each folder's README):
+├── apps/web/           # Unused: earlier sound/analysis/offline components
+├── src/                # Unused: leaderboard, spectator chat, AI tutor drafts
+├── pers-store/         # Unused: standalone persistence/verification drafts
 └── README.md
 ```
 

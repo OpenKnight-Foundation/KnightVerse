@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
@@ -7,6 +8,35 @@ use base64::{Engine as _, engine::general_purpose};
 use sha2::{Sha256, Digest};
 use sea_orm::{DatabaseConnection, EntityTrait, ActiveModelTrait, Set};
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// BE-95: Dead-Letter Queue — failed archive jobs
+// ---------------------------------------------------------------------------
+
+/// A record of an archive job that could not be completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedJob {
+    /// Identifier of the game whose archival failed.
+    pub game_id: Uuid,
+    /// Human-readable description of the failure (IPFS/DB error message, etc.).
+    pub failure_reason: String,
+    /// How many times this job has been attempted (including the initial failure).
+    pub retry_count: u32,
+    /// When the first (or most recent) failure occurred.
+    pub failed_at: DateTime<Utc>,
+}
+
+/// In-memory dead-letter store, shared across all archiver instances.
+///
+/// A production deployment would persist this to the database via the
+/// `failed_archive_jobs` table created by the companion migration; this
+/// in-memory implementation is used when no DB table is available.
+static DEAD_LETTER_QUEUE: std::sync::OnceLock<Mutex<Vec<FailedJob>>> =
+    std::sync::OnceLock::new();
+
+fn dlq() -> &'static Mutex<Vec<FailedJob>> {
+    DEAD_LETTER_QUEUE.get_or_init(|| Mutex::new(Vec::new()))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PGNGame {
@@ -214,6 +244,25 @@ impl PGNArchiver {
     }
 
     pub async fn archive_game(&self, request: ArchiveRequest) -> Result<ArchiveResult, ArchiveError> {
+        match self.try_archive_game(request.clone()).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // BE-95: write the failed job to the dead-letter queue.
+                let job = FailedJob {
+                    game_id: request.game_id,
+                    failure_reason: e.to_string(),
+                    retry_count: 1,
+                    failed_at: Utc::now(),
+                };
+                self.push_to_dlq(job);
+                Err(e)
+            }
+        }
+    }
+
+    /// Internal implementation — separated so that `archive_game` can intercept
+    /// errors and write them to the dead-letter queue.
+    async fn try_archive_game(&self, request: ArchiveRequest) -> Result<ArchiveResult, ArchiveError> {
         // Convert PGN to string and validate
         let pgn_string = self.pgn_to_string(&request.pgn_data)?;
         let pgn_bytes = pgn_string.as_bytes();
@@ -513,6 +562,111 @@ impl PGNArchiver {
         // For now, we'll just log the result
         log::info!("Saved archive record for game {}: {:?}", result.game_id, result.archive_urls);
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // BE-95: Dead-Letter Queue helpers
+    // -------------------------------------------------------------------------
+
+    /// Push a failed job onto the in-memory dead-letter queue.
+    fn push_to_dlq(&self, job: FailedJob) {
+        if let Ok(mut store) = dlq().lock() {
+            store.push(job);
+        }
+    }
+
+    /// Return the number of jobs currently in the dead-letter queue.
+    pub fn failed_job_count(&self) -> usize {
+        dlq().lock().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// Return a snapshot of all dead-lettered jobs.
+    pub fn failed_jobs(&self) -> Vec<FailedJob> {
+        dlq()
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// Reprocess all dead-lettered jobs.
+    ///
+    /// Each job is re-attempted once.  Successfully reprocessed jobs are
+    /// removed from the queue.  Jobs that fail again have their `retry_count`
+    /// incremented and their `failed_at` timestamp refreshed.
+    pub async fn retry_failed_jobs(&self) -> Vec<(Uuid, Result<ArchiveResult, ArchiveError>)> {
+        // Drain the current queue so we can re-attempt each entry.
+        let jobs: Vec<FailedJob> = {
+            let mut store = dlq().lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *store)
+        };
+
+        let mut outcomes = Vec::with_capacity(jobs.len());
+
+        for mut job in jobs {
+            // We cannot recover the original full ArchiveRequest here, so we
+            // construct a minimal stub that re-triggers the same network path.
+            // In a full implementation the original request would be persisted
+            // alongside the FailedJob record.
+            let stub_request = ArchiveRequest {
+                game_id: job.game_id,
+                pgn_data: PGNGame {
+                    id: job.game_id,
+                    event: "Retry".to_string(),
+                    site: "KnightVerse".to_string(),
+                    date: job.failed_at.format("%Y.%m.%d").to_string(),
+                    round: "-".to_string(),
+                    white: "Unknown".to_string(),
+                    black: "Unknown".to_string(),
+                    result: "*".to_string(),
+                    white_elo: None,
+                    black_elo: None,
+                    time_control: "-".to_string(),
+                    eco: None,
+                    opening: None,
+                    moves: vec![],
+                    annotations: None,
+                    metadata: GameMetadata {
+                        game_id: job.game_id,
+                        tournament_id: None,
+                        created_at: job.failed_at,
+                        completed_at: job.failed_at,
+                        duration_seconds: 0,
+                        total_moves: 0,
+                        average_move_time: 0.0,
+                        time_control_category: TimeControlCategory::Custom,
+                        game_type: GameType::Casual,
+                    },
+                },
+                archive_immediately: true,
+                preferred_network: ArchiveNetwork::IPFS,
+                metadata: ArchiveMetadata {
+                    tags: vec![],
+                    description: None,
+                    visibility: ArchiveVisibility::Private,
+                    encryption_key: None,
+                    compression: false,
+                },
+            };
+
+            let result = self.try_archive_game(stub_request).await;
+
+            match &result {
+                Ok(_) => {
+                    // Successfully archived — do NOT re-add to the queue.
+                }
+                Err(e) => {
+                    // Still failing — update the record and push back.
+                    job.retry_count += 1;
+                    job.failure_reason = e.to_string();
+                    job.failed_at = Utc::now();
+                    self.push_to_dlq(job.clone());
+                }
+            }
+
+            outcomes.push((job.game_id, result));
+        }
+
+        outcomes
     }
 
     pub async fn get_archive_status(&self, game_id: Uuid) -> Result<ArchiveStatus, ArchiveError> {

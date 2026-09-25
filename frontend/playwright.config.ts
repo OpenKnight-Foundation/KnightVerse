@@ -14,6 +14,12 @@ export default defineConfig({
     port: 3000,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
+    env: {
+      // Test-only escrow account so the staking spec can complete a deposit.
+      NEXT_PUBLIC_STAKING_ESCROW_ADDRESS:
+        process.env.NEXT_PUBLIC_STAKING_ESCROW_ADDRESS ??
+        "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA",
+    },
   },
   projects: [
     { name: "chromium", use: { browserName: "chromium" } },

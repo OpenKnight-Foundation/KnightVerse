@@ -149,6 +149,16 @@ We have identified **150 independent tasks** across the frontend, backend, contr
 
 Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
 
+## Toolchain
+- **Rust**: stable (minimum edition 2021)
+- **soroban-sdk**: `21.0.0`
+- **stellar-cli / soroban-cli**: `21.x` (compatible with SDK 21)
+
+## Deployed Addresses (Testnet)
+| Contract | ID |
+|----------|----|
+| Game     | `CBGZ...` *(see `contracts/README.md` for full IDs)* |
+
 ## Helpful Links
 - Stellar Developer Docs: https://developers.stellar.org/
 - Soroban Docs & Tutorials: https://soroban.stellar.org/docs

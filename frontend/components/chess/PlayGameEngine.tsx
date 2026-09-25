@@ -42,7 +42,7 @@ const ChessboardComponent = dynamic(
 
 type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
 
-export default function PlayGameEngine() {
+export default function PlayGameEngine({ fen }: { fen?: string }) {
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;

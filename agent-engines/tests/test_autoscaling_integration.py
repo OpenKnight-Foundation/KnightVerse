@@ -235,6 +235,8 @@ class TestAutoscalingIntegration:
                     
                     # Mock the daemon's scale_to_target to work with the pool
                     daemon._scale_to_target = AsyncMock()
+                    # Capacity checks fail closed without NVML; act as a GPU host.
+                    daemon._has_available_gpu_capacity = AsyncMock(return_value=True)
                     await daemon.start()
                     
                     # Initial state: should have 2 workers

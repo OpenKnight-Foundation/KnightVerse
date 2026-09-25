@@ -1,15 +1,18 @@
 import React, { useState, useMemo } from "react";
-import { Chess } from "chess.js";
+import { Chess, type Move, type Square } from "chess.js";
 import ChessboardComponent from "./ChessboardComponent";
 
 interface ChessboardProps {
   position: string;
-  onMove: (move: any) => void;
+  onMove: (move: Move) => void;
 }
 
 const Chessboard: React.FC<ChessboardProps> = ({ position, onMove }) => {
-  const game = useMemo(() => new Chess(position), [position]);
-  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const game = useMemo(
+    () => new Chess(position === "start" ? undefined : position),
+    [position],
+  );
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
 
   const handleDrop = ({
     sourceSquare,
@@ -29,7 +32,7 @@ const Chessboard: React.FC<ChessboardProps> = ({ position, onMove }) => {
         onMove(move);
         return true;
       }
-    } catch (error) {
+    } catch {
       // illegal move
     }
     return false;
@@ -48,8 +51,7 @@ const Chessboard: React.FC<ChessboardProps> = ({ position, onMove }) => {
     <ChessboardComponent
       position={game.fen()}
       onDrop={handleDrop}
-      // @ts-ignore
-      onSquareClick={(square: string) => setSelectedSquare(square)}
+      onSquareClick={(square: string) => setSelectedSquare(square as Square)}
       legalMoves={legalMoves}
     />
   );

@@ -2,6 +2,7 @@
 
 import React from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 
 const PlayGameEngine = dynamic(
   () => import("@/components/chess/PlayGameEngine"),
@@ -55,10 +56,7 @@ const PlayGameEngine = dynamic(
   },
 );
 
-export default function PlayOnlinePage({
-  searchParams,
-}: {
-  searchParams: { fen?: string };
-}) {
-  return <PlayGameEngine fen={searchParams.fen} />;
+export default function PlayOnlinePage() {
+  const fen = useSearchParams().get("fen") ?? undefined;
+  return <PlayGameEngine fen={fen} />;
 }

@@ -1,0 +1,13 @@
+[package]
+name = "move_protocol"
+version = "0.1.0"
+edition = "2021"
+description = "Out-of-order move resolution and timestamp drift compensation (BE-77)"
+publish = false
+
+[lib]
+name = "move_protocol"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

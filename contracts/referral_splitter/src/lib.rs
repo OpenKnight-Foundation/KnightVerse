@@ -4,10 +4,21 @@
 //! Records permanent on-chain referee→referrer bindings and automatically
 //! splits a configurable fee percentage to the referrer on every wager.
 //! Self-referral loops are rejected at registration time.
+<<<<<<< HEAD
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, contracterror, panic_with_error,
     Address, Env, Vec,
+=======
+//!
+//! Commissions are accrued by [`ReferralSplitter::settle_wager`] and paid out
+//! on-chain by [`ReferralSplitter::withdraw_earnings`], which performs a real
+//! `token::Client` transfer of the referrer's full balance and zeroes it.
+
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
+    Address, Env,
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 };
 
 /// Fee denominator: commission_bps / 10_000 = commission fraction.
@@ -19,7 +30,11 @@ pub enum DataKey {
     Admin,
     /// referrer for a given referee address
     Referrer(Address),
+<<<<<<< HEAD
     /// cumulative earnings for a referrer
+=======
+    /// withdrawable commission balance for a referrer
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
     Earnings(Address),
     /// configurable commission in basis points (e.g. 1000 = 10%)
     CommissionBps,
@@ -70,7 +85,15 @@ impl ReferralSplitter {
     }
 
     /// Settle a wager of `amount` stroops. Splits commission to the referrer
+<<<<<<< HEAD
     /// (if one exists) and returns the referrer's cut. Emits a referral_earnings event.
+=======
+    /// (if one exists) and returns the referrer's cut, which is credited to
+    /// their withdrawable balance. Emits a referral_earnings event.
+    ///
+    /// This is accounting only: the accrued balance is moved on-chain by
+    /// [`ReferralSplitter::withdraw_earnings`].
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
     pub fn settle_wager(env: Env, referee: Address, amount: i128) -> i128 {
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
@@ -96,7 +119,11 @@ impl ReferralSplitter {
                     .persistent()
                     .set(&DataKey::Earnings(r.clone()), &(prev + cut));
                 env.events().publish(
+<<<<<<< HEAD
                     (soroban_sdk::symbol_short!("ref_earn"),),
+=======
+                    (symbol_short!("ref_earn"),),
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
                     (r.clone(), cut),
                 );
                 return cut;
@@ -105,7 +132,48 @@ impl ReferralSplitter {
         0
     }
 
+<<<<<<< HEAD
     /// Returns cumulative earnings for a referrer.
+=======
+    /// Withdraw a referrer's entire accrued commission balance in `token`.
+    ///
+    /// Requires the referrer's authorisation and transfers the full
+    /// [`ReferralSplitter::get_earnings`] balance from this contract to the
+    /// referrer using a real `token::Client` transfer. The balance is zeroed
+    /// *before* the transfer (checks-effects-interactions) so a repeated or
+    /// re-entrant call cannot double-pay.
+    ///
+    /// Withdrawing with nothing accrued is a no-op that returns `0` — it does
+    /// not panic and does not move any funds. Returns the amount paid out.
+    pub fn withdraw_earnings(env: Env, referrer: Address, token: Address) -> i128 {
+        referrer.require_auth();
+
+        let key = DataKey::Earnings(referrer.clone());
+        let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        if balance <= 0 {
+            return 0;
+        }
+
+        // Effects before interactions: zero the balance so the external call
+        // can never be replayed into a second payout.
+        env.storage().persistent().set(&key, &0i128);
+
+        token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &referrer,
+            &balance,
+        );
+
+        env.events().publish(
+            (symbol_short!("ref_wd"),),
+            (referrer, token, balance),
+        );
+
+        balance
+    }
+
+    /// Returns the withdrawable commission balance for a referrer.
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
     pub fn get_earnings(env: Env, referrer: Address) -> i128 {
         env.storage()
             .persistent()
@@ -119,4 +187,19 @@ impl ReferralSplitter {
             .persistent()
             .get(&DataKey::Referrer(referee))
     }
+<<<<<<< HEAD
 }
+=======
+
+    /// Returns the configured commission in basis points.
+    pub fn get_commission_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CommissionBps)
+            .unwrap_or(1_000)
+    }
+}
+
+#[cfg(test)]
+mod test;
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f

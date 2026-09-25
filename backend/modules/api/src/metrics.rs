@@ -1,7 +1,11 @@
 use actix_web::HttpResponse;
 use once_cell::sync::{Lazy, OnceCell};
 use prometheus::{
+<<<<<<< HEAD
     CounterVec, Encoder, Gauge, Histogram, HistogramOpts, Opts, Registry, TextEncoder,
+=======
+    CounterVec, Encoder, Gauge, GaugeVec, Histogram, HistogramOpts, Opts, Registry, TextEncoder,
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 };
 use std::sync::Arc;
 
@@ -36,6 +40,15 @@ pub struct Metrics {
 
     /// Total game events (labeled by type: created, completed, abandoned)
     pub game_events_total: CounterVec,
+
+    /// Buffered outbound frames per spectator game room (labeled by game_id)
+    pub spectator_queue_depth: GaugeVec,
+
+    /// Spectator frames dropped due to outbound backpressure (labeled by game_id)
+    pub spectator_frames_dropped_total: CounterVec,
+
+    /// Spectator connections disconnected due to backpressure (labeled by game_id)
+    pub spectator_backpressure_disconnects_total: CounterVec,
 }
 
 impl Metrics {
@@ -88,6 +101,36 @@ impl Metrics {
         )
         .expect("Failed to create game_events_total counter");
 
+<<<<<<< HEAD
+=======
+        let spectator_queue_depth = GaugeVec::new(
+            Opts::new(
+                "xlmate_spectator_queue_depth",
+                "Buffered outbound frames per spectator game room",
+            ),
+            &["game_id"],
+        )
+        .expect("Failed to create spectator_queue_depth gauge");
+
+        let spectator_frames_dropped_total = CounterVec::new(
+            Opts::new(
+                "xlmate_spectator_frames_dropped_total",
+                "Spectator frames dropped due to outbound backpressure",
+            ),
+            &["game_id"],
+        )
+        .expect("Failed to create spectator_frames_dropped_total counter");
+
+        let spectator_backpressure_disconnects_total = CounterVec::new(
+            Opts::new(
+                "xlmate_spectator_backpressure_disconnects_total",
+                "Spectator connections disconnected due to outbound backpressure",
+            ),
+            &["game_id"],
+        )
+        .expect("Failed to create spectator_backpressure_disconnects_total counter");
+
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
         // Register all metrics (only once)
         METRICS_REGISTERED.get_or_init(|| {
             REGISTRY
@@ -111,6 +154,18 @@ impl Metrics {
             REGISTRY
                 .register(Box::new(game_events_total.clone()))
                 .expect("Failed to register game_events_total");
+<<<<<<< HEAD
+=======
+            REGISTRY
+                .register(Box::new(spectator_queue_depth.clone()))
+                .expect("Failed to register spectator_queue_depth");
+            REGISTRY
+                .register(Box::new(spectator_frames_dropped_total.clone()))
+                .expect("Failed to register spectator_frames_dropped_total");
+            REGISTRY
+                .register(Box::new(spectator_backpressure_disconnects_total.clone()))
+                .expect("Failed to register spectator_backpressure_disconnects_total");
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             true
         });
 
@@ -122,6 +177,9 @@ impl Metrics {
             ai_requests_total,
             auth_events_total,
             game_events_total,
+            spectator_queue_depth,
+            spectator_frames_dropped_total,
+            spectator_backpressure_disconnects_total,
         }
     }
 
@@ -232,6 +290,38 @@ pub fn increment_game_events(event_type: &str) {
         metrics
             .game_events_total
             .with_label_values(&[event_type])
+            .inc();
+    }
+}
+
+/// Set the current outbound queue depth for a spectator game room.
+pub fn set_spectator_queue_depth(game_id: &str, depth: usize) {
+    if let Some(metrics) = get_global_metrics() {
+        metrics
+            .spectator_queue_depth
+            .with_label_values(&[game_id])
+            .set(depth as f64);
+    }
+}
+
+/// Record frames dropped from a spectator's outbound queue.
+pub fn increment_spectator_frames_dropped(game_id: &str, dropped: u64) {
+    if dropped > 0 {
+        if let Some(metrics) = get_global_metrics() {
+            metrics
+                .spectator_frames_dropped_total
+                .with_label_values(&[game_id])
+                .inc_by(dropped as f64);
+        }
+    }
+}
+
+/// Record a spectator disconnect caused by sustained outbound backpressure.
+pub fn increment_spectator_backpressure_disconnects(game_id: &str) {
+    if let Some(metrics) = get_global_metrics() {
+        metrics
+            .spectator_backpressure_disconnects_total
+            .with_label_values(&[game_id])
             .inc();
     }
 }

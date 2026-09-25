@@ -8,6 +8,10 @@ members = [
     "referral_splitter",
     "model_attestation",
     "sponsorship_escrow",
+<<<<<<< HEAD
+=======
+    "title_badge",
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 ]
 
 # title_badge is intentionally excluded: it pins soroban-sdk = "0.10.1" (every

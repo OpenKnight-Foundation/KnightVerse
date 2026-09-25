@@ -1,5 +1,9 @@
 // src/server.rs
 
+<<<<<<< HEAD
+=======
+use crate::admin::{list_actions, record_action};
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 use crate::ai::{analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
@@ -277,6 +281,17 @@ pub async fn main() -> std::io::Result<()> {
                     .service(find_player_by_id)
                     .service(update_player)
                     .service(delete_player),
+            )
+            // Admin audit-log routes (admin-gated inside the handlers)
+            .service(
+                web::scope("/v1/admin")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .service(list_actions)
+                    .service(record_action),
             )
             // Game routes
             .service(

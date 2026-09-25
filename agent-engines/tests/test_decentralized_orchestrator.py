@@ -34,6 +34,7 @@ class FakeBridge:
         self.initialized = False
         self.positions = []
         self.quit_called = False
+        self.options_set = []
 
     async def start(self) -> None:
         self.started = True
@@ -43,6 +44,12 @@ class FakeBridge:
 
     async def set_position(self, fen: str) -> None:
         self.positions.append(fen)
+
+    async def _set_option_if_supported(self, name: str, value: str | None) -> None:
+        self.options_set.append((name, value))
+
+    async def ensure_ready(self) -> None:
+        pass
 
     async def go(self, **_: object) -> tuple:
         from gpu_worker.uci_bridge import UciBestMove, UciInfo
@@ -57,11 +64,12 @@ class FakeBridge:
         self.quit_called = True
 
 
-def fake_worker_factory(cfg):
+def fake_worker_factory(cfg, opening_book=None):
     from gpu_worker.worker import GPUAnalysisWorker
     from gpu_worker.resource_monitor import ResourceMonitor
     return GPUAnalysisWorker(
         cfg,
+        opening_book=opening_book,
         bridge_factory=FakeBridge,
         resource_monitor=ResourceMonitor(),
     )
@@ -94,7 +102,7 @@ IMPOSSIBLE_VECTOR = ChallengeVector(
 class TestDecentralizedOrchestrator(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.config = WorkerConfig()
-        self.pool = WorkerPool([self.config], worker_factory=fake_worker_factory)
+        self.pool = WorkerPool([self.config], [], worker_factory=fake_worker_factory)
         self.orchestrator = DecentralizedOrchestrator(
             self.pool,
             node_id="test-node",

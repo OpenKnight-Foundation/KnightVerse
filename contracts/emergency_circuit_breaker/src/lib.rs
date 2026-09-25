@@ -10,6 +10,8 @@ pub enum DataKey {
     Balance(Address),
     TotalSupply,
     MatchEscrow(u64),
+    /// SC-66: the pending admin-transfer proposal, if any.
+    PendingAdmin,
 }
 
 #[contracttype]
@@ -17,6 +19,19 @@ pub struct MatchEscrowData {
     pub player: Address,
     pub amount: i128,
 }
+
+/// SC-66: a proposed admin handoff, timelocked so a compromised or
+/// fat-fingered `transfer_admin` call can be noticed and cancelled before
+/// it takes effect.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingAdmin {
+    pub candidate: Address,
+    pub effective_at: u64,
+}
+
+/// Delay between proposing an admin transfer and it taking effect.
+pub const ADMIN_TRANSFER_TIMELOCK_SECS: u64 = 48 * 60 * 60;
 
 /// Structured error codes for the PausableContract.
 #[contracterror]
@@ -38,6 +53,10 @@ pub enum ContractError {
     InsufficientBalance = 7,
     /// Match escrow with this ID already exists
     EscrowAlreadyExists = 8,
+    /// SC-66: no admin-transfer proposal is currently pending
+    NoPendingAdminTransfer = 9,
+    /// SC-66: the timelock delay has not yet elapsed
+    TimelockNotElapsed = 10,
 }
 
 #[contract]
@@ -374,7 +393,13 @@ impl PausableContract {
         );
     }
 
-    /// Transfer admin role (works even when paused)
+    /// Propose an admin transfer (works even when paused). Does not switch
+    /// admin immediately — records a `PendingAdmin` that only takes effect
+    /// after `ADMIN_TRANSFER_TIMELOCK_SECS` via [`accept_admin_transfer`],
+    /// so a compromised or fat-fingered handoff has a window to be
+    /// noticed and cancelled (SC-66). Calling this again while a proposal
+    /// is already pending overwrites it with a new candidate and resets
+    /// the timelock.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
         current_admin.require_auth();
 
@@ -383,12 +408,70 @@ impl PausableContract {
 
         // NOTE: No pause check - admin transfer should work even when paused
 
-        // Set new admin
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        let effective_at = env.ledger().timestamp() + ADMIN_TRANSFER_TIMELOCK_SECS;
+        env.storage().instance().set(
+            &DataKey::PendingAdmin,
+            &PendingAdmin {
+                candidate: new_admin.clone(),
+                effective_at,
+            },
+        );
 
         // Emit event
+        env.events().publish(
+            (soroban_sdk::symbol_short!("adminprop"),),
+            (new_admin, effective_at),
+        );
+    }
+
+    /// Finalizes a pending admin transfer once the timelock has elapsed.
+    /// Requires the candidate's own auth, so a bad/unreachable address
+    /// can't be force-finalized by anyone else (SC-66).
+    pub fn accept_admin_transfer(env: Env, candidate: Address) -> Result<(), ContractError> {
+        candidate.require_auth();
+
+        let pending: PendingAdmin = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(ContractError::NoPendingAdminTransfer)?;
+
+        if pending.candidate != candidate {
+            panic_with_error!(&env, ContractError::NotAdmin);
+        }
+        if env.ledger().timestamp() < pending.effective_at {
+            return Err(ContractError::TimelockNotElapsed);
+        }
+
+        env.storage().instance().set(&DataKey::Admin, &candidate);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
         env.events()
-            .publish((soroban_sdk::symbol_short!("adminxfer"),), new_admin);
+            .publish((soroban_sdk::symbol_short!("adminxfer"),), candidate);
+        Ok(())
+    }
+
+    /// The current admin cancels a pending admin transfer before it takes
+    /// effect (SC-66) — e.g. because `transfer_admin` was called with the
+    /// wrong address, or the current admin key recovers control before a
+    /// compromised-key handoff finalizes.
+    pub fn cancel_admin_transfer(env: Env, current_admin: Address) -> Result<(), ContractError> {
+        current_admin.require_auth();
+        Self::check_admin(&env, &current_admin);
+
+        if !env.storage().instance().has(&DataKey::PendingAdmin) {
+            return Err(ContractError::NoPendingAdminTransfer);
+        }
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("admincncl"),), current_admin);
+        Ok(())
+    }
+
+    /// Returns the pending admin-transfer proposal, if any.
+    pub fn get_pending_admin_transfer(env: Env) -> Option<PendingAdmin> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // ============================================
@@ -457,7 +540,10 @@ impl PausableContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        Address, Env,
+    };
 
     #[test]
     fn test_initialize() {
@@ -619,9 +705,98 @@ mod test {
         client.initialize(&admin);
         client.pause(&admin);
 
-        // Admin transfer should work even when paused
+        // Admin transfer should work even when paused, but only after the timelock
         client.transfer_admin(&admin, &new_admin);
+        assert_eq!(client.get_admin(), admin);
+
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+        client.accept_admin_transfer(&new_admin);
         assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin_transfer(), None);
+    }
+
+    #[test]
+    fn test_admin_transfer_waits_for_timelock() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.transfer_admin(&admin, &new_admin);
+        let effective_at = 1_000 + ADMIN_TRANSFER_TIMELOCK_SECS;
+        assert_eq!(
+            client.get_pending_admin_transfer(),
+            Some(PendingAdmin {
+                candidate: new_admin.clone(),
+                effective_at,
+            })
+        );
+
+        env.ledger().set_timestamp(effective_at - 1);
+        assert_eq!(
+            client.try_accept_admin_transfer(&new_admin),
+            Err(Ok(ContractError::TimelockNotElapsed))
+        );
+        assert_eq!(client.get_admin(), admin);
+
+        env.ledger().set_timestamp(effective_at);
+        client.accept_admin_transfer(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+    }
+
+    #[test]
+    fn test_admin_transfer_rejects_other_candidate() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        let intruder = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.transfer_admin(&admin, &new_admin);
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+
+        assert!(client.try_accept_admin_transfer(&intruder).is_err());
+        assert_eq!(client.get_admin(), admin);
+    }
+
+    #[test]
+    fn test_cancel_admin_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, PausableContract);
+        let client = PausableContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        assert_eq!(
+            client.try_cancel_admin_transfer(&admin),
+            Err(Ok(ContractError::NoPendingAdminTransfer))
+        );
+
+        client.transfer_admin(&admin, &new_admin);
+        client.cancel_admin_transfer(&admin);
+        assert_eq!(client.get_pending_admin_transfer(), None);
+
+        env.ledger().set_timestamp(ADMIN_TRANSFER_TIMELOCK_SECS);
+        assert_eq!(
+            client.try_accept_admin_transfer(&new_admin),
+            Err(Ok(ContractError::NoPendingAdminTransfer))
+        );
+        assert_eq!(client.get_admin(), admin);
     }
 
     #[test]

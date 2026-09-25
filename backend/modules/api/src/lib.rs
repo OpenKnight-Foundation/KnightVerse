@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod ai;
 pub mod auth;
 #[cfg(test)]
@@ -6,6 +7,7 @@ pub mod config;
 pub mod games;
 pub mod idempotency;
 pub mod metrics;
+pub mod moderation;
 pub mod openapi;
 pub mod players;
 pub mod rate_limiter;

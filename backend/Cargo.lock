@@ -337,6 +337,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "actix-ws"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -351,6 +352,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 name = "actix_derive"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -509,6 +512,7 @@ dependencies = [
  "once_cell",
  "prometheus",
  "redis",
+ "reqwest",
  "sea-orm",
  "security",
  "serde",
@@ -2620,6 +2624,13 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "move_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

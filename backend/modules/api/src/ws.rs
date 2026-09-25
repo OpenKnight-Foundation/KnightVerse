@@ -14,7 +14,12 @@ use std::env;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+<<<<<<< HEAD
 use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster};
+=======
+use crate::moderation::{self, ChatDecision, ChatModerator};
+use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster, SpectatorSubscription};
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 
 use chrono::{DateTime, Utc};
 use tokio::task::JoinHandle;
@@ -190,6 +195,18 @@ pub struct Broadcast {
     pub message: WsMessage,
 }
 
+<<<<<<< HEAD
+=======
+/// Internal control message sent by the spectator fan-out pump when a
+/// connection's bounded outbound queue stayed saturated, so the connection
+/// must be dropped rather than buffered indefinitely.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SpectatorDisconnect {
+    pub game_id: String,
+}
+
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 /// Lobby state actor.
 ///
 /// IMPORTANT: this now only holds *player* connections (at most two per
@@ -523,13 +540,22 @@ pub struct WsSession {
     pub lobby: Addr<LobbyState>,
     pub connection_tracker: Addr<ConnectionStateTracker>,
     pub redis: RedisBroadcaster,
+<<<<<<< HEAD
+=======
+    /// Chat moderation: local word filter plus the process-wide mute ledger.
+    pub moderator: ChatModerator,
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
     pub hb: std::time::Instant,
     pub user_id: i32,
     pub player_id: Uuid,
     pub username: String,
     pub session_id: String,
     pub is_spectator: bool,
+<<<<<<< HEAD
     pub redis_sub_task: Option<JoinHandle<()>>,
+=======
+    pub redis_sub_task: Option<SpectatorSubscription>,
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 }
 
 impl WsSession {
@@ -574,10 +600,23 @@ impl Actor for WsSession {
     fn started(&mut self, ctx: &mut Self::Context) {
         self.hb(ctx);
 
+<<<<<<< HEAD
         let addr = ctx.address().recipient();
         if self.is_spectator {
             let recipient = ctx.address().recipient();
             let handle = spawn_subscriber_task(self.redis.clone(), self.game_id.clone(), recipient);
+=======
+        let addr: Recipient<WsMessage> = ctx.address().recipient();
+        if self.is_spectator {
+            let recipient: Recipient<WsMessage> = ctx.address().recipient();
+            let disconnect: Recipient<SpectatorDisconnect> = ctx.address().recipient();
+            let handle = spawn_subscriber_task(
+                self.redis.clone(),
+                self.game_id.clone(),
+                recipient,
+                disconnect,
+            );
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             self.redis_sub_task = Some(handle);
 
             let redis = self.redis.clone();
@@ -719,6 +758,7 @@ impl WsSession {
     /// is published directly to the Redis fan-out channel — it never
     /// touches `LobbyState` or the core game actor loop, per the issue's
     /// "what not to do" constraint.
+<<<<<<< HEAD
     fn handle_spectator_message(
         &mut self,
         ws_msg: WsMessage,
@@ -728,6 +768,59 @@ impl WsSession {
             WsMessage::Chat { message, .. } => {
                 self.redis
                     .publish_chat(&self.game_id, self.username.clone(), message);
+=======
+    ///
+    /// Chat is moderated *before* it is published: the local trie filter runs
+    /// inline (no I/O, well inside the 5 ms budget), while the optional OpenAI
+    /// pass runs on a background task afterwards, because it must never delay
+    /// a broadcast. A message either goes out untouched, goes out with the
+    /// offending words masked, or is dropped with a warning to the sender.
+    fn handle_spectator_message(
+        &mut self,
+        ws_msg: WsMessage,
+        ctx: &mut ws::WebsocketContext<Self>,
+    ) {
+        match ws_msg {
+            WsMessage::Chat { message, .. } => {
+                let now = moderation::unix_now();
+                match self.moderator.review(&self.username, &message, now) {
+                    ChatDecision::Publish { message, masked } => {
+                        if masked > 0 {
+                            warn!(
+                                "Filtered chat from {} in game {}: {} word(s) masked",
+                                self.username, self.game_id, masked
+                            );
+                            self.warn(
+                                ctx,
+                                moderation::ERR_MESSAGE_MASKED,
+                                moderation::masked_warning(masked),
+                            );
+                        }
+                        self.redis.publish_chat(
+                            &self.game_id,
+                            self.username.clone(),
+                            message.clone(),
+                        );
+                        // Best-effort audit of what was published; a no-op
+                        // unless OPENAI_API_KEY is configured.
+                        self.audit_with_ai(message);
+                    }
+                    ChatDecision::Blocked { code, reason } => {
+                        warn!(
+                            "Blocked chat from {} in game {}: {}",
+                            self.username, self.game_id, reason
+                        );
+                        self.warn(ctx, code, reason);
+                    }
+                    ChatDecision::Muted { code, reason, .. } => {
+                        warn!(
+                            "Dropped chat from muted user {} in game {}",
+                            self.username, self.game_id
+                        );
+                        self.warn(ctx, code, reason);
+                    }
+                }
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             }
             _ => {
                 // Spectators can't submit moves, clocks, etc. Silently drop;
@@ -736,6 +829,37 @@ impl WsSession {
             }
         }
     }
+<<<<<<< HEAD
+=======
+
+    /// Send a moderation warning back to the sender of the message.
+    fn warn(&self, ctx: &mut ws::WebsocketContext<Self>, code: u16, message: String) {
+        if let Err(e) = ctx.address().try_send(WsMessage::Error { code, message }) {
+            warn!("Could not deliver moderation warning: {}", e);
+        }
+    }
+
+    /// Hand an already-published message to the optional AI pass. The call is
+    /// fire-and-forget: a slow or failing third party must never show up as
+    /// chat latency, and a flag records an offence against the next message
+    /// rather than recalling this one.
+    fn audit_with_ai(&self, message: String) {
+        if self.moderator.ai().is_none() {
+            return;
+        }
+        let moderator = self.moderator.clone();
+        let username = self.username.clone();
+        let game_id = self.game_id.clone();
+        actix::spawn(async move {
+            if moderator.audit(&username, &message).await.is_some() {
+                warn!(
+                    "Muted {} in match chat after an OpenAI moderation flag (game {})",
+                    username, game_id
+                );
+            }
+        });
+    }
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 }
 
 impl Handler<WsMessage> for WsSession {
@@ -752,6 +876,30 @@ impl Handler<WsMessage> for WsSession {
     }
 }
 
+<<<<<<< HEAD
+=======
+/// Disconnect a spectator whose bounded outbound queue overflowed (see the
+/// backpressure policy in `redis_broadcast.rs`).
+impl Handler<SpectatorDisconnect> for WsSession {
+    type Result = ();
+
+    fn handle(&mut self, msg: SpectatorDisconnect, ctx: &mut ws::WebsocketContext<Self>) {
+        warn!(
+            "Disconnecting backpressured spectator from game {}: outbound queue overflowed",
+            msg.game_id
+        );
+        if let Some(subscription) = self.redis_sub_task.take() {
+            subscription.abort();
+        }
+        ctx.close(Some(ws::CloseReason {
+            code: ws::CloseCode::Again,
+            description: Some("spectator outbound queue overflowed".to_string()),
+        }));
+        ctx.stop();
+    }
+}
+
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 /// WebSocket route handler with auth and reconnection support.
 ///
 /// Spectator vs. player is selected via `?role=spectator` (default: player).
@@ -810,6 +958,10 @@ pub async fn ws_route(
             lobby: lobby.get_ref().clone(),
             connection_tracker: connection_tracker.get_ref().clone(),
             redis: redis.get_ref().clone(),
+<<<<<<< HEAD
+=======
+            moderator: ChatModerator::global(),
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
             player_id: claims.player_id,

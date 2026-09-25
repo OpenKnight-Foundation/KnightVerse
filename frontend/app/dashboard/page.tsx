@@ -19,6 +19,7 @@ import { useAuth } from "@/context/authContext";
 import { useEloStats, type TimeRange } from "@/hook/useEloStats";
 import { cn } from "@/lib/utils";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { API_BASE } from "@/lib/api";
 
 const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
   ssr: false,
@@ -52,8 +53,6 @@ const PerformanceBreakdown = dynamic(() => import("@/components/dashboard/Perfor
     </div>
   ),
 });
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
   { label: "7D", value: "7d" },

@@ -4,7 +4,7 @@ mod tests {
     use st_core::{AIMetadata, NFTMintRequest, NFTService};
 
     #[tokio::test]
-    async fn test_nft_mint_transaction_creation() {
+    async fn test_nft_mint_transaction_rejects_an_unknown_network() {
         let ai_metadata = AIMetadata {
             name: "Test AI Agent".to_string(),
             description: "A test AI agent for chess".to_string(),
@@ -23,16 +23,17 @@ mod tests {
             destination_account: "GATTMQEODSDX45WZK2JFIYETXWYCU5GRJ5I3Z7P2UDYD6YFVONDM4CX4"
                 .to_string(),
             issuer_account: "GAB35A2WLFSK64P6EWSGVFXZYU6E5K2INGTTLMDEDSIPYOH7NZVV6GIG".to_string(),
-            network: "testnet".to_string(),
+            network: "invalid".to_string(),
         };
 
+        // Rejected before any Horizon lookup, so this stays a hermetic test. The
+        // successful path is covered against a stub Horizon in `transaction_builder`.
         let result = NFTService::create_nft_mint_transaction(mint_request).await;
-        assert!(result.is_ok());
-
-        let response = result.unwrap();
-        assert!(!response.xdr_transaction.is_empty());
-        assert_eq!(response.network, "testnet");
-        assert!(response.transaction_hash.is_some());
+        let error = result.expect_err("an unknown network must be rejected");
+        assert!(
+            error.to_string().contains("Network must be"),
+            "got {error}"
+        );
     }
 
     #[tokio::test]

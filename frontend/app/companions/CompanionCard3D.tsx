@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import Image from "next/image";
 
 export interface AICompanion {
   id: string;
@@ -101,9 +102,8 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
           <Image
             src={companion.image}
             alt={companion.name}
-            layout="fill"
-            objectFit="cover"
-            className="transform scale-105 hover:scale-110 transition-transform duration-500"
+            fill
+            className="object-cover transform scale-105 hover:scale-110 transition-transform duration-500"
           />
           <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg text-xs font-medium">
             Win Rate: {companion.winRate}%

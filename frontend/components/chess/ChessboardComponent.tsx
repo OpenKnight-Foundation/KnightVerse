@@ -122,6 +122,8 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   orientation = "white",
   lastMove,
   "aria-label": ariaLabel,
+  legalMoves,
+  onSquareClick,
 }) => {
   const { preferences } = useGamePreferences();
   const [premoves, setPremoves] = useState<PreMove[]>([]);
@@ -646,6 +648,10 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                 : lastMove.from === squareLabel || lastMove.to === squareLabel),
             );
 
+            const isLegalTarget =
+              preferences.showLegalMoveDots === "enabled" &&
+              Boolean(legalMoves?.includes(squareLabel));
+
             const selectionHint = isSelected
               ? ". Piece selected. Press Space on another square to move, or Escape to deselect."
               : "";
@@ -728,6 +734,21 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                   >
                     {getPieceImage(piece)}
                   </div>
+                )}
+                {isLegalTarget && (
+                  <div
+                    data-testid="legal-move-dot"
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      width: piece ? "90%" : "30%",
+                      height: piece ? "90%" : "30%",
+                      borderRadius: "50%",
+                      background: piece ? "transparent" : "rgba(0, 0, 0, 0.25)",
+                      border: piece ? "4px solid rgba(0, 0, 0, 0.25)" : "none",
+                      pointerEvents: "none",
+                    }}
+                  />
                 )}
               </div>
             );

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -145,8 +146,12 @@ class TestAutoscalingDaemon:
             assert metrics["queue_length"] == 0
             assert metrics["avg_wait_time_ms"] == 0.0
             
-            # Add items to queue
-            mock_redis_client.lpush("test_queue", "task1", "task2", "task3")
+            # Add items to queue, enqueued a second ago
+            enqueued_at = time.time() - 1.0
+            mock_redis_client.lpush(
+                "test_queue",
+                *(json.dumps({"task_id": f"task{i}", "enqueued_at": enqueued_at}) for i in range(3)),
+            )
             
             metrics = await daemon._get_queue_metrics()
             assert metrics["queue_length"] == 3

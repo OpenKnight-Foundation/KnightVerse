@@ -14,6 +14,7 @@ use std::env;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::moderation::{self, ChatDecision, ChatModerator};
 use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster};
 
 use chrono::{DateTime, Utc};
@@ -523,6 +524,8 @@ pub struct WsSession {
     pub lobby: Addr<LobbyState>,
     pub connection_tracker: Addr<ConnectionStateTracker>,
     pub redis: RedisBroadcaster,
+    /// Chat moderation: local word filter plus the process-wide mute ledger.
+    pub moderator: ChatModerator,
     pub hb: std::time::Instant,
     pub user_id: i32,
     pub player_id: Uuid,
@@ -719,15 +722,57 @@ impl WsSession {
     /// is published directly to the Redis fan-out channel — it never
     /// touches `LobbyState` or the core game actor loop, per the issue's
     /// "what not to do" constraint.
+    ///
+    /// Chat is moderated *before* it is published: the local trie filter runs
+    /// inline (no I/O, well inside the 5 ms budget), while the optional OpenAI
+    /// pass runs on a background task afterwards, because it must never delay
+    /// a broadcast. A message either goes out untouched, goes out with the
+    /// offending words masked, or is dropped with a warning to the sender.
     fn handle_spectator_message(
         &mut self,
         ws_msg: WsMessage,
-        _ctx: &mut ws::WebsocketContext<Self>,
+        ctx: &mut ws::WebsocketContext<Self>,
     ) {
         match ws_msg {
             WsMessage::Chat { message, .. } => {
-                self.redis
-                    .publish_chat(&self.game_id, self.username.clone(), message);
+                let now = moderation::unix_now();
+                match self.moderator.review(&self.username, &message, now) {
+                    ChatDecision::Publish { message, masked } => {
+                        if masked > 0 {
+                            warn!(
+                                "Filtered chat from {} in game {}: {} word(s) masked",
+                                self.username, self.game_id, masked
+                            );
+                            self.warn(
+                                ctx,
+                                moderation::ERR_MESSAGE_MASKED,
+                                moderation::masked_warning(masked),
+                            );
+                        }
+                        self.redis.publish_chat(
+                            &self.game_id,
+                            self.username.clone(),
+                            message.clone(),
+                        );
+                        // Best-effort audit of what was published; a no-op
+                        // unless OPENAI_API_KEY is configured.
+                        self.audit_with_ai(message);
+                    }
+                    ChatDecision::Blocked { code, reason } => {
+                        warn!(
+                            "Blocked chat from {} in game {}: {}",
+                            self.username, self.game_id, reason
+                        );
+                        self.warn(ctx, code, reason);
+                    }
+                    ChatDecision::Muted { code, reason, .. } => {
+                        warn!(
+                            "Dropped chat from muted user {} in game {}",
+                            self.username, self.game_id
+                        );
+                        self.warn(ctx, code, reason);
+                    }
+                }
             }
             _ => {
                 // Spectators can't submit moves, clocks, etc. Silently drop;
@@ -735,6 +780,34 @@ impl WsSession {
                 // game state or spam the lobby.
             }
         }
+    }
+
+    /// Send a moderation warning back to the sender of the message.
+    fn warn(&self, ctx: &mut ws::WebsocketContext<Self>, code: u16, message: String) {
+        if let Err(e) = ctx.address().try_send(WsMessage::Error { code, message }) {
+            warn!("Could not deliver moderation warning: {}", e);
+        }
+    }
+
+    /// Hand an already-published message to the optional AI pass. The call is
+    /// fire-and-forget: a slow or failing third party must never show up as
+    /// chat latency, and a flag records an offence against the next message
+    /// rather than recalling this one.
+    fn audit_with_ai(&self, message: String) {
+        if self.moderator.ai().is_none() {
+            return;
+        }
+        let moderator = self.moderator.clone();
+        let username = self.username.clone();
+        let game_id = self.game_id.clone();
+        actix::spawn(async move {
+            if moderator.audit(&username, &message).await.is_some() {
+                warn!(
+                    "Muted {} in match chat after an OpenAI moderation flag (game {})",
+                    username, game_id
+                );
+            }
+        });
     }
 }
 
@@ -810,6 +883,7 @@ pub async fn ws_route(
             lobby: lobby.get_ref().clone(),
             connection_tracker: connection_tracker.get_ref().clone(),
             redis: redis.get_ref().clone(),
+            moderator: ChatModerator::global(),
             hb: std::time::Instant::now(),
             user_id: claims.user_id,
             player_id: claims.player_id,

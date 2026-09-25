@@ -509,8 +509,6 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "emergency_circuit_breaker",
-<<<<<<< HEAD
-=======
  "rand",
  "soroban-sdk",
 ]
@@ -520,7 +518,6 @@ name = "gasless_relayer"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
->>>>>>> 5f6dda2c9c4229300622fcf92233996a143898b8
  "rand",
  "soroban-sdk",
 ]

@@ -36,6 +36,15 @@ pub struct Metrics {
 
     /// Total game events (labeled by type: created, completed, abandoned)
     pub game_events_total: CounterVec,
+
+    /// Buffered outbound frames per spectator game room (labeled by game_id)
+    pub spectator_queue_depth: GaugeVec,
+
+    /// Spectator frames dropped due to outbound backpressure (labeled by game_id)
+    pub spectator_frames_dropped_total: CounterVec,
+
+    /// Spectator connections disconnected due to backpressure (labeled by game_id)
+    pub spectator_backpressure_disconnects_total: CounterVec,
 }
 
 impl Metrics {
@@ -122,6 +131,9 @@ impl Metrics {
             ai_requests_total,
             auth_events_total,
             game_events_total,
+            spectator_queue_depth,
+            spectator_frames_dropped_total,
+            spectator_backpressure_disconnects_total,
         }
     }
 
@@ -232,6 +244,38 @@ pub fn increment_game_events(event_type: &str) {
         metrics
             .game_events_total
             .with_label_values(&[event_type])
+            .inc();
+    }
+}
+
+/// Set the current outbound queue depth for a spectator game room.
+pub fn set_spectator_queue_depth(game_id: &str, depth: usize) {
+    if let Some(metrics) = get_global_metrics() {
+        metrics
+            .spectator_queue_depth
+            .with_label_values(&[game_id])
+            .set(depth as f64);
+    }
+}
+
+/// Record frames dropped from a spectator's outbound queue.
+pub fn increment_spectator_frames_dropped(game_id: &str, dropped: u64) {
+    if dropped > 0 {
+        if let Some(metrics) = get_global_metrics() {
+            metrics
+                .spectator_frames_dropped_total
+                .with_label_values(&[game_id])
+                .inc_by(dropped as f64);
+        }
+    }
+}
+
+/// Record a spectator disconnect caused by sustained outbound backpressure.
+pub fn increment_spectator_backpressure_disconnects(game_id: &str) {
+    if let Some(metrics) = get_global_metrics() {
+        metrics
+            .spectator_backpressure_disconnects_total
+            .with_label_values(&[game_id])
             .inc();
     }
 }

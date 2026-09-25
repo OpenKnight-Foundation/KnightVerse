@@ -278,6 +278,17 @@ pub async fn main() -> std::io::Result<()> {
                     .service(update_player)
                     .service(delete_player),
             )
+            // Admin audit-log routes (admin-gated inside the handlers)
+            .service(
+                web::scope("/v1/admin")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .service(list_actions)
+                    .service(record_action),
+            )
             // Game routes
             .service(
                 web::scope("/v1/games")

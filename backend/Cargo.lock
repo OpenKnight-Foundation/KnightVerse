@@ -2623,6 +2623,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "move_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "mutually_exclusive_features"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

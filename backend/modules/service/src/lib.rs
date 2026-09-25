@@ -1,3 +1,4 @@
+pub mod admin_audit;
 pub mod anti_cheat;
 pub mod circuit_breaker;
 pub mod engine_service;

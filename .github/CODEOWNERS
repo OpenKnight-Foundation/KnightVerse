@@ -1,0 +1,28 @@
+# CODEOWNERS for KnightVerse
+#
+# These reviewers are automatically requested for PRs touching the
+# corresponding directories. Keep this file up to date as team membership
+# and expertise areas change.
+
+# Global owners (fallback for any file not matched below)
+* @OpenKnight-Foundation/core-maintainers
+
+# Smart Contracts (Soroban/Rust)
+/contracts/ @OpenKnight-Foundation/contract-maintainers
+
+# Backend (Actix/Rust)
+/backend/ @OpenKnight-Foundation/backend-maintainers
+
+# Frontend (Next.js/TypeScript)
+/frontend/ @OpenKnight-Foundation/frontend-maintainers
+
+# AI Engines (Python/PyTorch/Stockfish/WASM)
+/agent-engines/ @OpenKnight-Foundation/ai-maintainers
+
+# Infrastructure & DevOps
+/.github/ @OpenKnight-Foundation/devops-maintainers
+/docker-compose.yml @OpenKnight-Foundation/devops-maintainers
+/*.sh @OpenKnight-Foundation/devops-maintainers
+
+# Documentation
+/*.md @OpenKnight-Foundation/docs-maintainers

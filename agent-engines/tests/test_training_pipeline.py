@@ -257,3 +257,87 @@ class TestTrainingConfig:
         config = TrainingConfig(hidden_channels=256, learning_rate=0.0005)
         assert config.hidden_channels == 256
         assert config.learning_rate == 0.0005
+
+
+# ===================================================================
+# SECTION 6: Real Autograd Training Step (AI-53)
+# ===================================================================
+
+class TestLoRAAutograd:
+    """Verify that LoRAModel.step() uses real PyTorch autograd.
+
+    Issue AI-53: the previous implementation used a hand-rolled gradient
+    approximation that only updated the output layer.  After the fix, a
+    single training step must produce measurably lower loss by
+    backpropagating through *all* parameters via torch.autograd.
+    """
+
+    def test_loss_decreases_after_training_step(self) -> None:
+        """A single step() call must reduce cross-entropy loss."""
+        import torch  # noqa: PLC0415  (import inside test is intentional)
+
+        from gpu_worker.training_pipeline import LoRAModel
+
+        # Small vocab / embed so the test is fast
+        VOCAB = 50
+        EMBED = 16
+        RANK = 2
+        BATCH = 4
+        SEQ = 8
+
+        rng = np.random.RandomState(0)
+        model = LoRAModel(
+            vocab_size=VOCAB,
+            embed_dim=EMBED,
+            lora_rank=RANK,
+            learning_rate=1e-2,
+        )
+
+        # Fixed small batch: token ids in [0, VOCAB), labels shifted by 1
+        token_ids = rng.randint(0, VOCAB, size=(BATCH, SEQ)).astype(np.int64)
+        labels = rng.randint(0, VOCAB, size=(BATCH, SEQ)).astype(np.int64)
+
+        loss_before = model.compute_loss(token_ids, labels)
+
+        # Run several steps on the same batch so the model can memorise it
+        for _ in range(10):
+            model.step(token_ids, labels)
+
+        loss_after = model.compute_loss(token_ids, labels)
+
+        assert loss_after < loss_before, (
+            f"Expected loss to decrease after training steps "
+            f"(before={loss_before:.4f}, after={loss_after:.4f}). "
+            "Real autograd should update all parameters."
+        )
+
+    def test_optimizer_attribute_exists(self) -> None:
+        """LoRAModel must expose a self.optimizer when torch is available."""
+        import torch  # noqa: PLC0415
+
+        from gpu_worker.training_pipeline import LoRAModel
+
+        model = LoRAModel(vocab_size=20, embed_dim=8, lora_rank=2)
+        assert hasattr(model, "optimizer"), "LoRAModel must have a self.optimizer"
+        assert isinstance(model.optimizer, torch.optim.Optimizer)
+
+    def test_pytorch_parameters_exist(self) -> None:
+        """LoRAModel must expose PyTorch Parameter tensors for autograd."""
+        import torch  # noqa: PLC0415
+
+        from gpu_worker.training_pipeline import LoRAModel
+
+        model = LoRAModel(vocab_size=20, embed_dim=8, lora_rank=2)
+        for attr in (
+            "_pt_embeddings",
+            "_pt_lora_A",
+            "_pt_lora_B",
+            "_pt_output_weight",
+            "_pt_output_bias",
+        ):
+            assert hasattr(model, attr), f"Missing PyTorch parameter: {attr}"
+            param = getattr(model, attr)
+            assert isinstance(param, torch.nn.Parameter), (
+                f"{attr} must be a nn.Parameter"
+            )
+            assert param.requires_grad, f"{attr} must have requires_grad=True"

@@ -1,0 +1,81 @@
+name: Load-test harness (smoke)
+
+# Smoke check for `backend/loadtest/ws-move-loadtest` only. This does not need
+# Postgres, Redis or a running API server: the harness ships an in-process mock
+# of the endpoint, and its test suite runs a full load pass against it. Kept
+# `continue-on-error` so it informs rather than blocks while the numbers are
+# still being calibrated (see backend/loadtest/BASELINE.md).
+
+on:
+  pull_request:
+    paths:
+      - 'backend/loadtest/**'
+      - 'backend/modules/api/src/ws.rs'
+      - '.github/workflows/loadtest-harness.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/loadtest/**'
+      - '.github/workflows/loadtest-harness.yml'
+
+jobs:
+  harness:
+    name: Build and self-test the WebSocket load harness
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-loadtest-cargo-${{ hashFiles('backend/loadtest/ws-move-loadtest/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-loadtest-cargo-
+
+      - name: Cache build
+        uses: actions/cache@v4
+        with:
+          path: backend/loadtest/ws-move-loadtest/target
+          key: ${{ runner.os }}-loadtest-build-${{ hashFiles('backend/loadtest/ws-move-loadtest/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-loadtest-build-
+
+      - name: Check formatting
+        working-directory: backend/loadtest/ws-move-loadtest
+        run: cargo fmt --all -- --check
+
+      - name: Clippy lint
+        working-directory: backend/loadtest/ws-move-loadtest
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        working-directory: backend/loadtest/ws-move-loadtest
+        run: cargo build --release
+
+      - name: Test (unit + end-to-end self-test)
+        working-directory: backend/loadtest/ws-move-loadtest
+        run: cargo test
+
+      - name: Self-test smoke run
+        working-directory: backend/loadtest/ws-move-loadtest
+        run: |
+          cargo run --release -- \
+            --self-test \
+            --games 5 \
+            --spectators-per-game 2 \
+            --moves 20 \
+            --rate 20 \
+            --max-error-rate 0 \
+            --json "$RUNNER_TEMP/loadtest-report.json"

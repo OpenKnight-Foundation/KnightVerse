@@ -621,7 +621,15 @@ impl GameContract {
         let mut distributed: i128 = 0;
 
         for i in 0..winners.len() {
-            let pct = percentages.get(i).unwrap();
+            // `winners.len() == percentages.len()` was already checked above,
+            // so `.get(i)` for `i < winners.len()` cannot actually miss —
+            // but a payout loop is exactly the wrong place to trust that
+            // invariant silently. A typed error is safer than a panic (and
+            // than depending on the check above never being separated from
+            // this loop by a future refactor).
+            let pct = percentages
+                .get(i)
+                .ok_or(ContractError::MismatchedLengths)?;
             total_pct = total_pct
                 .checked_add(pct)
                 .ok_or(ContractError::InvalidPercentage)?;
@@ -630,7 +638,8 @@ impl GameContract {
             }
             let amount = (total_pool * pct as i128) / 100;
             distributed += amount;
-            payouts.push_back((winners.get(i).unwrap(), amount));
+            let winner = winners.get(i).ok_or(ContractError::MismatchedLengths)?;
+            payouts.push_back((winner, amount));
         }
 
         if total_pct != 100 {
@@ -1486,8 +1495,13 @@ impl GameContract {
 
         let mut distributed: i128 = 0;
         for i in 0..winners.len() {
-            let winner = winners.get(i).unwrap();
-            let percentage = percentages.get(i).unwrap();
+            // Same defensive rationale as `payout_tournament_optimized`:
+            // the length check above makes this unreachable today, but a
+            // typed error is safer than a panic in a payout loop.
+            let winner = winners.get(i).ok_or(ContractError::MismatchedLengths)?;
+            let percentage = percentages
+                .get(i)
+                .ok_or(ContractError::MismatchedLengths)?;
             total_percentage = total_percentage
                 .checked_add(percentage)
                 .ok_or(ContractError::InvalidPercentage)?;
@@ -1505,7 +1519,7 @@ impl GameContract {
         // Dust goes to first winner
         let remainder = total_pool - distributed;
         if remainder > 0 && !winners.is_empty() {
-            let first_winner = winners.get(0).unwrap();
+            let first_winner = winners.get(0).ok_or(ContractError::MismatchedLengths)?;
             let winner_escrow = escrow.get(first_winner.clone()).unwrap_or(0);
             escrow.set(first_winner.clone(), winner_escrow + remainder);
         }
@@ -4007,8 +4021,11 @@ impl GameContract {
 
         let mut total_pct: u32 = 0;
         for i in 0..percentages.len() {
+            let pct = percentages
+                .get(i)
+                .ok_or(ContractError::MismatchedLengths)?;
             total_pct = total_pct
-                .checked_add(percentages.get(i).unwrap())
+                .checked_add(pct)
                 .ok_or(ContractError::InvalidPercentage)?;
             if total_pct > 100 {
                 return Err(ContractError::InvalidPercentage);
@@ -4026,8 +4043,13 @@ impl GameContract {
         let mut distributed: i128 = 0;
 
         for i in 0..winners.len() {
-            let winner = winners.get(i).unwrap();
-            let pct = percentages.get(i).unwrap();
+            // `winners.len() == percentages.len()` was already checked
+            // above; a typed error here is defense-in-depth, not a
+            // currently-reachable path.
+            let winner = winners.get(i).ok_or(ContractError::MismatchedLengths)?;
+            let pct = percentages
+                .get(i)
+                .ok_or(ContractError::MismatchedLengths)?;
             let amount = (total * pct as i128) / 100;
             distributed += amount;
             token_client.transfer(&contract_address, &winner, &amount);
@@ -4036,7 +4058,7 @@ impl GameContract {
         // Dust goes to first winner
         let remainder = total - distributed;
         if remainder > 0 && !winners.is_empty() {
-            let first_winner = winners.get(0).unwrap();
+            let first_winner = winners.get(0).ok_or(ContractError::MismatchedLengths)?;
             token_client.transfer(&contract_address, &first_winner, &remainder);
         }
 

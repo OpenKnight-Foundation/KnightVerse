@@ -18,7 +18,6 @@ members = [
     "modules/pairing",
     "modules/st_core",
     "modules/metrics",
-    "modules/validation",
     "modules/archiving",
 ]
 
@@ -26,8 +25,14 @@ members = [
 # It is a manual `main()` harness (not `#[test]`s) that has not compiled in a
 # long time: it builds tournaments through `Tournament::new`/`BracketConfig`,
 # which no longer exist after the bracket/swiss refactor, and it calls private
-# helpers on `validation` and `archiving`. Re-adding it needs a rewrite against
-# the current APIs rather than a mechanical fix.
+# helpers on `archiving`. Re-adding it needs a rewrite against the current APIs
+# rather than a mechanical fix.
+#
+# It also still lists `validation` as a path dependency. That crate was removed
+# as dead code (BE-83), so whoever re-adds this harness must drop the dependency
+# along with the `RealTimeMoveValidator` usage in its `main()`. Cargo never reads
+# this crate's manifest, because it is neither a workspace member nor a path
+# dependency of one, so the stale path entry is inert.
 
 [workspace.dependencies]
 regex = "1.10.2"

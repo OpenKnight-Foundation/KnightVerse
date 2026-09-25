@@ -5170,26 +5170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "validation"
-version = "0.1.0"
-dependencies = [
- "actix-web",
- "actix-ws",
- "async-trait",
- "chess",
- "chrono",
- "env_logger",
- "futures-util",
- "log",
- "redis",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "validator"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

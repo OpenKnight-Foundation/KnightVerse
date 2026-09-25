@@ -1,9 +1,5 @@
 use actix_web::HttpResponse;
 use once_cell::sync::{Lazy, OnceCell};
-use prometheus::{
-    CounterVec, Encoder, Gauge, GaugeVec, Histogram, HistogramOpts, Opts, Registry, TextEncoder,
-};
-use std::sync::Arc;
 
 /// Global metrics registry
 static REGISTRY: Lazy<Registry> = Lazy::new(|| Registry::new());
@@ -97,14 +93,6 @@ impl Metrics {
         )
         .expect("Failed to create game_events_total counter");
 
-        let spectator_queue_depth = GaugeVec::new(
-            Opts::new(
-                "xlmate_spectator_queue_depth",
-                "Buffered outbound frames per spectator game room",
-            ),
-            &["game_id"],
-        )
-        .expect("Failed to create spectator_queue_depth gauge");
 
         let spectator_frames_dropped_total = CounterVec::new(
             Opts::new(

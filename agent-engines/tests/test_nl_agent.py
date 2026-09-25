@@ -24,9 +24,11 @@ from gpu_worker.models import AnalysisResult
 
 class TestNLModels(unittest.TestCase):
     """Test natural language models."""
-    
+
     def test_nl_analysis_request_to_dict(self):
         """Test NLAnalysisRequest serialization."""
+        # Confirms enum-valued fields (intent, complexity) serialize to
+        # their expected lowercase string values, not e.g. "IntentType.SUGGEST_MOVE".
         request = NLAnalysisRequest(
             user_input="What's the best move here?",
             fen="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
@@ -34,15 +36,18 @@ class TestNLModels(unittest.TestCase):
             complexity=ComplexityLevel.BEGINNER,
             request_id="test-123",
         )
-        
+
         result = request.to_dict()
         self.assertEqual(result["user_input"], "What's the best move here?")
         self.assertEqual(result["intent"], "suggest_move")
         self.assertEqual(result["complexity"], "beginner")
         self.assertEqual(result["request_id"], "test-123")
-    
+
     def test_nl_analysis_response_to_dict(self):
         """Test NLAnalysisResponse serialization."""
+        # Note: the dataclass field is `natural_language_response`, but
+        # the serialized dict key is the shorter `"response"` — this test
+        # verifies that renaming/mapping happens correctly.
         response = NLAnalysisResponse(
             request_id="test-123",
             intent=IntentType.SUGGEST_MOVE,
@@ -51,15 +56,16 @@ class TestNLModels(unittest.TestCase):
             evaluation=0.5,
             confidence=0.9,
         )
-        
+
         result = response.to_dict()
         self.assertEqual(result["response"], "Play e5")
         self.assertEqual(result["best_move"], "e5")
         self.assertEqual(result["evaluation"], 0.5)
         self.assertEqual(result["confidence"], 0.9)
-    
+
     def test_move_analysis_creation(self):
         """Test MoveAnalysis dataclass."""
+        # Basic construction/field-access sanity check.
         analysis = MoveAnalysis(
             move="e4",
             evaluation=0.3,
@@ -67,7 +73,7 @@ class TestNLModels(unittest.TestCase):
             is_best=True,
             explanation="Controls the center",
         )
-        
+
         self.assertEqual(analysis.move, "e4")
         self.assertTrue(analysis.is_best)
         self.assertEqual(analysis.evaluation, 0.3)
@@ -75,21 +81,23 @@ class TestNLModels(unittest.TestCase):
 
 class TestIntentParser(unittest.TestCase):
     """Test intent recognition and parsing."""
-    
+
     def test_recognize_analyze_position(self):
         """Test recognition of analyze position intent."""
+        # Multiple differently-worded phrasings should all map to the
+        # same ANALYZE_POSITION intent, each with nonzero confidence.
         test_cases = [
             "Analyze this position for me",
             "Can you evaluate the board?",
             "What's the assessment of this position?",
             "I need an analysis of this game",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.ANALYZE_POSITION)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_recognize_suggest_move(self):
         """Test recognition of suggest move intent."""
         test_cases = [
@@ -98,12 +106,12 @@ class TestIntentParser(unittest.TestCase):
             "What should I play here?",
             "Recommend the best move",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.SUGGEST_MOVE)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_recognize_explain_move(self):
         """Test recognition of explain move intent."""
         test_cases = [
@@ -111,12 +119,12 @@ class TestIntentParser(unittest.TestCase):
             "Why is that the best move?",
             "What makes this position strong?",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.EXPLAIN_MOVE)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_recognize_get_hint(self):
         """Test recognition of hint intent."""
         test_cases = [
@@ -125,12 +133,12 @@ class TestIntentParser(unittest.TestCase):
             "I'm stuck, what should I do?",
             "Any tips?",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.GET_HINT)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_recognize_compare_moves(self):
         """Test recognition of compare moves intent."""
         test_cases = [
@@ -138,12 +146,12 @@ class TestIntentParser(unittest.TestCase):
             "Which is better, Nf3 or c4?",
             "What's the difference between these moves?",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.COMPARE_MOVES)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_recognize_learn_concept(self):
         """Test recognition of learn concept intent."""
         test_cases = [
@@ -151,18 +159,20 @@ class TestIntentParser(unittest.TestCase):
             "Tell me about pins",
             "Teach me about endgame strategy",
         ]
-        
+
         for input_text in test_cases:
             result = recognize_intent(input_text)
             self.assertEqual(result.intent, IntentType.LEARN_CONCEPT)
             self.assertGreater(result.confidence, 0.0)
-    
+
     def test_unknown_intent(self):
         """Test unknown intent for unrecognized input."""
+        # Input with no chess-related keywords at all should map to
+        # UNKNOWN with zero confidence, not be forced into some category.
         result = recognize_intent("Hello, how are you?")
         self.assertEqual(result.intent, IntentType.UNKNOWN)
         self.assertEqual(result.confidence, 0.0)
-    
+
     def test_detect_complexity_beginner(self):
         """Test beginner complexity detection."""
         test_cases = [
@@ -170,11 +180,11 @@ class TestIntentParser(unittest.TestCase):
             "Keep it simple please",
             "I'm a beginner, basic explanation",
         ]
-        
+
         for input_text in test_cases:
             complexity = detect_complexity(input_text)
             self.assertEqual(complexity, ComplexityLevel.BEGINNER)
-    
+
     def test_detect_complexity_advanced(self):
         """Test advanced complexity detection."""
         test_cases = [
@@ -182,69 +192,90 @@ class TestIntentParser(unittest.TestCase):
             "Show me the tactical variations",
             "Advanced evaluation with centipawn loss",
         ]
-        
+
         for input_text in test_cases:
             complexity = detect_complexity(input_text)
             self.assertEqual(complexity, ComplexityLevel.ADVANCED)
-    
+
     def test_detect_complexity_intermediate(self):
         """Test default intermediate complexity."""
+        # No beginner/advanced signal words present => should fall back
+        # to the INTERMEDIATE default rather than erroring or guessing.
         complexity = detect_complexity("What's the best move?")
         self.assertEqual(complexity, ComplexityLevel.INTERMEDIATE)
-    
+
     def test_extract_fen(self):
         """Test FEN extraction from input captures all 6 segments."""
+        # A full FEN has 6 space-separated fields (board, side-to-move,
+        # castling rights, en passant, halfmove clock, fullmove number) —
+        # this checks the extractor grabs the whole string, including the
+        # castling-rights segment ("KQkq"), not just a partial match.
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         input_text = f"Analyze this position: {fen}"
-        
+
         extracted = extract_fen_from_input(input_text)
         self.assertEqual(extracted, fen)
         self.assertIn("KQkq", extracted)
-    
+
     def test_extract_fen_not_present(self):
         """Test FEN extraction when not present."""
+        # No FEN string in the input => should return None, not raise or
+        # return a garbage partial match.
         input_text = "What's the best move in the starting position?"
         extracted = extract_fen_from_input(input_text)
         self.assertIsNone(extracted)
-    
+
     def test_extract_moves(self):
         """Test move extraction from input."""
+        # Multiple plain SAN moves mentioned in one sentence should all
+        # be captured.
         input_text = "Compare e4 and d4, or maybe Nf3"
         moves = extract_moves_from_input(input_text)
-        
+
         self.assertIn("e4", moves)
         self.assertIn("d4", moves)
         self.assertIn("Nf3", moves)
-    
+
     def test_extract_moves_with_captures(self):
         """Test move extraction with captures and checks."""
+        # Moves with SAN suffix symbols (x for capture, + for check,
+        # # for checkmate) should be extracted with those symbols intact.
         input_text = "What about Qxd5+ or Bxf7#"
         moves = extract_moves_from_input(input_text)
-        
+
         self.assertIn("Qxd5+", moves)
         self.assertIn("Bxf7#", moves)
 
 
 class TestNaturalLanguageAgent(unittest.TestCase):
     """Test NaturalLanguageAgent service."""
-    
+
     def setUp(self):
         """Set up test fixtures."""
+        # A dedicated event loop per test, since NaturalLanguageAgent's
+        # methods are async and unittest.TestCase doesn't natively await
+        # coroutines — each test wraps its body in an inner `run_test()`
+        # coroutine and drives it via `self.loop.run_until_complete(...)`.
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        
+
         # Mock worker pool
+        # The agent delegates actual engine analysis to a worker pool;
+        # mocking it out here means these tests exercise the agent's NL
+        # request/response logic in isolation from real engine calls.
         self.mock_pool = MagicMock()
         self.agent = NaturalLanguageAgent(self.mock_pool)
-    
+
     def tearDown(self):
         """Clean up."""
         self.loop.close()
-    
+
     def test_process_suggest_move_request(self):
         """Test processing a move suggestion request."""
         async def run_test():
             # Mock the pool submit
+            # Stub out what the worker pool would normally return from a
+            # real engine analysis.
             mock_result = AnalysisResult(
                 request_id="test-1",
                 best_move="e5",
@@ -255,18 +286,18 @@ class TestNaturalLanguageAgent(unittest.TestCase):
                 time_ms=500,
             )
             self.mock_pool.submit = AsyncMock(return_value=mock_result)
-            
+
             response = await self.agent.process_request(
                 user_input="What's the best move?",
                 fen="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
             )
-            
+
             self.assertEqual(response.intent, IntentType.SUGGEST_MOVE)
             self.assertEqual(response.best_move, "e5")
             self.assertGreater(len(response.natural_language_response), 0)
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_process_analyze_position_request(self):
         """Test processing a position analysis request."""
         async def run_test():
@@ -280,30 +311,33 @@ class TestNaturalLanguageAgent(unittest.TestCase):
                 time_ms=600,
             )
             self.mock_pool.submit = AsyncMock(return_value=mock_result)
-            
+
             response = await self.agent.process_request(
                 user_input="Analyze this position",
                 fen="rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1",
             )
-            
+
             self.assertEqual(response.intent, IntentType.ANALYZE_POSITION)
             self.assertIsNotNone(response.evaluation)
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_process_without_fen(self):
         """Test processing request without FEN."""
         async def run_test():
+            # No board position was provided at all — the agent should
+            # respond by asking for one (mentioning "position"), rather
+            # than crashing or guessing a board state.
             response = await self.agent.process_request(
                 user_input="What's the best move?",
             )
-            
+
             # Should ask for position
             self.assertGreater(len(response.natural_language_response), 0)
             self.assertIn("position", response.natural_language_response.lower())
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_process_hint_request(self):
         """Test processing a hint request."""
         async def run_test():
@@ -317,43 +351,51 @@ class TestNaturalLanguageAgent(unittest.TestCase):
                 time_ms=300,
             )
             self.mock_pool.submit = AsyncMock(return_value=mock_result)
-            
+
             response = await self.agent.process_request(
                 user_input="Give me a hint",
                 fen="r1bqkbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3",
             )
-            
+
             self.assertEqual(response.intent, IntentType.GET_HINT)
             # Hint should not reveal the full best move
+            # (a hint is meant to nudge the user, not hand them the
+            # engine's exact answer via `best_move`).
             self.assertIsNone(response.best_move)
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_process_learn_concept_request(self):
         """Test processing a concept learning request."""
         async def run_test():
+            # No FEN/pool mock needed here — LEARN_CONCEPT responses are
+            # generated from static/explanatory content, not a live
+            # engine analysis.
             response = await self.agent.process_request(
                 user_input="What is a fork in chess?",
             )
-            
+
             self.assertEqual(response.intent, IntentType.LEARN_CONCEPT)
             self.assertIn("fork", response.natural_language_response.lower())
             self.assertGreater(len(response.natural_language_response), 0)
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_process_unknown_intent(self):
         """Test processing request with unknown intent."""
         async def run_test():
+            # Off-topic input should be classified UNKNOWN and produce a
+            # response that acknowledges the agent doesn't understand,
+            # rather than forcing a chess-related answer.
             response = await self.agent.process_request(
                 user_input="What's the weather like?",
             )
-            
+
             self.assertEqual(response.intent, IntentType.UNKNOWN)
             self.assertIn("not sure", response.natural_language_response.lower())
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_different_complexity_levels(self):
         """Test responses at different complexity levels."""
         async def run_test():
@@ -367,31 +409,33 @@ class TestNaturalLanguageAgent(unittest.TestCase):
                 time_ms=700,
             )
             self.mock_pool.submit = AsyncMock(return_value=mock_result)
-            
+
             # Test beginner
             beginner_response = await self.agent.process_request(
                 user_input="Suggest a move, keep it simple",
                 fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             )
-            
+
             # Test advanced
             advanced_response = await self.agent.process_request(
                 user_input="Suggest an advanced move with detailed variations",
                 fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             )
-            
+
             # Both should succeed but with different content
             self.assertEqual(beginner_response.intent, IntentType.SUGGEST_MOVE)
             self.assertEqual(advanced_response.intent, IntentType.SUGGEST_MOVE)
-            
+
             # Advanced should mention more technical terms
+            # (same underlying engine result, but the generated NL text
+            # should differ based on the requested complexity level).
             self.assertNotEqual(
                 beginner_response.natural_language_response,
                 advanced_response.natural_language_response,
             )
-        
+
         self.loop.run_until_complete(run_test())
-    
+
     def test_request_history(self):
         """Test request history tracking."""
         async def run_test():
@@ -405,25 +449,32 @@ class TestNaturalLanguageAgent(unittest.TestCase):
                 time_ms=500,
             )
             self.mock_pool.submit = AsyncMock(return_value=mock_result)
-            
+
             response = await self.agent.process_request(
                 user_input="Best move?",
                 fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             )
-            
+
             # Check history
+            # The agent should keep a log of past requests/responses,
+            # retrievable both as a full list and by specific request_id.
             history = self.agent.get_request_history()
             self.assertGreater(len(history), 0)
-            
+
             # Check specific request
             specific = self.agent.get_request_history(response.request_id)
             self.assertIsNotNone(specific)
             self.assertEqual(specific.request_id, response.request_id)
-        
+
         self.loop.run_until_complete(run_test())
 
     def test_null_evaluation_handling(self):
         """Test natural language response generation when result.evaluation is None."""
+        # Regression-style test: an AnalysisResult can legitimately have
+        # `evaluation=None` (e.g. engine mate score or incomplete
+        # analysis). Every NL-generation helper method must handle that
+        # gracefully (no exceptions, still produces non-empty text)
+        # rather than assuming evaluation is always a float.
         from gpu_worker.models import AnalysisResult
         from gpu_worker.nl_models import NLAnalysisRequest, IntentType, ComplexityLevel
         result_none_eval = AnalysisResult(
@@ -435,6 +486,9 @@ class TestNaturalLanguageAgent(unittest.TestCase):
             principal_variation=["e2e4", "e7e5"]
         )
         req = NLAnalysisRequest(user_input="Analyze e4")
+        # Exercise every complexity level against every NL-generation
+        # helper method the agent exposes, to catch a None-evaluation
+        # crash in any one of them.
         for level in [ComplexityLevel.BEGINNER, ComplexityLevel.INTERMEDIATE, ComplexityLevel.ADVANCED]:
             resp1 = self.agent._generate_position_analysis_nl(req, result_none_eval, level)
             self.assertIsNotNone(resp1.natural_language_response)

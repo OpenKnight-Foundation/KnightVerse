@@ -2,6 +2,18 @@
 name = "title_badge"
 version = "0.1.0"
 edition = "2021"
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "0.10.1"
+<<<<<<< HEAD
+=======
 publish = false
 
 [lib]
@@ -16,3 +28,6 @@ soroban-sdk = "21.0.0"
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+>>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e

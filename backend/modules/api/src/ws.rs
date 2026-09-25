@@ -14,7 +14,7 @@ use std::env;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster};
+use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster, SpectatorSubscription};
 
 use chrono::{DateTime, Utc};
 use tokio::task::JoinHandle;
@@ -188,6 +188,15 @@ pub struct Disconnect {
 pub struct Broadcast {
     pub game_id: String,
     pub message: WsMessage,
+}
+
+/// Internal control message sent by the spectator fan-out pump when a
+/// connection's bounded outbound queue stayed saturated, so the connection
+/// must be dropped rather than buffered indefinitely.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SpectatorDisconnect {
+    pub game_id: String,
 }
 
 /// Lobby state actor.
@@ -529,7 +538,7 @@ pub struct WsSession {
     pub username: String,
     pub session_id: String,
     pub is_spectator: bool,
-    pub redis_sub_task: Option<JoinHandle<()>>,
+    pub redis_sub_task: Option<SpectatorSubscription>,
 }
 
 impl WsSession {
@@ -574,10 +583,16 @@ impl Actor for WsSession {
     fn started(&mut self, ctx: &mut Self::Context) {
         self.hb(ctx);
 
-        let addr = ctx.address().recipient();
+        let addr: Recipient<WsMessage> = ctx.address().recipient();
         if self.is_spectator {
-            let recipient = ctx.address().recipient();
-            let handle = spawn_subscriber_task(self.redis.clone(), self.game_id.clone(), recipient);
+            let recipient: Recipient<WsMessage> = ctx.address().recipient();
+            let disconnect: Recipient<SpectatorDisconnect> = ctx.address().recipient();
+            let handle = spawn_subscriber_task(
+                self.redis.clone(),
+                self.game_id.clone(),
+                recipient,
+                disconnect,
+            );
             self.redis_sub_task = Some(handle);
 
             let redis = self.redis.clone();
@@ -749,6 +764,27 @@ impl Handler<WsMessage> for WsSession {
         }
         let text = serde_json::to_string(&val).unwrap();
         ctx.text(text);
+    }
+}
+
+/// Disconnect a spectator whose bounded outbound queue overflowed (see the
+/// backpressure policy in `redis_broadcast.rs`).
+impl Handler<SpectatorDisconnect> for WsSession {
+    type Result = ();
+
+    fn handle(&mut self, msg: SpectatorDisconnect, ctx: &mut ws::WebsocketContext<Self>) {
+        warn!(
+            "Disconnecting backpressured spectator from game {}: outbound queue overflowed",
+            msg.game_id
+        );
+        if let Some(subscription) = self.redis_sub_task.take() {
+            subscription.abort();
+        }
+        ctx.close(Some(ws::CloseReason {
+            code: 1013,
+            description: Some("spectator outbound queue overflowed".to_string()),
+        }));
+        ctx.stop();
     }
 }
 

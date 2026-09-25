@@ -118,6 +118,32 @@ The WebSocket protocol is documented at `/api/docs/websocket`, covering:
 - Chat messages
 - Error handling
 
+### Spectator backpressure
+
+Spectator fan-out (Redis pub/sub -> WebSocket) is bounded per connection so a
+single slow or stalled client can neither exhaust server memory nor delay
+delivery to the rest of the room. Each spectator connection owns a drop-oldest
+outbound queue (`SPECTATOR_QUEUE_CAPACITY` = 256 frames):
+
+- When a queue is full the **oldest** buffered frame is discarded to make room
+  for the newest, so a stalled connection's backlog stays bounded.
+- A connection still saturated after `MAX_CONSECUTIVE_OVERFLOWS` (64)
+  consecutive fan-out events is **disconnected** with WebSocket close code
+  `1013` instead of being buffered indefinitely.
+- The fan-out loop only ever enqueues (it never awaits a slow connection), so
+  one slow spectator never blocks delivery to other spectators in the same
+  room.
+
+The policy is implemented in `src/redis_broadcast.rs` and covered by unit tests
+in that module. Per-room queue depth and backpressure events are exported as
+Prometheus metrics:
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `xlmate_spectator_queue_depth{game_id}` | gauge | Frames currently buffered per spectator room |
+| `xlmate_spectator_frames_dropped_total{game_id}` | counter | Frames discarded by the drop-oldest policy |
+| `xlmate_spectator_backpressure_disconnects_total{game_id}` | counter | Spectators disconnected for sustained backpressure |
+
 ## Dependencies
 
 - `utoipa`: OpenAPI generation for Rust

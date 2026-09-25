@@ -55,6 +55,10 @@ const PlayGameEngine = dynamic(
   },
 );
 
-export default function PlayOnlinePage() {
-  return <PlayGameEngine />;
+export default function PlayOnlinePage({
+  searchParams,
+}: {
+  searchParams: { fen?: string };
+}) {
+  return <PlayGameEngine fen={searchParams.fen} />;
 }

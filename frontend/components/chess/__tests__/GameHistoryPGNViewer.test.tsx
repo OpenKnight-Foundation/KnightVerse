@@ -1,15 +1,17 @@
 /**
- * Regression tests for issue #1228.
+ * Component tests for GameHistoryPGNViewer.
  *
- * `GameHistoryPGNViewer` used to default `pgn` to the bundled `MOCK_PGN`, so
- * every render — including production ones — silently replayed a fabricated
- * game. The component now requires the real PGN from the caller, and the sample
- * is only an exported fixture.
+ * - Regression tests for issue #1228: `GameHistoryPGNViewer` used to default
+ *   `pgn` to the bundled `MOCK_PGN`, so every render — including production
+ *   ones — silently replayed a fabricated game. The component now requires the
+ *   real PGN from the caller, and the sample is only an exported fixture.
+ * - FE-79: the "Export as PDF" action triggers a browser download of a valid
+ *   PDF blob whose content matches the rendered game (metadata + moves).
  */
 
 import React from "react";
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // The board widget pulls in third-party rendering that is irrelevant here.
@@ -29,13 +31,16 @@ const REAL_GAME_PGN = `[Event "Testnet Rated Game"]
 
 1. f3 e5 2. g4 Qh4# 0-1`;
 
-describe("GameHistoryPGNViewer (#1228)", () => {
-  beforeEach(() => {
-    // jsdom does not implement scrollIntoView, which the component calls when
-    // the active move changes.
-    Element.prototype.scrollIntoView = vi.fn();
+beforeEach(() => {
+  // jsdom does not implement scrollIntoView, which the component calls when
+  // the active move changes.
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
   });
+});
 
+describe("GameHistoryPGNViewer (#1228)", () => {
   it("replays the PGN supplied by the caller instead of the sample fixture", () => {
     render(<GameHistoryPGNViewer pgn={REAL_GAME_PGN} />);
 
@@ -78,5 +83,78 @@ describe("GameHistoryPGNViewer (#1228)", () => {
     const pgnIsRequired: undefined extends PgnProp ? never : true = true;
 
     expect(pgnIsRequired).toBe(true);
+  });
+});
+
+describe("GameHistoryPGNViewer — PDF scoresheet export (FE-79)", () => {
+  let anchorClick: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    anchorClick = vi.fn();
+    Object.defineProperty(HTMLAnchorElement.prototype, "click", {
+      configurable: true,
+      writable: true,
+      value: anchorClick,
+    });
+  });
+
+  function stubObjectUrls(): {
+    create: ReturnType<typeof vi.fn>;
+    revoke: ReturnType<typeof vi.fn>;
+    captured: () => Blob | null;
+  } {
+    let captured: Blob | null = null;
+    const create = vi.fn((blob: Blob) => {
+      captured = blob;
+      return "blob:mock";
+    });
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    return { create, revoke, captured: () => captured };
+  }
+
+  it("renders an Export as PDF action on the replay header", () => {
+    render(<GameHistoryPGNViewer pgn={MOCK_PGN} />);
+    expect(
+      screen.getByRole("heading", { name: /game replay/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /pdf scoresheet/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("downloads a valid scoresheet blob matching the rendered game", async () => {
+    const { create, revoke, captured } = stubObjectUrls();
+
+    render(<GameHistoryPGNViewer pgn={MOCK_PGN} />);
+    // Parsing runs in an effect — wait for the move list to appear
+    await waitFor(() =>
+      expect(screen.getByText(/Rd8#/)).toBeInTheDocument(),
+    );
+
+    const exportButton = screen.getByRole("button", { name: /pdf scoresheet/i });
+    fireEvent.click(exportButton);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledTimes(1);
+
+    const blob = captured();
+    expect(blob).not.toBeNull();
+    expect(blob!.type).toBe("application/pdf");
+
+    const text = await blob!.text();
+    expect(text.startsWith("%PDF-1.4")).toBe(true);
+    expect(text.endsWith("%%EOF\n")).toBe(true);
+    // Metadata from the PGN headers
+    expect(text).toContain("Morphy, Paul");
+    expect(text).toContain("Duke of Brunswick");
+    expect(text).toContain("1858.10.21");
+    expect(text).toContain("1-0");
+    // Moves from the PGN body
+    expect(text).toContain("Qb8+");
+    expect(text).toContain("Rd8#");
+    expect(text).toContain("Final Position");
   });
 });

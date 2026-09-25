@@ -1,0 +1,101 @@
+name: Bug Report
+description: File a bug report with steps to reproduce
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please provide as much detail as possible.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of what the bug is
+      placeholder: e.g., "WebSocket connection drops after 30 seconds of inactivity"
+    validations:
+      required: true
+  - type: textarea
+    id: repro_steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen
+      placeholder: e.g., "WebSocket should reconnect automatically"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: A clear and concise description of what actually happened
+      placeholder: e.g., "WebSocket connection closes and doesn't reconnect"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the codebase is affected?
+      options:
+        - Smart Contracts (contracts/)
+        - Backend (backend/)
+        - Frontend (frontend/)
+        - AI Engines (agent-engines/)
+        - Infrastructure/DevOps
+        - Documentation
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please provide details about your environment:
+        - OS: [e.g., Ubuntu 22.04, macOS 14, Windows 11]
+        - Rust version (if applicable): [e.g., 1.75.0]
+        - Node.js version (if applicable): [e.g., 20.10.0]
+        - Python version (if applicable): [e.g., 3.11.5]
+        - Docker version (if applicable): [e.g., 24.0.5]
+        - Network: [testnet / futurenet / mainnet / local]
+      placeholder: |
+        OS: Ubuntu 22.04
+        Rust: 1.75.0
+        Node.js: 20.10.0
+        Network: testnet
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: If applicable, add logs, screenshots, or transaction hashes to help explain the problem
+      placeholder: |
+        ```
+        Error: Connection reset by peer
+        at WebSocket.onclose (...)
+        ```
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have provided all required information above
+          required: true

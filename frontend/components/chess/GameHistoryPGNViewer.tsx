@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Chess } from "chess.js";
 import ChessboardComponent from "./ChessboardComponent";
+import { downloadScoresheetPdf } from "@/lib/scoresheetPdf";
 
 // ── Sample PGN fixture ────────────────────────────────────────────────────────
 
@@ -317,6 +318,24 @@ export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
   const { fens, moves, headers } = parsed;
   const currentFen = fens[currentIndex];
 
+  const handleExportPdf = (): void => {
+    downloadScoresheetPdf({
+      metadata: {
+        white: headers.White ?? "White",
+        black: headers.Black ?? "Black",
+        whiteElo: headers.WhiteElo,
+        blackElo: headers.BlackElo,
+        date: headers.Date,
+        result: headers.Result,
+        event: headers.Event,
+        site: headers.Site,
+        timeControl: headers.TimeControl,
+      },
+      moves: moves.map((move) => move.san),
+      finalFen: fens[fens.length - 1],
+    });
+  };
+
   // The move that brought us to currentIndex (index 0 = no move yet)
   const currentMove = currentIndex > 0 ? moves[currentIndex - 1] : null;
   const captured = getCapturedPieces(moves, currentIndex);
@@ -331,8 +350,21 @@ export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-gray-700">
-        <h2 className="text-sm font-semibold text-white">Game Replay</h2>
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-400">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-white">Game Replay</h2>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            aria-label="Export this game as a PDF scoresheet"
+            className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold
+                       bg-indigo-600 text-white hover:bg-indigo-500
+                       transition-colors focus:outline-none focus-visible:ring-2
+                       focus-visible:ring-indigo-400"
+          >
+            Export as PDF
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2 text-xs text-gray-400">
           {headers.White && <span>⬜ {headers.White}</span>}
           {headers.Black && <span>⬛ {headers.Black}</span>}
           {headers.Result && (

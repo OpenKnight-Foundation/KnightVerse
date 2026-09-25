@@ -36,6 +36,11 @@ KnightVerse/
 └── README.md
 ```
 
+`apps/web/`, `src/` and `pers-store/` are **not** part of any build: nothing in
+`frontend/`, `backend/`, `contracts/` or CI imports them. Make changes in
+`frontend/` (or `backend/`) instead. If you want to revive something from these
+folders, port it into the live app.
+
 ## Setup Instructions (End-to-End)
 
 ### Prerequisites

@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
 #no_std]
 use soroban_sdk::{contract,contractimpl,Env,Address,Symbol,Vec,BytesN};
 #[contract]
@@ -10,6 +13,7 @@ impl C {
  pub fn revoke(e:Env,m:Address,u:Address){let admin:Address=e.storage().instance().get(&Symbol::new(&e,"a")).unwrap();if a==admin{e.storage().instance().remove(&u);}}
  pub fn get(e:Env,u:Address)->Option<Symbol>{e.storage().instance().get(&u)}
 }
+<<<<<<< HEAD
 =======
 #![no_std]
 //! Title Badge — an admin-gated registry of player titles/badges.
@@ -164,3 +168,5 @@ impl TitleBadgeContract {
 #[cfg(test)]
 mod test;
 >>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e

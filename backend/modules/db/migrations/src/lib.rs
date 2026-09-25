@@ -10,10 +10,7 @@ mod m20250605_090000_add_game_search_indexes;
 mod m20260127_180000_add_game_imported_flag;
 mod m20260127_create_refresh_tokens_table;
 mod m20260924_000001_create_failed_archive_jobs;
-<<<<<<< HEAD
-=======
 mod m20260925_000001_create_admin_actions_table;
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 
 pub struct Migrator;
 
@@ -31,10 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260127_180000_add_game_imported_flag::Migration),
             Box::new(m20250324_add_elo_rating_to_player::Migration),
             Box::new(m20260924_000001_create_failed_archive_jobs::Migration),
-<<<<<<< HEAD
-=======
             Box::new(m20260925_000001_create_admin_actions_table::Migration),
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
         ]
     }
 }

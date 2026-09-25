@@ -5,8 +5,6 @@
 //! that any backend node can broadcast to spectators connected to any other
 //! node, without registering (potentially thousands of) spectator recipients
 //! with `LobbyState`.
-<<<<<<< HEAD
-=======
 //!
 //! # Backpressure policy
 //!
@@ -30,17 +28,10 @@
 //!
 //! Per-room queue depth, dropped frames, and backpressure disconnects are
 //! exported as Prometheus metrics through `crate::metrics`.
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 
 use actix::Recipient;
 use futures_util::StreamExt;
 use redis::AsyncCommands;
-<<<<<<< HEAD
-use tokio::task::JoinHandle;
-use tracing::error;
-
-use crate::ws::WsMessage;
-=======
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -58,7 +49,6 @@ pub const SPECTATOR_QUEUE_CAPACITY: usize = 256;
 /// Consecutive fan-out events that overflow a spectator's queue before the
 /// connection is considered unrecoverable and disconnected.
 const MAX_CONSECUTIVE_OVERFLOWS: usize = 64;
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 
 fn channel_for(game_id: &str) -> String {
     format!("game:{}:spectators", game_id)
@@ -68,8 +58,6 @@ fn spectator_count_key(game_id: &str) -> String {
     format!("game:{}:spectator_count", game_id)
 }
 
-<<<<<<< HEAD
-=======
 /// Bounded, drop-oldest outbound queue for a single spectator connection.
 ///
 /// See the module-level "Backpressure policy" section for the rationale.
@@ -245,7 +233,6 @@ impl SpectatorSubscription {
     }
 }
 
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 #[derive(Clone)]
 pub struct RedisBroadcaster {
     client: redis::Client,
@@ -317,23 +304,14 @@ impl RedisBroadcaster {
 }
 
 /// Subscribe to a game's Redis channel and forward messages to `recipient`
-<<<<<<< HEAD
-/// until the connection drops or the returned handle is aborted.
-=======
 /// through a bounded, drop-oldest outbound queue (see the module-level
 /// "Backpressure policy"). Runs until the Redis connection drops, the queue
 /// overflows (at which point `disconnect` is notified), or the returned
 /// subscription is aborted.
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 pub fn spawn_subscriber_task(
     redis: RedisBroadcaster,
     game_id: String,
     recipient: Recipient<WsMessage>,
-<<<<<<< HEAD
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let channel = channel_for(&game_id);
-=======
     disconnect: Recipient<SpectatorDisconnect>,
 ) -> SpectatorSubscription {
     let queue = SpectatorQueue::new(game_id.clone());
@@ -343,30 +321,21 @@ pub fn spawn_subscriber_task(
     let subscriber_game_id = game_id.clone();
     let subscriber = tokio::spawn(async move {
         let channel = channel_for(&subscriber_game_id);
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
         let conn = match redis.client.get_async_connection().await {
             Ok(c) => c,
             Err(e) => {
                 error!(
                     "Failed to open Redis pubsub connection for game {}: {}",
-<<<<<<< HEAD
-                    game_id, e
-                );
-=======
                     subscriber_game_id, e
                 );
                 subscriber_queue.close();
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
                 return;
             }
         };
         let mut pubsub = conn.into_pubsub();
         if let Err(e) = pubsub.subscribe(&channel).await {
             error!("Failed to subscribe to {}: {}", channel, e);
-<<<<<<< HEAD
-=======
             subscriber_queue.close();
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             return;
         }
 
@@ -379,11 +348,6 @@ pub fn spawn_subscriber_task(
             let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&payload) else {
                 continue;
             };
-<<<<<<< HEAD
-            recipient.do_send(ws_msg);
-        }
-    })
-=======
             if subscriber_queue.push(ws_msg) {
                 error!(
                     "Spectator outbound queue for game {} stayed saturated; disconnecting",
@@ -496,5 +460,4 @@ mod tests {
             .expect("pump should stop after the queue closes")
             .expect("pump task should not panic");
     }
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 }

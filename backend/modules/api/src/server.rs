@@ -1,9 +1,7 @@
 // src/server.rs
 
-<<<<<<< HEAD
-=======
 use crate::admin::{list_actions, record_action};
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
+
 use crate::ai::{analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;

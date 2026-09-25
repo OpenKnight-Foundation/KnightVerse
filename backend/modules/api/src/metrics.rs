@@ -1,13 +1,5 @@
 use actix_web::HttpResponse;
 use once_cell::sync::{Lazy, OnceCell};
-use prometheus::{
-<<<<<<< HEAD
-    CounterVec, Encoder, Gauge, Histogram, HistogramOpts, Opts, Registry, TextEncoder,
-=======
-    CounterVec, Encoder, Gauge, GaugeVec, Histogram, HistogramOpts, Opts, Registry, TextEncoder,
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-};
-use std::sync::Arc;
 
 /// Global metrics registry
 static REGISTRY: Lazy<Registry> = Lazy::new(|| Registry::new());
@@ -101,16 +93,6 @@ impl Metrics {
         )
         .expect("Failed to create game_events_total counter");
 
-<<<<<<< HEAD
-=======
-        let spectator_queue_depth = GaugeVec::new(
-            Opts::new(
-                "xlmate_spectator_queue_depth",
-                "Buffered outbound frames per spectator game room",
-            ),
-            &["game_id"],
-        )
-        .expect("Failed to create spectator_queue_depth gauge");
 
         let spectator_frames_dropped_total = CounterVec::new(
             Opts::new(
@@ -130,7 +112,6 @@ impl Metrics {
         )
         .expect("Failed to create spectator_backpressure_disconnects_total counter");
 
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
         // Register all metrics (only once)
         METRICS_REGISTERED.get_or_init(|| {
             REGISTRY
@@ -154,8 +135,6 @@ impl Metrics {
             REGISTRY
                 .register(Box::new(game_events_total.clone()))
                 .expect("Failed to register game_events_total");
-<<<<<<< HEAD
-=======
             REGISTRY
                 .register(Box::new(spectator_queue_depth.clone()))
                 .expect("Failed to register spectator_queue_depth");
@@ -165,7 +144,6 @@ impl Metrics {
             REGISTRY
                 .register(Box::new(spectator_backpressure_disconnects_total.clone()))
                 .expect("Failed to register spectator_backpressure_disconnects_total");
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
             true
         });
 

@@ -337,7 +337,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "actix-ws"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -352,8 +351,6 @@ dependencies = [
 ]
 
 [[package]]
-=======
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
 name = "actix_derive"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

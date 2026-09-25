@@ -511,9 +511,12 @@ dependencies = [
  "emergency_circuit_breaker",
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 >>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
  "rand",
  "soroban-sdk",
 ]
@@ -524,9 +527,12 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 5f6dda2c9c4229300622fcf92233996a143898b8
 =======
 >>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
+=======
+>>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
  "rand",
  "soroban-sdk",
 ]

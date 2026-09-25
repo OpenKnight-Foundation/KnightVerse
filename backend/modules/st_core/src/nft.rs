@@ -8,12 +8,16 @@ pub struct NFTService;
 
 impl NFTService {
     /// Creates an NFT minting transaction following Stellar SEP-0039 standards
+    ///
+    /// The issuer account is loaded from Horizon so the transaction carries the
+    /// sequence number the network expects; a failed lookup is reported to the
+    /// caller instead of falling back to a value the network would reject.
     pub async fn create_nft_mint_transaction(request: NFTMintRequest) -> Result<NFTMintResponse> {
         // Validate request
         Self::validate_mint_request(&request)?;
 
         // Create the transaction
-        let response = StellarTransactionBuilder::create_nft_mint_transaction(&request)?;
+        let response = StellarTransactionBuilder::create_nft_mint_transaction(&request).await?;
 
         Ok(response)
     }

@@ -1,5 +1,5 @@
-use crate::{AIMetadata, NFTMintRequest, NFTService};
-use actix_web::{web, HttpResponse, Result};
+use crate::{AIMetadata, NFTMintRequest, NFTService, SequenceNumberError};
+use actix_web::{http::StatusCode, web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -50,13 +50,22 @@ pub async fn mint_nft(request: web::Json<MintNFTRequest>) -> Result<HttpResponse
             transaction_hash: response.transaction_hash,
             error: None,
         })),
-        Err(e) => Ok(HttpResponse::BadRequest().json(MintNFTResponse {
-            success: false,
-            xdr_transaction: None,
-            network: None,
-            transaction_hash: None,
-            error: Some(e.to_string()),
-        })),
+        Err(e) => {
+            // A Horizon lookup failure is an upstream outage rather than a
+            // malformed request, so it must not be reported as a client error.
+            let status = match e.downcast_ref::<SequenceNumberError>() {
+                Some(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                None => StatusCode::BAD_REQUEST,
+            };
+
+            Ok(HttpResponse::build(status).json(MintNFTResponse {
+                success: false,
+                xdr_transaction: None,
+                network: None,
+                transaction_hash: None,
+                error: Some(e.to_string()),
+            }))
+        }
     }
 }
 

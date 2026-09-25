@@ -78,8 +78,9 @@ fn account_url(horizon_url: &str, account_id: &str) -> String {
 ///
 /// Stellar rejects a transaction whose sequence number is not exactly
 /// `account.sequence + 1` (`tx_bad_seq`), so the increment happens here rather
-/// than at every call site. Horizon encodes 32-bit values as strings to keep
-/// them intact in JavaScript clients, so both shapes are accepted.
+/// than at every call site. Sequence numbers are signed 64-bit (an account starts
+/// at `creation_ledger << 32`), and Horizon encodes them as strings to keep them
+/// intact in JavaScript clients, so both shapes are accepted.
 pub fn next_sequence_number(
     account_id: &str,
     payload: &serde_json::Value,
@@ -93,14 +94,13 @@ pub fn next_sequence_number(
         .get("sequence")
         .ok_or_else(|| unusable("no `sequence` field".to_string()))?;
 
-    let current: u32 = match sequence {
+    let current: i64 = match sequence {
         serde_json::Value::String(value) => value
-            .parse::<u32>()
-            .map_err(|_| unusable(format!("`sequence` is not a 32-bit integer: {value}")))?,
+            .parse::<i64>()
+            .map_err(|_| unusable(format!("`sequence` is not a 64-bit integer: {value}")))?,
         serde_json::Value::Number(value) => value
-            .as_u64()
-            .and_then(|raw| u32::try_from(raw).ok())
-            .ok_or_else(|| unusable(format!("`sequence` is not a 32-bit integer: {value}")))?,
+            .as_i64()
+            .ok_or_else(|| unusable(format!("`sequence` is not a 64-bit integer: {value}")))?,
         _ => {
             return Err(unusable(format!(
                 "`sequence` is not a string or a number: {sequence}"
@@ -108,10 +108,11 @@ pub fn next_sequence_number(
         }
     };
 
-    current
-        .checked_add(1)
-        .map(i64::from)
-        .ok_or(SequenceNumberError::Exhausted {
+    if current < 0 {
+        return Err(unusable(format!("`sequence` is negative: {current}")));
+    }
+
+    current.checked_add(1).ok_or(SequenceNumberError::Exhausted {
             account_id: account_id.to_string(),
         })
 }
@@ -481,13 +482,19 @@ mod tests {
             Err(SequenceNumberError::Payload { .. })
         ));
 
-        let too_large = serde_json::json!({ "sequence": "4294967296" });
+        let too_large = serde_json::json!({ "sequence": "9223372036854775808" });
         assert!(matches!(
             next_sequence_number(ISSUER, &too_large),
             Err(SequenceNumberError::Payload { .. })
         ));
 
-        let exhausted = serde_json::json!({ "sequence": "4294967295" });
+        let negative = serde_json::json!({ "sequence": "-1" });
+        assert!(matches!(
+            next_sequence_number(ISSUER, &negative),
+            Err(SequenceNumberError::Payload { .. })
+        ));
+
+        let exhausted = serde_json::json!({ "sequence": "9223372036854775807" });
         assert!(matches!(
             next_sequence_number(ISSUER, &exhausted),
             Err(SequenceNumberError::Exhausted { .. })
@@ -500,6 +507,16 @@ mod tests {
         assert_eq!(
             next_sequence_number(ISSUER, &payload).expect("numeric sequence is valid"),
             42
+        );
+    }
+
+    #[test]
+    fn test_real_account_sequence_numbers_are_accepted() {
+        // A real account starts at `creation_ledger << 32`, far beyond 32 bits.
+        let payload = serde_json::json!({ "sequence": "103420918407103888" });
+        assert_eq!(
+            next_sequence_number(ISSUER, &payload).expect("64-bit sequence is valid"),
+            103_420_918_407_103_889
         );
     }
 

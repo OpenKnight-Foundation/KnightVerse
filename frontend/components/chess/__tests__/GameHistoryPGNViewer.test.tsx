@@ -1,69 +1,95 @@
 /**
- * Component tests for GameHistoryPGNViewer (FE-79) — PDF scoresheet export.
+ * Component tests for GameHistoryPGNViewer.
  *
- * Verifies the "Export as PDF" action triggers a browser download of a valid
- * PDF blob whose content matches the rendered game (metadata + moves).
+ * - Regression tests for issue #1228: `GameHistoryPGNViewer` used to default
+ *   `pgn` to the bundled `MOCK_PGN`, so every render — including production
+ *   ones — silently replayed a fabricated game. The component now requires the
+ *   real PGN from the caller, and the sample is only an exported fixture.
+ * - FE-79: the "Export as PDF" action triggers a browser download of a valid
+ *   PDF blob whose content matches the rendered game (metadata + moves).
  */
 
 import React from "react";
+import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("next/image", () => ({
-  default: ({ src, alt, ...rest }: { src?: string; alt?: string; [key: string]: unknown }) =>
-    React.createElement("img", {
-      src: typeof src === "string" ? src : "",
-      alt: typeof alt === "string" ? alt : "",
-      ...rest,
-    }),
+// The board widget pulls in third-party rendering that is irrelevant here.
+vi.mock("../ChessboardComponent", () => ({
+  default: () => React.createElement("div", { "data-testid": "chessboard" }),
 }));
 
-// SVG chess piece assets — plain string module exports, no compiler needed
-vi.mock("@/components/chess/chesspieces/white-king.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/white-queen.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/white-bishop.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/white-knight.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/white-rook.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/white-pawn.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-king.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-queen.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-bishop.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-knight.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-rook.svg", () => ({ default: "" }));
-vi.mock("@/components/chess/chesspieces/black-pawn.svg", () => ({ default: "" }));
+import { GameHistoryPGNViewer, MOCK_PGN } from "../GameHistoryPGNViewer";
 
-vi.mock("@/context/ThemeContext", () => ({
-  useBoardTheme: () => ({
-    colors: { light: "#f0d9b5", dark: "#b58863", selected: "#a5c0ff", lastMove: "#90d26d" },
-  }),
-}));
+/** Fool's mate — the shortest legal game, with distinctive headers. */
+const REAL_GAME_PGN = `[Event "Testnet Rated Game"]
+[Site "knightverse.app"]
+[Date "2026.04.01"]
+[White "AminaReplays"]
+[Black "BilalReplays"]
+[Result "0-1"]
 
-vi.mock("@/context/GamePreferencesContext", () => ({
-  useGamePreferences: () => ({
-    preferences: {
-      pieceInputMethod: "both",
-      autoQueen: "always",
-      showLegalMoveDots: "enabled",
-      confirmMoveCorrespondence: false,
-      boardCoordinates: "inside",
-      pieceSet: "neo",
-    },
-    setPreference: () => {},
-    resetPreferences: () => {},
-  }),
-}));
+1. f3 e5 2. g4 Qh4# 0-1`;
 
-import { GameHistoryPGNViewer, MOCK_PGN } from "@/components/chess/GameHistoryPGNViewer";
+beforeEach(() => {
+  // jsdom does not implement scrollIntoView, which the component calls when
+  // the active move changes.
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+});
+
+describe("GameHistoryPGNViewer (#1228)", () => {
+  it("replays the PGN supplied by the caller instead of the sample fixture", () => {
+    render(<GameHistoryPGNViewer pgn={REAL_GAME_PGN} />);
+
+    expect(screen.getByText(/AminaReplays/)).toBeInTheDocument();
+    expect(screen.getByText(/BilalReplays/)).toBeInTheDocument();
+    expect(screen.getByText("0-1")).toBeInTheDocument();
+    expect(screen.getByText("2026-04-01")).toBeInTheDocument();
+
+    // Nothing from the bundled sample leaks into a real game's replay.
+    expect(screen.queryByText(/Morphy/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Duke of Brunswick/)).not.toBeInTheDocument();
+    expect(screen.queryByText("1858-10-21")).not.toBeInTheDocument();
+  });
+
+  it("replays the caller's moves — move list, count and board", () => {
+    render(<GameHistoryPGNViewer pgn={REAL_GAME_PGN} />);
+
+    expect(screen.getByText(/^0 \/ 4 moves$/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "f3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Qh4#" })).toBeInTheDocument();
+    expect(screen.getByTestId("chessboard")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next move" })).toBeEnabled();
+  });
+
+  it("renders the sample fixture when it is passed explicitly", () => {
+    render(<GameHistoryPGNViewer pgn={MOCK_PGN} />);
+
+    // The fixture must be replayable — it used to contain an illegal move.
+    expect(screen.queryByText(/Invalid PGN/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Morphy, Paul/)).toBeInTheDocument();
+    expect(screen.getByText(/Duke of Brunswick/)).toBeInTheDocument();
+    expect(screen.getByText(/^0 \/ 33 moves$/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go to end" })).toBeEnabled();
+  });
+
+  it("keeps `pgn` required so the component can never silently default", () => {
+    // Compile-time guard, enforced by `tsc` during `next build`: if `pgn` ever
+    // becomes optional (or regains a default), this stops compiling.
+    type PgnProp = ComponentProps<typeof GameHistoryPGNViewer>["pgn"];
+    const pgnIsRequired: undefined extends PgnProp ? never : true = true;
+
+    expect(pgnIsRequired).toBe(true);
+  });
+});
 
 describe("GameHistoryPGNViewer — PDF scoresheet export (FE-79)", () => {
   let anchorClick: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    // jsdom does not implement these — define them so the viewer can call them
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
     anchorClick = vi.fn();
     Object.defineProperty(HTMLAnchorElement.prototype, "click", {
       configurable: true,
@@ -88,8 +114,8 @@ describe("GameHistoryPGNViewer — PDF scoresheet export (FE-79)", () => {
     return { create, revoke, captured: () => captured };
   }
 
-  it("renders an Export as PDF action on the replay header", async () => {
-    render(<GameHistoryPGNViewer />);
+  it("renders an Export as PDF action on the replay header", () => {
+    render(<GameHistoryPGNViewer pgn={MOCK_PGN} />);
     expect(
       screen.getByRole("heading", { name: /game replay/i }),
     ).toBeInTheDocument();
@@ -122,9 +148,9 @@ describe("GameHistoryPGNViewer — PDF scoresheet export (FE-79)", () => {
     expect(text.startsWith("%PDF-1.4")).toBe(true);
     expect(text.endsWith("%%EOF\n")).toBe(true);
     // Metadata from the PGN headers
-    expect(text).toContain("GABC...XYZ \\(1280\\)");
-    expect(text).toContain("GDEF...UVW \\(1263\\)");
-    expect(text).toContain("2026.03.26");
+    expect(text).toContain("Morphy, Paul");
+    expect(text).toContain("Duke of Brunswick");
+    expect(text).toContain("1858.10.21");
     expect(text).toContain("1-0");
     // Moves from the PGN body
     expect(text).toContain("Qb8+");

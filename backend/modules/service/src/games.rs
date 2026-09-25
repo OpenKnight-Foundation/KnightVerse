@@ -23,7 +23,7 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chess::pgn::ValidatedGame;
-use chess::{RatingConfig, RatingService};
+use chess::{RatingConfig, RatingService, TimeControlCategory};
 use chrono::{DateTime, TimeZone, Utc};
 use db::DbPool;
 use db_entity::{game, prelude::Game};
@@ -439,7 +439,6 @@ impl GameService {
         result: db_entity::game::ResultSide,
         rating_config: Option<RatingConfig>,
     ) -> Result<(i32, i32), ApiError> {
-        let config = rating_config.unwrap_or_default();
         let txn = db.begin().await.map_err(ApiError::from)?;
 
         let game_model = game::Entity::find_by_id(game_id)
@@ -447,6 +446,18 @@ impl GameService {
             .await
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+        // An explicitly provided config keeps the legacy single-K behavior.
+        // Otherwise the K-factor is selected from the game's time control.
+        let (config, time_control) = match rating_config {
+            Some(cfg) => (cfg, None),
+            None => (
+                RatingConfig::default(),
+                Some(TimeControlCategory::from_base_seconds(
+                    game_model.duration_sec,
+                )),
+            ),
+        };
 
         if game_model.result.is_some() {
             let _ = txn.rollback().await;
@@ -464,7 +475,8 @@ impl GameService {
             .map_err(ApiError::from)?;
 
         let ratings_result =
-            RatingService::update_ratings_in_transaction(&txn, game_id, &config).await;
+            RatingService::update_ratings_in_transaction(&txn, game_id, &config, time_control)
+                .await;
 
         match ratings_result {
             Ok(ratings) => {

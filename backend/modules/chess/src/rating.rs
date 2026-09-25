@@ -1,3 +1,23 @@
+//! Elo rating updates with a per-time-control K-factor.
+//!
+//! # K-factor table
+//!
+//! Faster time controls produce noisier single-game results, so ratings take
+//! bigger steps to converge; slower, more decisive games take smaller steps
+//! for long-run stability:
+//!
+//! | Category  | K  | Rationale                                  |
+//! |-----------|----|--------------------------------------------|
+//! | Bullet    | 56 | Highest noise, fastest convergence         |
+//! | Blitz     | 48 | High noise, fast convergence               |
+//! | Rapid     | 40 | Moderate noise and decisiveness            |
+//! | Classical | 32 | Most decisive, most stable; keeps the historical single K-factor |
+//!
+//! `Classical` intentionally reuses the pre-existing default K-factor, and a
+//! missing time control (`None`) falls back to `RatingConfig::k_factor`, so
+//! existing callers and unmapped games behave exactly as before.
+
+use super::time_control::TimeControlCategory;
 use db_entity::{game, player};
 use error::error::ApiError;
 use matchmaking::elo::calculate_new_ratings;
@@ -6,6 +26,16 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
+
+/// K-factor for bullet games (noisiest, fastest convergence).
+pub const K_FACTOR_BULLET: u32 = 56;
+/// K-factor for blitz games.
+pub const K_FACTOR_BLITZ: u32 = 48;
+/// K-factor for rapid games.
+pub const K_FACTOR_RAPID: u32 = 40;
+/// K-factor for classical games. Matches the historical single K-factor so
+/// default behavior is unchanged for classical and unmapped games.
+pub const K_FACTOR_CLASSICAL: u32 = 32;
 
 /// Service for handling Elo rating calculations and updates after game completion
 pub struct RatingService;
@@ -32,9 +62,32 @@ pub struct RatingConfig {
 impl Default for RatingConfig {
     fn default() -> Self {
         Self {
-            k_factor: 32,
+            k_factor: K_FACTOR_CLASSICAL,
             min_rating: 100,
             max_rating: 3000,
+        }
+    }
+}
+
+impl RatingConfig {
+    /// Returns the K-factor for a time-control category (see the module-level
+    /// table). The classical entry equals the default `k_factor`.
+    pub fn k_factor_for_category(category: TimeControlCategory) -> u32 {
+        match category {
+            TimeControlCategory::Bullet => K_FACTOR_BULLET,
+            TimeControlCategory::Blitz => K_FACTOR_BLITZ,
+            TimeControlCategory::Rapid => K_FACTOR_RAPID,
+            TimeControlCategory::Classical => K_FACTOR_CLASSICAL,
+        }
+    }
+
+    /// Returns the effective K-factor: the table value when the game's time
+    /// control is known, otherwise the configured single `k_factor`
+    /// (legacy behavior for callers that don't track time controls).
+    pub fn effective_k_factor(&self, time_control: Option<TimeControlCategory>) -> u32 {
+        match time_control {
+            Some(category) => Self::k_factor_for_category(category),
+            None => self.k_factor,
         }
     }
 }
@@ -45,7 +98,10 @@ impl RatingService {
     /// # Arguments
     /// * `db` - Database connection
     /// * `game_id` - UUID of the completed game
-    /// * `config` - Rating configuration (K-factor, min/max ratings)
+    /// * `config` - Rating configuration (K-factor fallback, min/max ratings)
+    /// * `time_control` - Game's time-control category, when known. Selects
+    ///   the K-factor from the module-level table and takes precedence over
+    ///   `config.k_factor`; `None` preserves the legacy single-K behavior.
     ///
     /// # Returns
     /// * `Ok((white_new_rating, black_new_rating))` - New ratings for both players
@@ -58,20 +114,22 @@ impl RatingService {
     /// let (white_rating, black_rating) = RatingService::update_ratings_after_game(
     ///     &db,
     ///     game_id,
-    ///     &config
+    ///     &config,
+    ///     None
     /// ).await?;
     /// ```
     pub async fn update_ratings_after_game(
         db: &DatabaseConnection,
         game_id: Uuid,
         config: &RatingConfig,
+        time_control: Option<TimeControlCategory>,
     ) -> Result<(i32, i32), ApiError> {
         // Start a database transaction to ensure atomicity
         let txn = db.begin().await.map_err(|e| {
             ApiError::DatabaseError(DbErr::Custom(format!("Failed to start transaction: {}", e)))
         })?;
 
-        let result = Self::update_ratings_in_transaction(&txn, game_id, config).await;
+        let result = Self::update_ratings_in_transaction(&txn, game_id, config, time_control).await;
 
         match result {
             Ok(ratings) => {
@@ -92,11 +150,15 @@ impl RatingService {
         }
     }
 
-    /// Internal method that performs the rating update within a transaction
+    /// Internal method that performs the rating update within a transaction.
+    ///
+    /// `time_control` selects the K-factor from the module-level table when
+    /// known; `None` falls back to `config.k_factor` (legacy behavior).
     pub async fn update_ratings_in_transaction(
         txn: &DatabaseTransaction,
         game_id: Uuid,
         config: &RatingConfig,
+        time_control: Option<TimeControlCategory>,
     ) -> Result<(i32, i32), ApiError> {
         // 1. Fetch the game with result
         let game_model = game::Entity::find_by_id(game_id)
@@ -157,6 +219,7 @@ impl RatingService {
             black_player.elo_rating,
             white_outcome,
             config,
+            time_control,
         );
 
         // 6. Update both players' ratings atomically
@@ -190,30 +253,32 @@ impl RatingService {
         Ok((new_white_rating, new_black_rating))
     }
 
-    /// Calculates new ratings based on game outcome using Elo formula
+    /// Calculates new ratings based on game outcome using Elo formula.
+    ///
+    /// The K-factor comes from the time-control table when `time_control` is
+    /// known, otherwise from `config.k_factor`.
     fn calculate_rating_changes(
         white_rating: i32,
         black_rating: i32,
         white_outcome: GameOutcome,
         config: &RatingConfig,
+        time_control: Option<TimeControlCategory>,
     ) -> (i32, i32) {
+        let k_factor = config.effective_k_factor(time_control);
         let (new_white, new_black) = match white_outcome {
             GameOutcome::Win => {
                 // White wins, black loses
-                calculate_new_ratings(white_rating as u32, black_rating as u32, config.k_factor)
+                calculate_new_ratings(white_rating as u32, black_rating as u32, k_factor)
             }
             GameOutcome::Loss => {
                 // White loses, black wins
-                let (new_black, new_white) = calculate_new_ratings(
-                    black_rating as u32,
-                    white_rating as u32,
-                    config.k_factor,
-                );
+                let (new_black, new_white) =
+                    calculate_new_ratings(black_rating as u32, white_rating as u32, k_factor);
                 (new_white, new_black)
             }
             GameOutcome::Draw => {
                 // Draw: both players get half points
-                Self::calculate_draw_ratings(white_rating, black_rating, config.k_factor)
+                Self::calculate_draw_ratings(white_rating, black_rating, k_factor)
             }
         };
 
@@ -294,7 +359,7 @@ mod tests {
     fn test_calculate_rating_changes_white_wins() {
         let config = RatingConfig::default();
         let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config);
+            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config, None);
 
         // Equal ratings, white wins: white gains ~16, black loses ~16
         assert!(new_white > 1500);
@@ -306,7 +371,7 @@ mod tests {
     fn test_calculate_rating_changes_draw() {
         let config = RatingConfig::default();
         let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1600, 1400, GameOutcome::Draw, &config);
+            RatingService::calculate_rating_changes(1600, 1400, GameOutcome::Draw, &config, None);
 
         // Higher rated player loses points in draw, lower rated gains
         assert!(new_white < 1600);
@@ -322,7 +387,7 @@ mod tests {
         };
 
         let (new_white, new_black) =
-            RatingService::calculate_rating_changes(50, 2500, GameOutcome::Win, &config);
+            RatingService::calculate_rating_changes(50, 2500, GameOutcome::Win, &config, None);
 
         // Ratings should be clamped to bounds
         assert!(new_white >= config.min_rating);
@@ -335,7 +400,7 @@ mod tests {
     fn test_upset_victory_large_rating_change() {
         let config = RatingConfig::default();
         let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1200, 1800, GameOutcome::Win, &config);
+            RatingService::calculate_rating_changes(1200, 1800, GameOutcome::Win, &config, None);
 
         // Lower rated player beating higher rated should gain significant points
         let white_gain = new_white - 1200;
@@ -344,5 +409,100 @@ mod tests {
         assert!(white_gain > 20); // Significant gain for upset
         assert!(black_loss > 20); // Significant loss for upset
         assert_eq!(white_gain, black_loss); // Zero-sum
+    }
+
+    #[test]
+    fn test_k_factor_table_values() {
+        assert_eq!(
+            RatingConfig::k_factor_for_category(TimeControlCategory::Bullet),
+            K_FACTOR_BULLET
+        );
+        assert_eq!(
+            RatingConfig::k_factor_for_category(TimeControlCategory::Blitz),
+            K_FACTOR_BLITZ
+        );
+        assert_eq!(
+            RatingConfig::k_factor_for_category(TimeControlCategory::Rapid),
+            K_FACTOR_RAPID
+        );
+        assert_eq!(
+            RatingConfig::k_factor_for_category(TimeControlCategory::Classical),
+            K_FACTOR_CLASSICAL
+        );
+        // Classical keeps the historical single K-factor.
+        assert_eq!(
+            RatingConfig::k_factor_for_category(TimeControlCategory::Classical),
+            RatingConfig::default().k_factor
+        );
+        // Faster controls use strictly larger K-factors.
+        assert!(K_FACTOR_BULLET > K_FACTOR_BLITZ);
+        assert!(K_FACTOR_BLITZ > K_FACTOR_RAPID);
+        assert!(K_FACTOR_RAPID > K_FACTOR_CLASSICAL);
+    }
+
+    #[test]
+    fn test_bullet_and_classical_use_different_k_factors() {
+        let config = RatingConfig::default();
+        let (bullet_white, bullet_black) = RatingService::calculate_rating_changes(
+            1500,
+            1500,
+            GameOutcome::Win,
+            &config,
+            Some(TimeControlCategory::Bullet),
+        );
+        let (classical_white, classical_black) = RatingService::calculate_rating_changes(
+            1500,
+            1500,
+            GameOutcome::Win,
+            &config,
+            Some(TimeControlCategory::Classical),
+        );
+
+        // Equal ratings: delta is exactly K/2 (56/2 = 28 vs 32/2 = 16).
+        assert_eq!((bullet_white, bullet_black), (1528, 1472));
+        assert_eq!((classical_white, classical_black), (1516, 1484));
+    }
+
+    #[test]
+    fn test_rapid_draw_uses_table_k_factor() {
+        let config = RatingConfig::default();
+        let (rapid_white, rapid_black) = RatingService::calculate_rating_changes(
+            1600,
+            1400,
+            GameOutcome::Draw,
+            &config,
+            Some(TimeControlCategory::Rapid),
+        );
+        let (classical_white, classical_black) = RatingService::calculate_rating_changes(
+            1600,
+            1400,
+            GameOutcome::Draw,
+            &config,
+            Some(TimeControlCategory::Classical),
+        );
+
+        // Expected white score ~0.76: rapid (K=40) moves 10 points,
+        // classical (K=32) moves 8 points.
+        assert_eq!((rapid_white, rapid_black), (1590, 1410));
+        assert_eq!((classical_white, classical_black), (1592, 1408));
+    }
+
+    #[test]
+    fn test_missing_time_control_falls_back_to_config_k_factor() {
+        let config = RatingConfig {
+            k_factor: 24,
+            min_rating: 100,
+            max_rating: 3000,
+        };
+        let (new_white, new_black) =
+            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config, None);
+
+        // Legacy behavior: delta is exactly k/2 = 12.
+        assert_eq!((new_white, new_black), (1512, 1488));
+        assert_eq!(config.effective_k_factor(None), 24);
+        assert_eq!(
+            config.effective_k_factor(Some(TimeControlCategory::Blitz)),
+            K_FACTOR_BLITZ
+        );
     }
 }

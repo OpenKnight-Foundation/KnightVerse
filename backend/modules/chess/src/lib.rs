@@ -13,5 +13,8 @@ pub use pgn::{
     parse_pgn, validate_game, GameResult as PgnGameResult, ParsedGame, PgnError, PgnHeaders,
     ValidatedGame,
 };
-pub use rating::{GameOutcome, RatingConfig, RatingService};
-pub use time_control::{PlayerClock, TimeControl};
+pub use rating::{
+    GameOutcome, RatingConfig, RatingService, K_FACTOR_BLITZ, K_FACTOR_BULLET, K_FACTOR_CLASSICAL,
+    K_FACTOR_RAPID,
+};
+pub use time_control::{PlayerClock, TimeControl, TimeControlCategory};

@@ -578,10 +578,13 @@ pub async fn complete_game(
         }
     };
 
-    let rating_config = chess::RatingConfig {
-        k_factor: payload.k_factor.unwrap_or(32),
+    // An explicit K-factor keeps the legacy single-K behavior. When absent,
+    // no config is passed so the rating K-factor is selected from the
+    // game's time control (classical games still use K=32).
+    let rating_config = payload.k_factor.map(|k_factor| chess::RatingConfig {
+        k_factor,
         ..Default::default()
-    };
+    });
 
     // Fetch current ratings from replica before the write
     let white_old_rating =
@@ -606,13 +609,8 @@ pub async fn complete_game(
             }
         };
 
-    match GameService::complete_game(
-        pool.get_ref(),
-        game_id,
-        result_enum.clone(),
-        Some(rating_config),
-    )
-    .await
+    match GameService::complete_game(pool.get_ref(), game_id, result_enum.clone(), rating_config)
+        .await
     {
         Ok((white_new_rating, black_new_rating)) => {
             // Track game completion metric

@@ -9,6 +9,7 @@ members = [
     "model_attestation",
     "sponsorship_escrow",
     "title_badge",
+    "arbiter_escrow",
 ]
 
 [profile.release]

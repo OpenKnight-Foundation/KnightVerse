@@ -5,7 +5,8 @@
 //! PGN strings from stored game data for export.
 
 use regex::Regex;
-use shakmaty::{san::San, Chess, Move, Position};
+use shakmaty::fen::Fen;
+use shakmaty::{san::San, CastlingMode, Chess, Color, FromSetup, Move, Position};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -300,6 +301,12 @@ pub struct ExportHeaders {
     pub time_control: Option<String>,
     /// e.g. "Normal", "Time forfeit", "Abandoned".
     pub termination: Option<String>,
+    /// Non-standard start position (Chess960 or a custom variant) as a FEN
+    /// string. When set, the builder emits `SetUp "1"` + `FEN` tags and
+    /// replays the moves from this position instead of the standard start.
+    pub start_fen: Option<String>,
+    /// Variant tag, e.g. `"Chess960"` or a custom variant name.
+    pub variant: Option<String>,
 }
 
 impl Default for ExportHeaders {
@@ -316,6 +323,8 @@ impl Default for ExportHeaders {
             black_elo: None,
             time_control: None,
             termination: None,
+            start_fen: None,
+            variant: None,
         }
     }
 }
@@ -387,15 +396,49 @@ impl PgnBuilder {
         if let Some(term) = &self.headers.termination {
             out.push_str(&Self::tag("Termination", term));
         }
+        if let Some(variant) = &self.headers.variant {
+            out.push_str(&Self::tag("Variant", variant));
+        }
+        if let Some(fen) = &self.headers.start_fen {
+            out.push_str(&Self::tag("SetUp", "1"));
+            out.push_str(&Self::tag("FEN", fen));
+        }
 
         out
     }
 
-    /// Replays every move from the start position, recomputing the correct
-    /// check (`+`) / checkmate (`#`) suffix instead of trusting whatever
-    /// suffix (if any) was stored, so export can never emit invalid SAN.
-    fn recompute_check_suffixes(moves: &[MoveAnnotation]) -> Result<Vec<String>, PgnError> {
-        let mut position: Chess = Chess::default();
+    /// Resolves the position the game starts from: the standard array, or the
+    /// caller-supplied `start_fen` for Chess960 / custom variants.
+    ///
+    /// `CastlingMode::Chess960` is used for explicit FENs because it also
+    /// accepts the standard `KQkq` right notation, so a single code path
+    /// covers standard-castling and Chess960/custom rook placements alike.
+    fn start_position(&self) -> Result<Chess, PgnError> {
+        match &self.headers.start_fen {
+            None => Ok(Chess::default()),
+            Some(fen) => {
+                let parsed: Fen = fen.parse().map_err(|err| {
+                    PgnError::InvalidFormat(format!("invalid start FEN: {err}"))
+                })?;
+                Chess::from_setup(parsed.into_setup(), CastlingMode::Chess960).map_err(|err| {
+                    PgnError::InvalidFormat(format!("illegal start position: {err}"))
+                })
+            }
+        }
+    }
+
+    /// Replays every move from `start`, recomputing the correct check (`+`) /
+    /// checkmate (`#`) suffix instead of trusting whatever suffix (if any) was
+    /// stored, so export can never emit invalid SAN.
+    ///
+    /// SAN disambiguation is computed from the position *before* each move —
+    /// the position `San::from_move` expects — and the suffix from the
+    /// position after it.
+    fn recompute_check_suffixes(
+        start: &Chess,
+        moves: &[MoveAnnotation],
+    ) -> Result<Vec<String>, PgnError> {
+        let mut position = start.clone();
         let mut out = Vec::with_capacity(moves.len());
 
         for (idx, ann) in moves.iter().enumerate() {
@@ -413,7 +456,9 @@ impl PgnBuilder {
                 reason: "Move is not legal in this position".to_string(),
             })?;
 
-            position = position
+            let canonical = San::from_move(&position, &chess_move).to_string();
+
+            let next = position
                 .play(&chess_move)
                 .map_err(|_| PgnError::IllegalMove {
                     move_number,
@@ -421,19 +466,16 @@ impl PgnBuilder {
                     reason: "Move leaves king in check".to_string(),
                 })?;
 
-            let suffix = if position.is_checkmate() {
+            let suffix = if next.is_checkmate() {
                 "#"
-            } else if position.is_check() {
+            } else if next.is_check() {
                 "+"
             } else {
                 ""
             };
 
-            out.push(format!(
-                "{}{}",
-                San::from_move(&position, &chess_move),
-                suffix
-            ));
+            out.push(format!("{}{}", canonical, suffix));
+            position = next;
         }
 
         Ok(out)
@@ -455,13 +497,22 @@ impl PgnBuilder {
     /// Builds the movetext, wrapping at `MOVETEXT_LINE_WIDTH` columns as
     /// recommended by the PGN spec.
     fn format_movetext(&self) -> Result<String, PgnError> {
-        let sans = Self::recompute_check_suffixes(&self.moves)?;
+        let start = self.start_position()?;
+        let start_turn = start.turn();
+        let first_move_number = u32::from(start.fullmoves());
+        // A black-to-move start shifts the white-move parity by one ply.
+        let side_offset = if start_turn == Color::White { 0 } else { 1 };
+        let sans = Self::recompute_check_suffixes(&start, &self.moves)?;
 
         let mut tokens: Vec<String> = Vec::new();
 
         for (idx, (san, ann)) in sans.iter().zip(self.moves.iter()).enumerate() {
-            let is_white = idx % 2 == 0;
-            let move_number = (idx / 2) + 1;
+            let is_white = if start_turn == Color::White {
+                idx % 2 == 0
+            } else {
+                idx % 2 == 1
+            };
+            let move_number = first_move_number + ((idx + side_offset) as u32) / 2;
 
             if is_white {
                 tokens.push(format!("{}.", move_number));
@@ -540,6 +591,25 @@ pub fn export_pgn(
     }
 
     PgnBuilder::new(headers, moves, include_analysis).build()
+}
+
+/// Builds a PGN export and then runs the strict
+/// [`crate::pgn_validator`] checks over the result.
+///
+/// Unlike [`export_pgn`], this entry point rejects documents that would fail
+/// external PGN linters — missing or unordered Seven Tag Roster, missing
+/// termination tag, result/termination inconsistencies, non-canonical SAN,
+/// malformed `[%eval ...]` / `[%clk ...]` annotations, and so on. Use it for
+/// any export that will be handed to third-party tools.
+pub fn export_pgn_validated(
+    headers: ExportHeaders,
+    moves: Vec<MoveAnnotation>,
+    include_analysis: bool,
+) -> Result<String, PgnError> {
+    let pgn = export_pgn(headers, moves, include_analysis)?;
+    crate::pgn_validator::validate_pgn_export(&pgn)
+        .map_err(|err| PgnError::InvalidFormat(err.to_string()))?;
+    Ok(pgn)
 }
 
 #[cfg(test)]
@@ -728,6 +798,8 @@ mod tests {
             black_elo: Some(2802),
             time_control: Some("300+3".to_string()),
             termination: Some("Normal".to_string()),
+            start_fen: None,
+            variant: None,
         }
     }
 
@@ -917,5 +989,70 @@ mod tests {
         let pgn = export_pgn(headers, vec![], false).unwrap();
         assert!(pgn.contains("[Result \"*\"]"));
         assert!(pgn.trim_end().ends_with('*'));
+    }
+
+    #[test]
+    fn test_export_pgn_emits_chess960_setup_tags() {
+        // A valid Chess960 back rank: rooks on the a/h files, king between
+        // them, bishops on opposite colours.
+        let fen = "rnkbbqnr/pppppppp/8/8/8/8/PPPPPPPP/RNKBBQNR w KQkq - 0 1";
+        let mut headers = sample_export_headers();
+        headers.result = GameResult::Ongoing;
+        headers.termination = Some("Unterminated".to_string());
+        headers.variant = Some("Chess960".to_string());
+        headers.start_fen = Some(fen.to_string());
+
+        let pgn = export_pgn(headers, vec![MoveAnnotation {
+            san: "Nc3".to_string(),
+            ..Default::default()
+        }], false)
+        .unwrap();
+
+        assert!(pgn.contains("[Variant \"Chess960\"]"));
+        assert!(pgn.contains("[SetUp \"1\"]"));
+        assert!(pgn.contains(format!("[FEN \"{fen}\"]").as_str()));
+        // Moves are replayed from the Chess960 position, not the standard one.
+        assert!(pgn.contains("1. Nc3 *"));
+    }
+
+    #[test]
+    fn test_export_pgn_supports_custom_start_position() {
+        let fen = "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1";
+        let mut headers = sample_export_headers();
+        headers.result = GameResult::Ongoing;
+        headers.termination = Some("Unterminated".to_string());
+        headers.variant = Some("Custom".to_string());
+        headers.start_fen = Some(fen.to_string());
+
+        let pgn = export_pgn(headers, vec![MoveAnnotation {
+            san: "Kd1".to_string(),
+            ..Default::default()
+        }], false)
+        .unwrap();
+
+        assert!(pgn.contains(format!("[FEN \"{fen}\"]").as_str()));
+        assert!(pgn.contains("1. Kd1 *"));
+    }
+
+    #[test]
+    fn test_export_pgn_rejects_invalid_start_fen() {
+        let mut headers = sample_export_headers();
+        headers.start_fen = Some("this is not a fen".to_string());
+        let result = export_pgn(headers, sample_moves(), false);
+        assert!(matches!(result, Err(PgnError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn test_export_pgn_validated_accepts_clean_export() {
+        let pgn = export_pgn_validated(sample_export_headers(), sample_moves(), false).unwrap();
+        assert!(crate::pgn_validator::is_valid_pgn_export(&pgn));
+    }
+
+    #[test]
+    fn test_export_pgn_validated_rejects_missing_termination_tag() {
+        let mut headers = sample_export_headers();
+        headers.termination = None;
+        let result = export_pgn_validated(headers, sample_moves(), false);
+        assert!(matches!(result, Err(PgnError::InvalidFormat(_))));
     }
 }

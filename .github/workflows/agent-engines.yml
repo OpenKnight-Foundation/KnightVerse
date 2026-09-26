@@ -308,12 +308,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install minimal dependencies
+      - name: Install dependencies
         working-directory: agent-engines
         run: |
           python -m pip install --upgrade pip
-          # Install only the packages required by stress_test & tournament_simulator
-          pip install websockets pydantic
+          # stress_test imports gpu_worker, which needs the full package deps (e.g. python-chess)
+          pip install -e ".[dev]" websockets
 
       - name: Run tournament simulator (5 bots, 3 games per pair)
         # Healthy baseline: 30 games finish in < 1 s with no assertion errors.

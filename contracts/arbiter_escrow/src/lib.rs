@@ -108,14 +108,33 @@ pub enum EscrowStatus {
 /// The three ways an arbiter can vote on a disputed match.
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
 pub enum VoteChoice {
     /// Release the pot to player A
-    PlayerA = 1,
+    PlayerA,
     /// Release the pot to player B
-    PlayerB = 2,
+    PlayerB,
     /// Refund each player their original stake
-    Refund = 3,
+    Refund,
+}
+
+impl VoteChoice {
+    /// Stable numeric code published in events (PlayerA = 1, PlayerB = 2, Refund = 3).
+    pub fn code(self) -> u32 {
+        match self {
+            VoteChoice::PlayerA => 1,
+            VoteChoice::PlayerB => 2,
+            VoteChoice::Refund => 3,
+        }
+    }
+}
+
+/// Resolution of a match escrow. Stored instead of `Option<VoteChoice>`,
+/// which soroban-sdk can't convert as a `#[contracttype]` struct field.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Undecided,
+    Decided(VoteChoice),
 }
 
 /// Full state of a single match escrow.
@@ -146,8 +165,18 @@ pub struct MatchEscrow {
     pub votes_for_b: u32,
     pub votes_for_refund: u32,
     /// Winning outcome once resolved
-    pub winning_choice: Option<VoteChoice>,
+    pub outcome: Outcome,
     pub resolved_at: u64,
+}
+
+impl MatchEscrow {
+    /// Winning outcome once resolved.
+    pub fn winning_choice(&self) -> Option<VoteChoice> {
+        match self.outcome {
+            Outcome::Undecided => None,
+            Outcome::Decided(choice) => Some(choice),
+        }
+    }
 }
 
 /// Storage keys for the contract.
@@ -261,7 +290,7 @@ impl ArbiterEscrowContract {
             votes_for_a: 0,
             votes_for_b: 0,
             votes_for_refund: 0,
-            winning_choice: None,
+            outcome: Outcome::Undecided,
             resolved_at: 0,
         };
         env.storage()
@@ -355,7 +384,7 @@ impl ArbiterEscrowContract {
 
         Self::release(&env, &escrow, choice);
         escrow.status = EscrowStatus::Resolved;
-        escrow.winning_choice = Some(choice);
+        escrow.outcome = Outcome::Decided(choice);
         escrow.resolved_at = env.ledger().timestamp();
         env.storage()
             .instance()
@@ -377,7 +406,7 @@ impl ArbiterEscrowContract {
 
         Self::release(&env, &escrow, VoteChoice::Refund);
         escrow.status = EscrowStatus::Resolved;
-        escrow.winning_choice = Some(VoteChoice::Refund);
+        escrow.outcome = Outcome::Decided(VoteChoice::Refund);
         escrow.resolved_at = env.ledger().timestamp();
         env.storage()
             .instance()
@@ -467,7 +496,7 @@ impl ArbiterEscrowContract {
         env.events().publish(
             (symbol_short!("vote"), match_id, arbiter),
             (
-                choice as u32,
+                choice.code(),
                 escrow.votes_for_a,
                 escrow.votes_for_b,
                 escrow.votes_for_refund,
@@ -504,14 +533,16 @@ impl ArbiterEscrowContract {
 
         Self::release(&env, &escrow, choice);
         escrow.status = EscrowStatus::Resolved;
-        escrow.winning_choice = Some(choice);
+        escrow.outcome = Outcome::Decided(choice);
         escrow.resolved_at = env.ledger().timestamp();
         env.storage()
             .instance()
             .set(&DataKey::Escrow(match_id), &escrow);
 
-        env.events()
-            .publish((symbol_short!("resolved"), match_id), (choice as u32, caller));
+        env.events().publish(
+            (symbol_short!("resolved"), match_id),
+            (choice.code(), caller),
+        );
     }
 
     /// Time-locked fallback: if the arbiters failed to reach a 2-of-3 majority
@@ -537,7 +568,7 @@ impl ArbiterEscrowContract {
 
         Self::release(&env, &escrow, VoteChoice::Refund);
         escrow.status = EscrowStatus::Resolved;
-        escrow.winning_choice = Some(VoteChoice::Refund);
+        escrow.outcome = Outcome::Decided(VoteChoice::Refund);
         escrow.resolved_at = now;
         env.storage()
             .instance()

@@ -349,7 +349,9 @@ fn test_settle_blocked_while_disputed() {
     assert!(client(&ctx)
         .try_settle_match(&match_id, &ctx.admin, &ctx.player_a)
         .is_err());
-    assert!(client(&ctx).try_settle_refund(&match_id, &ctx.admin).is_err());
+    assert!(client(&ctx)
+        .try_settle_refund(&match_id, &ctx.admin)
+        .is_err());
     assert_eq!(balance_of(&ctx, &ctx.contract_id), STAKE * 2);
     assert_eq!(
         client(&ctx).get_escrow(&match_id).unwrap().status,
@@ -376,7 +378,7 @@ fn test_admin_fast_path_settle_transfers_pot() {
 
     let escrow = client(&ctx).get_escrow(&match_id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Resolved);
-    assert_eq!(escrow.winning_choice, Some(VoteChoice::PlayerB));
+    assert_eq!(escrow.winning_choice(), Some(VoteChoice::PlayerB));
 
     // A resolved escrow cannot be settled twice.
     assert!(client(&ctx)
@@ -397,7 +399,7 @@ fn test_admin_fast_path_refund_returns_stakes() {
     assert_eq!(balance_of(&ctx, &ctx.player_b), STAKE);
     assert_eq!(balance_of(&ctx, &ctx.contract_id), 0);
     assert_eq!(
-        client(&ctx).get_escrow(&match_id).unwrap().winning_choice,
+        client(&ctx).get_escrow(&match_id).unwrap().winning_choice(),
         Some(VoteChoice::Refund)
     );
 }
@@ -433,7 +435,7 @@ fn test_two_of_three_arbiters_release_to_winner() {
 
     let escrow = client(&ctx).get_escrow(&match_id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Resolved);
-    assert_eq!(escrow.winning_choice, Some(VoteChoice::PlayerA));
+    assert_eq!(escrow.winning_choice(), Some(VoteChoice::PlayerA));
 }
 
 #[test]
@@ -452,7 +454,7 @@ fn test_arbiter_refund_returns_stakes() {
     assert_eq!(balance_of(&ctx, &ctx.player_b), STAKE);
     assert_eq!(balance_of(&ctx, &ctx.contract_id), 0);
     assert_eq!(
-        client(&ctx).get_escrow(&match_id).unwrap().winning_choice,
+        client(&ctx).get_escrow(&match_id).unwrap().winning_choice(),
         Some(VoteChoice::Refund)
     );
 }
@@ -540,10 +542,7 @@ fn test_unauthorized_arbiter_vote_rejected() {
     assert!(client(&ctx)
         .try_resolve_dispute(&match_id, &ctx.outsider)
         .is_err());
-    assert_eq!(
-        client(&ctx).get_escrow(&match_id).unwrap().votes_for_a,
-        0
-    );
+    assert_eq!(client(&ctx).get_escrow(&match_id).unwrap().votes_for_a, 0);
 }
 
 #[test]
@@ -625,7 +624,7 @@ fn test_fallback_after_seven_days_refunds_players() {
 
     let escrow = client(&ctx).get_escrow(&match_id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Resolved);
-    assert_eq!(escrow.winning_choice, Some(VoteChoice::Refund));
+    assert_eq!(escrow.winning_choice(), Some(VoteChoice::Refund));
     assert_eq!(escrow.resolved_at, START_TS + FALLBACK_TIMEOUT_SECS);
 }
 

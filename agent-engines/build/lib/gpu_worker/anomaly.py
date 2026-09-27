@@ -23,13 +23,21 @@ class AnomalyRiskLevel(str, Enum):
 class BotFarmDetectionConfig(BaseModel):
     """Configuration for bot-farm anomaly heuristics."""
 
+    # How far back (in seconds) the detector looks when analyzing events.
     sliding_window_seconds: int = Field(default=300, ge=1)
+    # Width of each time bucket used to detect synchronized bursts.
     bucket_size_seconds: int = Field(default=10, ge=1)
+    # Minimum distinct actors sharing an ip/device hash to flag as suspicious.
     shared_hash_actor_threshold: int = Field(default=5, ge=2)
+    # Minimum distinct actors active in the same time bucket to flag a burst.
     burst_actor_threshold: int = Field(default=8, ge=2)
+    # Minimum distinct actors reusing the exact same search profile to flag it.
     repeated_profile_actor_threshold: int = Field(default=5, ge=2)
+    # Max requests a single actor can make within the window before flagging.
     actor_rate_threshold: int = Field(default=20, ge=1)
+    # Hard cap on how many events the detector keeps in memory.
     max_events_retained: int = Field(default=10000, ge=1)
+    # Score cutoffs used to translate a numeric score into a risk level.
     moderate_risk_score: int = Field(default=25, ge=0, le=100)
     high_risk_score: int = Field(default=60, ge=0, le=100)
     critical_risk_score: int = Field(default=85, ge=0, le=100)
@@ -38,8 +46,10 @@ class BotFarmDetectionConfig(BaseModel):
     def normalize_values(self) -> BotFarmDetectionConfig:
         """Normalize bucket sizes and validate risk thresholds."""
 
+        # Buckets can't be wider than the overall window we analyze.
         if self.bucket_size_seconds > self.sliding_window_seconds:
             self.bucket_size_seconds = self.sliding_window_seconds
+        # Risk thresholds must increase monotonically or scoring breaks.
         if not (
             self.moderate_risk_score
             <= self.high_risk_score
@@ -69,6 +79,7 @@ class BotFarmEvent(BaseModel):
     def normalize_optional_identifier(cls, value: str | None) -> str | None:
         """Normalize optional hashed identifiers."""
 
+        # Treat blank/whitespace-only strings the same as missing values.
         if value is None:
             return None
         normalized = value.strip()
@@ -79,6 +90,7 @@ class BotFarmEvent(BaseModel):
     def normalize_created_at(cls, value: datetime) -> datetime:
         """Ensure timestamps are timezone-aware UTC values."""
 
+        # Naive timestamps are assumed to already be UTC; aware ones get converted.
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
@@ -96,13 +108,19 @@ class BotFarmEvent(BaseModel):
             fen=request.fen,
             depth=request.depth,
             time_limit_ms=request.time_limit_ms,
+            # Copy the list defensively so callers can't mutate our internal state.
             search_moves=list(request.search_moves) if request.search_moves is not None else None,
             num_pv=request.num_pv,
             created_at=request.created_at,
         )
 
     def profile_key(self) -> tuple[Any, ...]:
-        """Return the normalized search profile key."""
+        """Return the normalized search profile key.
+
+        Used to group events that requested the exact same analysis
+        (position + search parameters), which is a signal of scripted/
+        replayed requests when many distinct actors do it.
+        """
 
         return (
             self.fen,
@@ -120,6 +138,7 @@ class BotFarmFinding(BaseModel):
     score: int = Field(ge=0, le=100)
     reason: str
     affected_actor_ids: list[str] = Field(default_factory=list)
+    # Free-form supporting details (counts, thresholds, etc.) for operators.
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -138,11 +157,20 @@ class BotFarmReport(BaseModel):
 
 
 class BotFarmAnomalyDetector:
-    """Passive detector for coordinated analysis-request anomalies."""
+    """Passive detector for coordinated analysis-request anomalies.
+
+    Maintains a bounded, time-windowed buffer of recent events and runs a
+    handful of cheap linear-time heuristics over it to surface likely
+    bot-farm / coordinated-abuse behavior (shared hashes, synchronized
+    bursts, repeated profiles, and per-actor rate spikes).
+    """
 
     def __init__(self, config: BotFarmDetectionConfig | None = None) -> None:
         self.config = config or BotFarmDetectionConfig()
+        # Ordered buffer of retained events, oldest first, for efficient pruning.
         self._events: deque[BotFarmEvent] = deque()
+        # Tracks the most recent event timestamp seen so far, used as the
+        # reference point for the sliding window (rather than wall-clock time).
         self._latest_event_at: datetime | None = None
 
     def record_request(self, request: AnalysisRequest) -> BotFarmReport:
@@ -153,10 +181,12 @@ class BotFarmAnomalyDetector:
     def record_event(self, event: BotFarmEvent) -> BotFarmReport:
         """Record a normalized telemetry event and return the current report."""
 
+        # Re-validate in case a plain dict-like object was passed in.
         normalized = BotFarmEvent.model_validate(event)
         self._events.append(normalized)
         if self._latest_event_at is None or normalized.created_at > self._latest_event_at:
             self._latest_event_at = normalized.created_at
+        # Drop events that have fallen outside the sliding window before analyzing.
         self._prune(reference_time=self._latest_event_at)
         return self.analyze()
 
@@ -164,20 +194,25 @@ class BotFarmAnomalyDetector:
         """Analyze retained or supplied events using bounded linear heuristics."""
 
         if events is None:
+            # Default path: analyze whatever is currently retained in memory.
             current_events = list(self._events)
         else:
+            # Ad-hoc path: analyze an externally supplied batch of events,
+            # windowing it the same way the internal buffer would be.
             current_events = [BotFarmEvent.model_validate(event) for event in events]
             current_events = self._windowed_events(current_events)
 
         if not current_events:
             return self._build_report([], [])
 
+        # Run each heuristic independently; each returns zero or more findings.
         findings: list[BotFarmFinding] = []
         findings.extend(self._find_shared_hashes(current_events, "ip_hash"))
         findings.extend(self._find_shared_hashes(current_events, "device_hash"))
         findings.extend(self._find_synchronized_bursts(current_events))
         findings.extend(self._find_repeated_profiles(current_events))
         findings.extend(self._find_actor_rate_spikes(current_events))
+        # Highest-severity findings first; alphabetical reason as a tiebreaker.
         findings.sort(key=lambda finding: (-finding.score, finding.reason))
         return self._build_report(current_events, findings)
 
@@ -194,28 +229,42 @@ class BotFarmAnomalyDetector:
         return len(self._events)
 
     def _prune(self, reference_time: datetime | None = None) -> None:
+        # Evict anything older than the sliding window relative to the
+        # newest known event timestamp (not wall-clock time).
         if reference_time is None:
             reference_time = max((event.created_at for event in self._events), default=None)
         if reference_time is not None:
             cutoff = reference_time - timedelta(seconds=self.config.sliding_window_seconds)
             while self._events and self._events[0].created_at < cutoff:
                 self._events.popleft()
+        # Also enforce a hard cap on retained events regardless of time window,
+        # to bound memory use under extreme load.
         while len(self._events) > self.config.max_events_retained:
             self._events.popleft()
 
     def _windowed_events(self, events: list[BotFarmEvent]) -> list[BotFarmEvent]:
+        """Apply the same windowing/cap rules as _prune, but to a standalone list."""
+
         if not events:
             return []
         reference_time = max(event.created_at for event in events)
         cutoff = reference_time - timedelta(seconds=self.config.sliding_window_seconds)
         retained = [event for event in events if event.created_at >= cutoff]
         if len(retained) > self.config.max_events_retained:
+            # Keep the most recent events if the batch exceeds the cap.
             retained = retained[-self.config.max_events_retained :]
         return retained
 
     def _find_shared_hashes(
         self, events: list[BotFarmEvent], hash_field: str
     ) -> list[BotFarmFinding]:
+        """Flag ip/device hashes used by an unusually large number of distinct actors.
+
+        A single IP or device fingerprint shared across many "different"
+        actor IDs is a classic sign of a bot farm spoofing actor identity
+        while running from the same underlying infrastructure.
+        """
+
         actor_sets: dict[str, set[str]] = defaultdict(set)
         event_counts: dict[str, int] = defaultdict(int)
         for event in events:
@@ -231,6 +280,7 @@ class BotFarmAnomalyDetector:
             actor_count = len(actor_ids)
             if actor_count < self.config.shared_hash_actor_threshold:
                 continue
+            # Base score plus a per-actor increment, capped at 100.
             score = min(100, 45 + actor_count * 5)
             findings.append(
                 BotFarmFinding(
@@ -251,6 +301,12 @@ class BotFarmAnomalyDetector:
     def _find_synchronized_bursts(
         self, events: list[BotFarmEvent]
     ) -> list[BotFarmFinding]:
+        """Flag time buckets where too many distinct actors fire near-simultaneously.
+
+        Coordinated/scripted traffic tends to cluster tightly in time even
+        when actor IDs differ, unlike organic traffic which is more spread out.
+        """
+
         bucket_actors: dict[int, set[str]] = defaultdict(set)
         bucket_events: dict[int, int] = defaultdict(int)
         for event in events:
@@ -272,6 +328,7 @@ class BotFarmAnomalyDetector:
                     reason="many actors submitted requests in the same time bucket",
                     affected_actor_ids=sorted(actor_ids),
                     evidence={
+                        # Convert the bucket index back into a human-readable timestamp.
                         "bucket_start": datetime.fromtimestamp(
                             bucket * self.config.bucket_size_seconds, tz=timezone.utc
                         ).isoformat(),
@@ -287,6 +344,13 @@ class BotFarmAnomalyDetector:
     def _find_repeated_profiles(
         self, events: list[BotFarmEvent]
     ) -> list[BotFarmFinding]:
+        """Flag search profiles (position + params) reused by many distinct actors.
+
+        Legitimate users rarely request the exact same position with the
+        exact same search parameters; widespread reuse suggests scripted
+        or replayed requests rather than organic play.
+        """
+
         profile_actors: dict[tuple[Any, ...], set[str]] = defaultdict(set)
         profile_events: dict[tuple[Any, ...], int] = defaultdict(int)
         for event in events:
@@ -325,6 +389,8 @@ class BotFarmAnomalyDetector:
     def _find_actor_rate_spikes(
         self, events: list[BotFarmEvent]
     ) -> list[BotFarmFinding]:
+        """Flag any single actor whose request rate exceeds the window threshold."""
+
         actor_counts: dict[str, int] = defaultdict(int)
         for event in events:
             if event.actor_id:
@@ -354,6 +420,8 @@ class BotFarmAnomalyDetector:
         self, events: list[BotFarmEvent], findings: list[BotFarmFinding]
     ) -> BotFarmReport:
         if findings:
+            # Overall score starts from the worst single finding, then adds a
+            # small bonus (capped) for each additional corroborating finding.
             score = min(100, max(finding.score for finding in findings) + min(15, 5 * (len(findings) - 1)))
         else:
             score = 0
@@ -371,9 +439,13 @@ class BotFarmAnomalyDetector:
         )
 
     def _bucket_for(self, timestamp: datetime) -> int:
+        """Map a timestamp to its integer time-bucket index."""
+
         return int(timestamp.timestamp()) // self.config.bucket_size_seconds
 
     def _risk_for_score(self, score: int) -> AnomalyRiskLevel:
+        """Translate a numeric score into a discrete risk level using config cutoffs."""
+
         if score >= self.config.critical_risk_score:
             return AnomalyRiskLevel.CRITICAL
         if score >= self.config.high_risk_score:

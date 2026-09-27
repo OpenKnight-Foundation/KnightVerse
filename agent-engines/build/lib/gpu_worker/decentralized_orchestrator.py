@@ -18,10 +18,17 @@ class DecentralizedOrchestrator:
     """
 
     def __init__(self, pool: WorkerPool, node_id: Optional[str] = None):
+        # Stable identity for this node within the cluster; auto-generated
+        # if the caller doesn't supply one.
         self.node_id = node_id or str(uuid.uuid4())
+        # Local worker pool used to actually execute analyses on this node.
         self.pool = pool
+        # Known peer nodes, keyed by their node_id.
         self.peers: Dict[str, NodeInfo] = {}
+        # Guards concurrent access to `peers` from registration, updates,
+        # and the background health-check loop.
         self._lock = asyncio.Lock()
+        # Handle to the background task that expires stale peers.
         self._health_check_task: Optional[asyncio.Task] = None
 
     async def start(self):
@@ -55,11 +62,15 @@ class DecentralizedOrchestrator:
         async with self._lock:
             if node_id in self.peers:
                 self.peers[node_id].load = load
+                # Refresh the liveness timestamp too, since a load update
+                # implies the peer is still alive and reachable.
                 self.peers[node_id].last_seen = datetime.now(timezone.utc)
                 logger.debug(f"Updated load for node {node_id}: {load}")
 
     def get_cluster_state(self) -> List[NodeInfo]:
         """Return the current state of all nodes in the cluster."""
+        # Approximate this node's own load as the average load across its
+        # local workers (0.0 if there are none).
         local_load = sum(w.load for w in self.pool._workers) / len(self.pool._workers) if self.pool._workers else 0.0
         local_node = NodeInfo(
             node_id=self.node_id,
@@ -68,6 +79,7 @@ class DecentralizedOrchestrator:
             load=local_load,
             last_seen=datetime.now(timezone.utc)
         )
+        # Present the local node alongside all known peers as one cluster view.
         return [local_node] + list(self.peers.values())
 
     async def submit_task(self, request: AnalysisRequest) -> AnalysisResult:
@@ -76,6 +88,8 @@ class DecentralizedOrchestrator:
         Dispatches to the least-loaded node (local or remote).
         """
         cluster = self.get_cluster_state()
+        # Simple greedy load balancing: always pick whichever node (local
+        # or remote) currently reports the lowest load.
         best_node = min(cluster, key=lambda n: n.load)
 
         if best_node.node_id == self.node_id:
@@ -90,6 +104,9 @@ class DecentralizedOrchestrator:
         Simulate dispatching a task to a remote node.
         In a real implementation, this would involve a network call.
         """
+        # NOTE: this is a stand-in for real network dispatch (e.g. RPC/HTTP
+        # to the peer). It does not actually send `request` anywhere, and
+        # the "result" below is hardcoded rather than computed by the peer.
         # For simulation purposes, we'll just wait a bit and return a mocked result
         # or fail if the node is "offline".
         await asyncio.sleep(0.1)
@@ -109,9 +126,13 @@ class DecentralizedOrchestrator:
         """Periodically check the health of peer nodes."""
         try:
             while True:
+                # Poll every 10 seconds rather than reacting to individual
+                # updates, keeping this loop simple and low-overhead.
                 await asyncio.sleep(10)
                 async with self._lock:
                     now = datetime.now(timezone.utc)
+                    # A peer is considered dead if it hasn't been heard from
+                    # (via update_peer_load or registration) in 30+ seconds.
                     expired_nodes = [
                         nid for nid, node in self.peers.items()
                         if (now - node.last_seen).total_seconds() > 30
@@ -120,4 +141,5 @@ class DecentralizedOrchestrator:
                         logger.warning(f"Node {nid} timed out. Removing from cluster.")
                         del self.peers[nid]
         except asyncio.CancelledError:
+            # Expected when shutdown() cancels this task; exit quietly.
             pass

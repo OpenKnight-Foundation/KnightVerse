@@ -15,6 +15,10 @@ import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
 import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
+import { VoiceMoveInput } from "@/components/chess/VoiceMoveInput";
+import BlindfoldToggle from "@/components/chess/BlindfoldToggle";
+import { useSpeechSynthesis } from "@/hook/useSpeechSynthesis";
+import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
 
 const ChessboardComponent = dynamic(
@@ -61,6 +65,8 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   );
   const isMobile = useIsMobile();
   const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
+  const { preferences, setPreference } = useGamePreferences();
+  const { speak: speakOpponentMove } = useSpeechSynthesis();
 
   const handleFlipBoard = useCallback(() => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -147,6 +153,15 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           from: move.from,
           to: move.to,
         });
+
+        // FE-52: spoken announcement of opponent moves (configurable volume/rate)
+        if (preferences.ttsOpponentMoves) {
+          speakOpponentMove(`Opponent played ${move.san}`, {
+            volume: preferences.ttsVolume,
+            rate: preferences.ttsRate,
+            lang: "en-US",
+          });
+        }
       }
     } catch {
       // illegal move from server — ignore
@@ -158,6 +173,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     recordCheatMove,
     playerColor,
     announceMove,
+    speakOpponentMove,
+    preferences.ttsOpponentMoves,
+    preferences.ttsVolume,
+    preferences.ttsRate,
   ]);
 
   const isMyTurn =
@@ -432,8 +451,16 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                   position={position}
                   onDrop={handleMove}
                   orientation={boardOrientation}
+                  blindfoldMode={preferences.blindfoldMode}
                 />
               </ErrorBoundary>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <BlindfoldToggle
+                blindfoldMode={preferences.blindfoldMode}
+                onToggle={(v) => setPreference("blindfoldMode", v)}
+              />
             </div>
 
             <div
@@ -463,11 +490,18 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               </div>
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
+              <VoiceMoveInput
+                onSubmitMove={handleSanMove}
+                isGameActive={gameStatus === "playing"}
+                isMyTurn={isMyTurn}
+                enabled={preferences.voiceMoveEnabled}
+              />
               <KeyboardMoveInput
                 onSubmitMove={handleSanMove}
                 isGameActive={gameStatus === "playing"}
                 isMyTurn={isMyTurn}
+                suggestions={game.moves()}
               />
             </div>
 

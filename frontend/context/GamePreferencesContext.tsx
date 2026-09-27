@@ -15,6 +15,11 @@ export interface GamePreferences {
   confirmMoveCorrespondence: boolean;
   boardCoordinates: BoardCoordinates;
   pieceSet: PieceSet;
+  blindfoldMode: boolean;
+  voiceMoveEnabled: boolean;
+  ttsOpponentMoves: boolean;
+  ttsVolume: number;
+  ttsRate: number;
 }
 
 export const DEFAULT_PREFERENCES: GamePreferences = {
@@ -24,6 +29,11 @@ export const DEFAULT_PREFERENCES: GamePreferences = {
   confirmMoveCorrespondence: false,
   boardCoordinates: "inside",
   pieceSet: "neo",
+  blindfoldMode: false,
+  voiceMoveEnabled: true,
+  ttsOpponentMoves: true,
+  ttsVolume: 80,
+  ttsRate: 1,
 };
 
 const STORAGE_KEY = "knightverse_game_preferences";

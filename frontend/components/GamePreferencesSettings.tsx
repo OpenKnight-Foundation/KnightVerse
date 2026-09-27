@@ -186,6 +186,57 @@ export default function GamePreferencesSettings() {
           onChange={(v) => setPreference("confirmMoveCorrespondence", v)}
           tooltip="Require explicit confirmation before sending a move in correspondence games."
         />
+        <Toggle
+          label="Blindfold mode (hide pieces)"
+          checked={preferences.blindfoldMode}
+          onChange={(v) => setPreference("blindfoldMode", v)}
+          tooltip="Hide piece graphics while keeping board coordinates and move input. Training for visualization."
+        />
+        <Toggle
+          label="Voice move input"
+          checked={preferences.voiceMoveEnabled}
+          onChange={(v) => setPreference("voiceMoveEnabled", v)}
+          tooltip="Dictate moves in English via the Web Speech API (e.g. Knight f3). Falls back to keyboard input."
+        />
+        <Toggle
+          label="Announce opponent moves aloud"
+          checked={preferences.ttsOpponentMoves}
+          onChange={(v) => setPreference("ttsOpponentMoves", v)}
+          tooltip="Use text-to-speech to speak opponent moves. Volume and rate configurable below."
+        />
+      </div>
+
+      <div className="border-t border-gray-800 pt-4 mb-4">
+        <label
+          htmlFor="tts-volume"
+          className="block text-sm text-gray-300 mb-1"
+        >
+          Speech volume: {preferences.ttsVolume}%
+        </label>
+        <input
+          id="tts-volume"
+          type="range"
+          min={0}
+          max={100}
+          value={preferences.ttsVolume}
+          onChange={(e) => setPreference("ttsVolume", Number(e.target.value))}
+          aria-label="Speech volume"
+          className="w-full"
+        />
+        <label htmlFor="tts-rate" className="block text-sm text-gray-300 mt-3 mb-1">
+          Speech rate: {preferences.ttsRate.toFixed(2)}x
+        </label>
+        <input
+          id="tts-rate"
+          type="range"
+          min={0.5}
+          max={2}
+          step={0.1}
+          value={preferences.ttsRate}
+          onChange={(e) => setPreference("ttsRate", Number(e.target.value))}
+          aria-label="Speech rate"
+          className="w-full"
+        />
       </div>
 
       <RadioGroup<BoardCoordinates>

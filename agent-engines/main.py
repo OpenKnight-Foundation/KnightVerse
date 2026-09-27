@@ -64,7 +64,7 @@ class AgentEngineOrchestrator:
     def __init__(self, node_id: Optional[str] = None):
         self.config = WorkerConfig()
         self.bot_farm_detector = BotFarmAnomalyDetector()
-        self.pool = WorkerPool([self.config], anomaly_detector=self.bot_farm_detector)
+        self.pool = WorkerPool([self.config], [], anomaly_detector=self.bot_farm_detector)
         self.nl_agent = NaturalLanguageAgent(self.pool)
         self.decentralized = DecentralizedOrchestrator(self.pool, node_id=node_id)
         self.resource_optimizer = ResourceOptimizer()

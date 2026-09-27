@@ -127,6 +127,13 @@ export function GameSidebar({
           />
           <SidebarItem
             icon={<NewsIcon />}
+            label="Openings"
+            href="/openings"
+            collapsed={collapsed && !isHovered}
+            active={pathname === "/openings"}
+          />
+          <SidebarItem
+            icon={<NewsIcon />}
             label="News"
             href="/news"
             collapsed={collapsed && !isHovered}
@@ -294,6 +301,7 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
         <MobileSidebarItem icon={<ChessIcon />} label="Play" href="/" active={pathname === "/"} />
         <MobileSidebarItem icon={<DashboardIcon />} label="Dashboard" href="/dashboard" active={pathname === "/dashboard"} />
         <MobileSidebarItem icon={<WatchIcon />} label="Watch" href="/watch" active={pathname === "/watch"} />
+        <MobileSidebarItem icon={<NewsIcon />} label="Openings" href="/openings" active={pathname === "/openings"} />
         <MobileSidebarItem icon={<NewsIcon />} label="News" href="/news" active={pathname === "/news"} />
         <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname === "/profile"} />
         <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" active={pathname === "/settings"} />

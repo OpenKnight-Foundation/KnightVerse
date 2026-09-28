@@ -11,6 +11,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
+import type { DotItemDotProps, MouseHandlerDataParam } from "recharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -235,11 +236,13 @@ export function CentipawnAdvantageChart({
   );
 
   const handleClick = useCallback(
-    (chartData: { activePayload?: Array<{ payload: EvaluatedPly }> }) => {
-      const ply = chartData?.activePayload?.[0]?.payload;
+    // recharts v3 reports the clicked point by index (no `activePayload`).
+    (state: MouseHandlerDataParam) => {
+      const index = Number(state?.activeTooltipIndex);
+      const ply = Number.isInteger(index) ? data[index] : undefined;
       if (ply != null) onPlySelect(ply.plyIndex);
     },
-    [onPlySelect]
+    [data, onPlySelect]
   );
 
   if (plies.length === 0) {
@@ -321,17 +324,12 @@ export function CentipawnAdvantageChart({
             strokeWidth={1.5}
             fill="url(#evalGradientWhite)"
             isAnimationActive={false}
-            dot={(props: {
-              cx: number;
-              cy: number;
-              payload: EvaluatedPly & { pawns: number };
-              index: number;
-            }) => (
+            dot={(props: DotItemDotProps) => (
               <QualityDot
-                key={props.payload.plyIndex}
-                cx={props.cx}
-                cy={props.cy}
-                payload={props.payload}
+                key={props.index}
+                cx={Number(props.cx)}
+                cy={Number(props.cy)}
+                payload={props.payload as EvaluatedPly & { pawns: number }}
                 activePly={activePly}
                 onPlySelect={onPlySelect}
               />

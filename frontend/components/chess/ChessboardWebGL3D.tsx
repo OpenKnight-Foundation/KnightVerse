@@ -25,6 +25,22 @@ import React, {
 } from "react";
 import dynamic from "next/dynamic";
 
+// three.js JSX elements rendered inside the lazily loaded R3F canvas. Declared
+// here because @react-three/fiber is loaded at runtime rather than installed,
+// so its JSX typings aren't available at compile time.
+type ThreeElementProps = Record<string, unknown> & { children?: React.ReactNode };
+declare module "react" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface IntrinsicElements {
+      ambientLight: ThreeElementProps;
+      directionalLight: ThreeElementProps;
+      pointLight: ThreeElementProps;
+      meshStandardMaterial: ThreeElementProps;
+    }
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type BoardMaterial = "Marble" | "Obsidian" | "HolographicNeon" | "ClassicMahogany";

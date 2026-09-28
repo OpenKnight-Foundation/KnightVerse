@@ -90,8 +90,8 @@ export function parseVoiceToSan(rawTranscript: string): string | null {
   // Already SAN-like ("nf3", "qxd7", "e4", "o-o")
   const sanLike = text.match(/^([kqrbnp]?)([a-h]?[1-8]?)(x?)([a-h][1-8])([+#]?)(=(q|r|b|n))?$/i);
   if (sanLike) {
-    let [, p, disamb, cap, sq, suffix, promo] = sanLike;
-    p = piece || (p ? p.toUpperCase() : "");
+    const [, pieceLetter, disamb, cap, sq, suffix, promo] = sanLike;
+    let p = piece || (pieceLetter ? pieceLetter.toUpperCase() : "");
     // Pawn moves must not carry a piece letter
     if (p === "P") p = "";
     // Pawns capturing need file: "exd5" — if capture with no file, invalid

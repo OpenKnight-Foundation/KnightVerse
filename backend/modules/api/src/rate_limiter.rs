@@ -424,6 +424,7 @@ impl Default for SpectatorAdmissionConfig {
     }
 }
 
+#[derive(Debug)]
 struct GameEntry {
     count: usize,
     last_seen: std::time::Instant,
@@ -558,10 +559,7 @@ pub static DROPPED_CLIENT_FRAMES: once_cell::sync::Lazy<prometheus::CounterVec> 
 
         // A duplicate registration means another instance already installed an
         // identically named collector; keeping the local handle is still correct.
-        let _ = prometheus::register_counter_vec_with_registry(
-            counter.clone(),
-            crate::metrics::registry(),
-        );
+        let _ = crate::metrics::Metrics::registry().register(Box::new(counter.clone()));
         counter
     });
 

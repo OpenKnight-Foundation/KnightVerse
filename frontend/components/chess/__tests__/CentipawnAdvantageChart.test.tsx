@@ -36,7 +36,7 @@ vi.mock("recharts", async () => {
         data-testid="area-chart"
         onClick={() =>
           onClick?.({
-            activePayload: [{ payload: { plyIndex: 2 } }],
+            activeTooltipIndex: 2, // recharts v3 click data
           })
         }
       >

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { endpoints } from "@/lib/api";
 
 interface AuthUser {
@@ -44,41 +44,165 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const TOKEN_KEY = "access_token";
+const USER_KEY = "user";
+/** Refresh this many seconds before the access token expires. */
+const REFRESH_MARGIN_SECONDS = 300;
+/** Web Locks name that serialises token refresh across tabs (#FE-93). */
+const REFRESH_LOCK = "knightverse-auth-refresh";
+
+interface StoredSession {
+  token: string;
+  user: AuthUser;
+}
+
+/**
+ * Reads the persisted session. A malformed `user` entry (old format, manual
+ * edit, partial write) clears both keys instead of crashing the app (#FE-92).
+ */
+function readStoredSession(): StoredSession | null {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const rawUser = localStorage.getItem(USER_KEY);
+    if (!token || !rawUser) return null;
+    const user = JSON.parse(rawUser) as AuthUser;
+    if (!user || typeof user !== "object") throw new Error("Invalid stored user");
+    return { token, user };
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+}
+
+function persistSession(token: string, user: AuthUser) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function clearStoredSession() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // Storage unavailable (e.g. privacy mode): nothing to clear.
+  }
+}
+
+/** True when the token is expired, undecodable, or inside the refresh margin. */
+function needsRefresh(token: string): boolean {
+  const exp = decodeJWT(token)?.exp;
+  return typeof exp !== "number" || exp - REFRESH_MARGIN_SECONDS <= Date.now() / 1000;
+}
+
+/**
+ * Runs `fn` while holding a cross-tab lock so only one tab refreshes at a
+ * time; tabs that were waiting then adopt the new token from storage.
+ */
+async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (locks?.request) {
+    await locks.request(REFRESH_LOCK, fn);
+  } else {
+    await fn();
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const accessTokenRef = useRef<string | null>(null);
 
-  // Initialize auth state from localStorage on mount
-  useEffect(() => {
-    const storedToken = localStorage.getItem("access_token");
-    const storedUser = localStorage.getItem("user");
-
-    if (storedToken && storedUser) {
-      setAccessToken(storedToken);
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
+  const applySession = useCallback((session: StoredSession | null) => {
+    accessTokenRef.current = session?.token ?? null;
+    setAccessToken(session?.token ?? null);
+    setUser(session?.user ?? null);
   }, []);
 
-  // Auto-refresh token before expiration
+  const clearSession = useCallback(() => {
+    clearStoredSession();
+    applySession(null);
+  }, [applySession]);
+
+  // Restore the session on mount. An expired (or nearly expired) token keeps
+  // `isLoading` true until the immediate refresh below settles (#FE-91).
+  useEffect(() => {
+    const stored = readStoredSession();
+    if (stored && typeof decodeJWT(stored.token)?.exp !== "number") {
+      // A token we can't read can't be refreshed either; start logged out.
+      clearSession();
+      setIsLoading(false);
+      return;
+    }
+    applySession(stored);
+    if (!stored || !needsRefresh(stored.token)) setIsLoading(false);
+  }, [applySession, clearSession]);
+
+  const refreshToken = useCallback(async () => {
+    const tokenBeforeLock = accessTokenRef.current;
+    try {
+      await withRefreshLock(async () => {
+        const stored = readStoredSession();
+        if (!stored) {
+          // Another tab logged out (or storage was cleared) while we waited.
+          applySession(null);
+          return;
+        }
+        if (stored.token !== tokenBeforeLock && !needsRefresh(stored.token)) {
+          // Another tab already refreshed: reuse its token instead of
+          // spending the refresh token a second time.
+          applySession(stored);
+          return;
+        }
+
+        const response = await fetch(endpoints.auth.refresh(), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${stored.token}`,
+          },
+          credentials: "include",
+        });
+        if (!response.ok) {
+          throw new Error(`Token refresh failed (HTTP ${response.status})`);
+        }
+
+        const data = await response.json();
+        persistSession(data.access_token, stored.user);
+        applySession({ token: data.access_token, user: stored.user });
+      });
+    } catch (error) {
+      console.error("Token refresh error:", error);
+      clearSession();
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applySession, clearSession]);
+
+  // Refresh REFRESH_MARGIN_SECONDS before expiry, or immediately if the token
+  // is already expired or inside the margin (#FE-91).
   useEffect(() => {
     if (!accessToken) return;
+    const exp = decodeJWT(accessToken)?.exp;
+    if (typeof exp !== "number") return;
 
-    const tokenData = decodeJWT(accessToken);
-    if (!tokenData) return;
+    const delay = Math.max(0, (exp - REFRESH_MARGIN_SECONDS) * 1000 - Date.now());
+    const timeout = setTimeout(() => {
+      void refreshToken();
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, [accessToken, refreshToken]);
 
-    const expiresIn = tokenData.exp - Date.now() / 1000;
-    const refreshTime = (expiresIn - 300) * 1000; // Refresh 5 minutes before expiration
-
-    if (refreshTime > 0) {
-      const timeout = setTimeout(() => {
-        refreshToken();
-      }, refreshTime);
-
-      return () => clearTimeout(timeout);
-    }
-  }, [accessToken]);
+  // Mirror login/logout/refresh performed in other tabs (#FE-93). `storage`
+  // events only fire in tabs other than the one that wrote the value.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== TOKEN_KEY && event.key !== USER_KEY) return;
+      applySession(readStoredSession());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [applySession]);
 
   const login = useCallback(async (username: string, password: string): Promise<AuthResponse> => {
     const response = await fetch(endpoints.auth.login(), {
@@ -96,21 +220,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data: AuthResponse = await response.json();
-
-    setAccessToken(data.access_token);
-    setUser({
-      user_id: data.user_id,
-      username: data.username,
-    });
-
-    localStorage.setItem("access_token", data.access_token);
-    localStorage.setItem("user", JSON.stringify({
-      user_id: data.user_id,
-      username: data.username,
-    }));
+    const sessionUser = { user_id: data.user_id, username: data.username };
+    persistSession(data.access_token, sessionUser);
+    applySession({ token: data.access_token, user: sessionUser });
 
     return data;
-  }, []);
+  }, [applySession]);
 
   const register = useCallback(async (username: string, email: string, password: string): Promise<AuthResponse> => {
     const response = await fetch(endpoints.auth.register(), {
@@ -128,65 +243,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data: AuthResponse = await response.json();
-
-    setAccessToken(data.access_token);
-    setUser({
-      user_id: data.user_id,
-      username: data.username,
-    });
-
-    localStorage.setItem("access_token", data.access_token);
-    localStorage.setItem("user", JSON.stringify({
-      user_id: data.user_id,
-      username: data.username,
-    }));
+    const sessionUser = { user_id: data.user_id, username: data.username };
+    persistSession(data.access_token, sessionUser);
+    applySession({ token: data.access_token, user: sessionUser });
 
     return data;
-  }, []);
+  }, [applySession]);
 
   const logout = useCallback(async () => {
     try {
       await fetch(endpoints.auth.logout(), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessTokenRef.current}`,
         },
         credentials: "include",
       });
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
-      setAccessToken(null);
-      setUser(null);
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("user");
+      clearSession();
     }
-  }, [accessToken]);
-
-  const refreshToken = useCallback(async () => {
-    try {
-      const response = await fetch(endpoints.auth.refresh(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        throw new Error("Token refresh failed");
-      }
-
-      const data = await response.json();
-      setAccessToken(data.access_token);
-      localStorage.setItem("access_token", data.access_token);
-    } catch (error) {
-      console.error("Token refresh error:", error);
-      // If refresh fails, logout user
-      await logout();
-    }
-  }, [accessToken, logout]);
+  }, [clearSession]);
 
   const getSessions = useCallback(async (): Promise<SessionInfo[]> => {
     const response = await fetch(endpoints.auth.sessions(), {

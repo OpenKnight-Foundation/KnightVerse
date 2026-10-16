@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { API_BASE, WS_BASE } from "@/lib/api";
-import { useWebSocketScaling } from "@/context/webSocketScalingContext";
+import { endpoints } from "@/lib/api";
 
 export type ChessSocketStatus =
   | "idle"
@@ -33,7 +32,6 @@ const RECONNECT_TIMEOUT = 3000; // 3 seconds timeout for reconnection
 /**
  * Custom hook for managing WebSocket connection to the chess game server.
  * Handles connection, reconnection with exponential backoff, move queuing, and network state detection.
- * Now supports horizontal load balancing and regional node discovery.
  * 
  * @param gameId - The unique identifier for the chess game, or null if no game is active
  * @returns Object containing WebSocket status, game state, and control functions
@@ -46,8 +44,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     setStatusState(s);
   }, []);
   const [lastOpponentMove, setLastOpponentMove] = useState<ChessMove | null>(null);
-  
-  const { getOptimalNode } = useWebSocketScaling();
+
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -85,27 +82,26 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   }, []);
 
   /**
-   * Creates a new WebSocket connection to the optimal game server node.
-   * 
+   * Creates a new WebSocket connection to the game server configured via
+   * `NEXT_PUBLIC_API_URL` (see `endpoints.games.ws`).
+   *
    * @param attemptReconnect - Whether this connection attempt is a reconnection
    */
   const createWebSocket = useCallback(async (attemptReconnect = false) => {
     if (!gameId) return null;
 
     try {
-      // Step 1: Discover the optimal horizontal node (Regional Load Balancing)
-      const node = await getOptimalNode(gameId);
-      const wsUrl = `${node.url}/v1/games/${gameId}/ws`;
+      const wsUrl = endpoints.games.ws(gameId);
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       if (attemptReconnect) {
         setStatus("reconnecting");
-        console.log(`[WebSocket] Scaling: Attempting reconnection to ${node.id} (${node.region})`);
+        console.log(`[WebSocket] Attempting reconnection to ${wsUrl}`);
       } else {
         setStatus("connecting");
-        console.log(`[WebSocket] Scaling: Connecting to ${node.id} for game ${gameId}`);
+        console.log(`[WebSocket] Connecting to ${wsUrl} for game ${gameId}`);
       }
 
       ws.onopen = () => {

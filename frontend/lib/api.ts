@@ -7,40 +7,49 @@
  * `process.env` directly.
  */
 
-function env(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+/**
+ * Returns `value` unless it is unset or empty.
+ *
+ * Every call site below passes `process.env.NEXT_PUBLIC_…` as a *literal*
+ * property access. Next.js only inlines `NEXT_PUBLIC_*` variables into the
+ * client bundle when they are written that way; indexing `process.env` with a
+ * variable is left as-is and is always `undefined` in the browser (#FE-86).
+ * Don't refactor these back into a name-based helper.
+ */
+function withDefault(value: string | undefined, fallback: string): string {
+  return value ? value : fallback;
 }
 
 /** Backend / game-server base URL (REST + WebSocket) */
-export const API_BASE = env("NEXT_PUBLIC_API_URL", "http://localhost:8000");
+export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8000");
 
 /** Derive the WebSocket base from the HTTP base automatically */
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 /** Legacy alias — some older services read `NEXT_PUBLIC_BACKEND_URL` */
-export const BACKEND_BASE = env("NEXT_PUBLIC_BACKEND_URL", API_BASE);
+export const BACKEND_BASE = withDefault(process.env.NEXT_PUBLIC_BACKEND_URL, API_BASE);
 
 /** Stellar Horizon API */
-export const HORIZON_URL = env(
-  "NEXT_PUBLIC_HORIZON_URL",
+export const HORIZON_URL = withDefault(
+  process.env.NEXT_PUBLIC_HORIZON_URL,
   "https://horizon-testnet.stellar.org",
 );
 
 /** Soroban RPC endpoint */
-export const SOROBAN_RPC = env(
-  "NEXT_PUBLIC_SOROBAN_RPC",
+export const SOROBAN_RPC = withDefault(
+  process.env.NEXT_PUBLIC_SOROBAN_RPC,
   "https://soroban-testnet.stellar.org:443",
 );
 
 /** Stellar network passphrase */
-export const NETWORK_PASSPHRASE = env(
-  "NEXT_PUBLIC_NETWORK_PASSPHRASE",
+export const NETWORK_PASSPHRASE = withDefault(
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
   "Test SDF Network ; September 2015",
 );
 
 /** IPFS gateway for decentralized storage */
-export const IPFS_GATEWAY = env(
-  "NEXT_PUBLIC_IPFS_GATEWAY",
+export const IPFS_GATEWAY = withDefault(
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY,
   "https://gateway.pinata.cloud",
 );
 
@@ -180,8 +189,9 @@ export const endpoints = {
   /** Games */
   games: {
     live: () => `${API_BASE}/v1/games/live`,
+    /** Game socket — served by the backend at `/v1/ws/game/{game_id}`. */
     ws: (gameId: string) =>
-      `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/ws`,
+      `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}`,
     spectate: (gameId: string) =>
       `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/spectate`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,

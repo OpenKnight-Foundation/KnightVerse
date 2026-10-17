@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useParams, useRouter } from "next/navigation";
 import { useChessSocket } from "@/hook/useChessSocket";
-import { FaUser, FaClock, FaSignal } from "react-icons/fa";
+import { FaUser, FaClock } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
@@ -20,8 +20,8 @@ import BlindfoldToggle from "@/components/chess/BlindfoldToggle";
 import { useSpeechSynthesis } from "@/hook/useSpeechSynthesis";
 import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
-import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
 import { ReconnectionBanner } from "@/components/ReconnectionBanner";
+import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -496,9 +496,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               >
                 Resign
               </button>
-              <div className="flex items-center gap-1.5 px-2 shrink-0">
-                <ConnectionStatusIndicator status={socketStatus} />
-              </div>
+              <ConnectionStatusIndicator
+                status={socketStatus}
+                className="shrink-0"
+              />
             </div>
           </div>
 
@@ -512,9 +513,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                 <h3 className="text-sm font-semibold text-gray-300">
                   Game Status
                 </h3>
-                <div className="hidden lg:flex items-center gap-1.5">
-                  <ConnectionStatusIndicator status={socketStatus} />
-                </div>
+                <ConnectionStatusIndicator
+                  status={socketStatus}
+                  className="hidden lg:flex"
+                />
               </div>
 
               {gameStatus !== "playing" && (
@@ -634,8 +636,6 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
       >
         {announcement}
       </div>
-
-      <ReconnectionBanner status={socketStatus} onReconnect={reconnect} />
 
       {overlayResult && (
         <GameResultOverlay

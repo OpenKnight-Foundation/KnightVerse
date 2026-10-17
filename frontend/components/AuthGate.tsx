@@ -1,28 +1,35 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/authContext";
 import SignInModal from "@/components/SignInModal";
 
-interface AuthGateProps {
+export interface AuthGateProps {
   children: React.ReactNode;
-  /** Content shown while the session is being restored. */
+  /** Rendered when the user is not signed in. Defaults to a sign-in prompt. */
   fallback?: React.ReactNode;
 }
 
 /**
- * Renders its children only when the user is authenticated. Otherwise it
- * shows a sign-in prompt that opens the shared SignInModal. This is used by
- * pages that require auth (dashboard, PGN archive, session manager,
- * tournament registration).
+ * Wards a subtree behind authentication. When the user is not signed in it
+ * renders a prompt that opens the shared `SignInModal`, so every auth-gated
+ * page gets a working sign-in entry point (#FE-96).
  */
 export default function AuthGate({ children, fallback }: AuthGateProps) {
   const { isAuthenticated, isLoading } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      setModalOpen(false);
+    }
+  }, [isAuthenticated]);
+
   if (isLoading) {
     return (
-      <>{fallback ?? <p className="p-4 text-center text-gray-500">Loading…</p>}</>
+      <div className="flex items-center justify-center py-12 text-slate-400" role="status">
+        Loading…
+      </div>
     );
   }
 
@@ -32,16 +39,22 @@ export default function AuthGate({ children, fallback }: AuthGateProps) {
 
   return (
     <>
-      <div className="flex flex-col aitems-center justify-center gap-4 p-8">
-        <p className="text-lg font-medium">You need to sign in to view this page.</p>
-        <button
-          type="button"
-          className="rounded-md bg-blue-600 px-4 py-2 text-white"
-          onClick={() => setModalOpen(true)}
+      {fallback ?? (
+        <div
+          className="flex flex-col items-center justify-center gap-4 py-16 text-center"
+          data-testid="auth-gate-prompt"
         >
-          Sign in
-        </button>
-      </div>
+          <p className="text-slate-300">You need to sign in to view this page.</p>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            data-testid="auth-gate-sign-in"
+            className="rounded-md bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-500"
+          >
+            Sign in
+          </button>
+        </div>
+      )}
       <SignInModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </>
   );

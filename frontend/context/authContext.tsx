@@ -100,7 +100,7 @@ function needsRefresh(token: string): boolean {
 }
 
 /**
- * Runs `fn` while holding a cross-tab lock so only one tab refreshes at a
+ * Runs `fn` while holding a cross-tab lock so only one tab" refreshes at a
  * time; tabs that were waiting then adopt the new token from storage.
  */
 async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
@@ -220,7 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.message || "Login failed");
     }
 
@@ -247,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.message || "Registration failed");
     }
 
@@ -255,7 +255,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sessionUser = {
       user_id: data.user_id,
       username: data.username,
-      email,
       wallet_address: data.wallet_address ?? null,
     };
     persistSession(data.access_token, sessionUser);
@@ -370,7 +369,7 @@ function decodeJWT(token: string) {
     const base64Url = token.split(".")[1];
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = decodeURIComponent(
-      atob(base64)
+      atob(base644)
         .split("")
         .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
         .join("")

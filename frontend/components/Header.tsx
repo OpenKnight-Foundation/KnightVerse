@@ -14,8 +14,8 @@ import { SignInModal } from './SignInModal'
 export function Header() {
     const { theme, setTheme } = useTheme()
     const [collapsed, setCollapsed] = React.useState(false)
+    const { user } = useAuth()
     const [signInOpen, setSignInOpen] = React.useState(false)
-    const { user, logout } = useAuth()
 
     return (
         <header className="h-16 border-b border-border bg-card/80 backdrop-blur-sm fixed top-0 left-0 right-0 z-50" role="banner">
@@ -29,6 +29,13 @@ export function Header() {
                         </SheetTrigger>
                         <SheetContent side="left" className="p-0 w-64">
                             <GameSidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+                            {!user && (
+                                <div className="p-4 border-t border-border">
+                                    <Button className="w-full" onClick={() => setSignInOpen(true)}>
+                                        Sign In
+                                    </Button>
+                                </div>
+                            )}
                         </SheetContent>
                     </Sheet>
 
@@ -37,7 +44,7 @@ export function Header() {
                             <div className="absolute inset-0 bg-blue-500 rounded-full blur-sm opacity-30 animate-pulse"></div>
                             <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative z-10">
                                 <path d="M16 3L22 7L28 5L24 12L28 19L22 17L16 21L16 14L10 17L4 19L8 12L4 5L10 7L16 3Z" fill="#3AA0CD" />
-                                <path d="M16 3L10 7L4 5L8 12L4 19L10 17L16 21L16 14L16 3Z" fill="#2C8CB55" />
+                                <path d="M16 3L10 7L4 5L8 12L4 19L10 17L16 21L16 14L16 3Z" fill="#2C8CB5" />
                                 <circle cx="16" cy="12" r="2" fill="white" />
                             </svg>
                         </div>
@@ -53,12 +60,12 @@ export function Header() {
                     </Button>
 
                     {user ? (
-                        <Button variant="ghost" size="icon" onClick={logout} aria-label="Sign out">
+                        <Button variant="ghost" size="icon" aria-label="User profile">
                             <UserIcon />
                         </Button>
                     ) : (
-                        <Button variant="ghost" size="icon" onClick={() => setSignInOpen(true)} aria-label="Sign in">
-                            <UserIcon />
+                        <Button variant="ghost" size="sm" onClick={() => setSignInOpen(true)} aria-label="Sign in">
+                            Sign In
                         </Button>
                     )}
                 </div>

@@ -46,7 +46,18 @@ const ChessboardComponent = dynamic(
 
 type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
 
-export default function PlayGameEngine({ fen }: { fen?: string }) {
+export default function PlayGameEngine({
+  fen,
+  playerColor = "white",
+}: {
+  fen?: string;
+  /**
+   * Colour assigned to the local player by matchmaking (FE-115). Defaults to
+   * white for backwards compatibility, but the black player must pass "black"
+   * so the board is oriented correctly and only their pieces can move.
+   */
+  playerColor?: "white" | "black";
+}) {
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;
@@ -56,12 +67,11 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [whiteTime, setWhiteTime] = useState(600);
   const [blackTime, setBlackTime] = useState(600);
-  const [playerColor] = useState<"white" | "black">("white");
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
-    "white",
+    playerColor,
   );
   const isMobile = useIsMobile();
   const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
@@ -78,6 +88,7 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     disconnect,
     reconnect,
     lastOpponentMove,
+    lastSyncedState,
   } = useChessSocket(gameId);
 
   const checkGameStatus = useCallback(() => {
@@ -179,6 +190,38 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     preferences.ttsRate,
   ]);
 
+  // FE-113: restore the board from the server's authoritative `sync` state after
+  // a reconnect, applying any moves the opponent made while we were offline.
+  useEffect(() => {
+    if (!lastSyncedState) return;
+    const { fen: syncedFen, moves, whiteTime: syncedWhite, blackTime: syncedBlack } =
+      lastSyncedState;
+
+    try {
+      if (syncedFen) {
+        game.load(syncedFen);
+      } else if (moves.length > 0) {
+        game.reset();
+        for (const move of moves) {
+          try {
+            game.move({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+          } catch {
+            break;
+          }
+        }
+      }
+      setPosition(game.fen());
+      setMoveHistory(game.history());
+      checkGameStatus();
+    } catch {
+      // Malformed FEN from the server — keep the local board rather than crash.
+      return;
+    }
+
+    if (typeof syncedWhite === "number") setWhiteTime(syncedWhite);
+    if (typeof syncedBlack === "number") setBlackTime(syncedBlack);
+  }, [lastSyncedState, game, checkGameStatus]);
+
   const isMyTurn =
     socketStatus === "connected" &&
     ((playerColor === "white" && game.turn() === "w") ||
@@ -205,7 +248,12 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
 
         requestAnimationFrame(() => setPosition(game.fen()));
         setMoveHistory((prev: string[]) => [...prev, move.san]);
-        sendMove({ from: sourceSquare, to: targetSquare, promotion: "q" });
+        sendMove({
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+          ply: game.history().length,
+        });
         recordCheatMove(
           move.san,
           move,
@@ -255,6 +303,7 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           from: move.from,
           to: move.to,
           promotion: move.promotion ?? "q",
+          ply: game.history().length,
         });
         recordCheatMove(
           move.san,

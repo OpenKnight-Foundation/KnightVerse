@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers } from "react-icons/fa";
+import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers, FaSearch } from "react-icons/fa";
 import { useFocusTrap } from "@/hook/useFocusTrap";
 
 type GameResult = "white_wins" | "black_wins" | "draw" | "stalemate";
@@ -10,6 +10,8 @@ interface GameResultOverlayProps {
   result: GameResult;
   onPlayAgain: () => void;
   onPlayOnline: () => void;
+  /** Optional: open the post-game review view (FE-120 / #1361). */
+  onReview?: () => void;
 }
 
 const resultConfig: Record<
@@ -46,7 +48,7 @@ const resultConfig: Record<
   },
 };
 
-export function GameResultOverlay({ result, onPlayAgain, onPlayOnline }: GameResultOverlayProps) {
+export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview }: GameResultOverlayProps) {
   const cfg = resultConfig[result];
 
   // Focus trap: keep keyboard focus within the modal while it is open.
@@ -87,6 +89,15 @@ export function GameResultOverlay({ result, onPlayAgain, onPlayOnline }: GameRes
 
           {/* Buttons */}
           <div className="flex flex-col gap-3 w-full mt-2" role="group" aria-label="Post-game options">
+            {onReview && (
+              <button
+                onClick={onReview}
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              >
+                <FaSearch aria-hidden="true" />
+                Review Game
+              </button>
+            )}
             <button
               onClick={onPlayAgain}
               className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-teal-500/20 hover:shadow-teal-400/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"

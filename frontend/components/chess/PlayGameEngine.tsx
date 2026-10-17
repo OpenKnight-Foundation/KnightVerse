@@ -44,6 +44,11 @@ const ChessboardComponent = dynamic(
   },
 );
 
+const ChessboardWebGL3D = dynamic(
+  () => import("@/components/chess/ChessboardWebGL3D").then((m) => m.ChessboardWebGL3D),
+  { ssr: false },
+);
+
 type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
 
 export default function PlayGameEngine({ fen }: { fen?: string }) {
@@ -361,6 +366,17 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     [],
   );
 
+  // FE-120 (#1361): persist the finished game's PGN and open the review view.
+  const handleReview = useCallback(() => {
+    try {
+      sessionStorage.setItem(`knightverse:review:${gameId}`, game.pgn());
+    } catch {
+      // Storage can be unavailable (private mode) — the review page falls back
+      // to a sample game.
+    }
+    router.push(`/game/${gameId}/review`);
+  }, [game, gameId, router]);
+
   let overlayResult: GameResult | null = null;
   if (gameStatus === "checkmate") {
     overlayResult = game.turn() === "b" ? "white_wins" : "black_wins";
@@ -447,12 +463,22 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                 className="mb-3"
               />
               <ErrorBoundary componentName="Chessboard">
-                <ChessboardComponent
-                  position={position}
-                  onDrop={handleMove}
-                  orientation={boardOrientation}
-                  blindfoldMode={preferences.blindfoldMode}
-                />
+                {preferences.boardRenderer === "3d" ? (
+                  <ChessboardWebGL3D
+                    fen={position === "start" ? game.fen() : position}
+                    interactive
+                    onMove={(from, to) =>
+                      handleMove({ sourceSquare: from, targetSquare: to })
+                    }
+                  />
+                ) : (
+                  <ChessboardComponent
+                    position={position}
+                    onDrop={handleMove}
+                    orientation={boardOrientation}
+                    blindfoldMode={preferences.blindfoldMode}
+                  />
+                )}
               </ErrorBoundary>
             </div>
 
@@ -679,6 +705,7 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           result={overlayResult}
           onPlayAgain={() => router.push("/")}
           onPlayOnline={() => router.push("/")}
+          onReview={handleReview}
         />
       )}
     </div>

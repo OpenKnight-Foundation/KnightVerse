@@ -136,6 +136,8 @@ export default function Home() {
 
   useEffect(() => {
     let isMounted = true;
+    let intervalId: number | undefined;
+
     const fetchOnlinePlayers = async () => {
       try {
         const resp = await fetch(PLAYER_COUNT_ENDPOINT);
@@ -145,18 +147,23 @@ export default function Home() {
           setOnlinePlayerCount(data.count);
         }
       } catch {
-        console.warn(
-          "[KnightVerse] Could not fetch online player count — backend offline?",
-        );
-        if (isMounted) setOnlinePlayerCount(null);
+        // The backend does not serve this route yet (#FE-102). Hide the
+        // counter and stop polling instead of hammering a missing endpoint.
+        if (isMounted) {
+          setOnlinePlayerCount(null);
+          if (intervalId !== undefined) {
+            clearInterval(intervalId);
+            intervalId = undefined;
+          }
+        }
       }
     };
 
-    fetchOnlinePlayers();
-    const intervalId = window.setInterval(fetchOnlinePlayers, 20000);
+    void fetchOnlinePlayers();
+    intervalId = window.setInterval(fetchOnlinePlayers, 20000);
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
+      if (intervalId !== undefined) clearInterval(intervalId);
     };
   }, [PLAYER_COUNT_ENDPOINT]);
 
@@ -593,7 +600,8 @@ export default function Home() {
                 <span className="relative inline-flex rounded-full h-10 w-10 border-2 border-yellow-500 bg-yellow-500/10" />
               </span>
               <p className="text-gray-300 text-sm" aria-live="polite">
-                {onlinePlayerCount} Players online
+                {onlinePlayerCount !== null && `${onlinePlayerCount} `}
+                {onlinePlayerCount !== null ? "Players online" : "Searching for players…"}
               </p>
               <p className="text-cyan-100 text-xs uppercase tracking-[0.24em]">
                 Queueing for {selectedVariant.label}

@@ -255,6 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sessionUser = {
       user_id: data.user_id,
       username: data.username,
+      email,
       wallet_address: data.wallet_address ?? null,
     };
     persistSession(data.access_token, sessionUser);

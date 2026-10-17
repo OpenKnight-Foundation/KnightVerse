@@ -57,6 +57,10 @@ const PlayGameEngine = dynamic(
 );
 
 export default function PlayOnlinePage() {
-  const fen = useSearchParams().get("fen") ?? undefined;
-  return <PlayGameEngine fen={fen} />;
+  const searchParams = useSearchParams();
+  const fen = searchParams.get("fen") ?? undefined;
+  // FE-116: initialise both clocks from the chosen time control (?minutes=).
+  const minutes = Number(searchParams.get("minutes"));
+  const initialMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
+  return <PlayGameEngine fen={fen} initialMinutes={initialMinutes} />;
 }

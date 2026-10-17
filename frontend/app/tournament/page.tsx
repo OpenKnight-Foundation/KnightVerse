@@ -2,22 +2,28 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
-import type { TournamentBracket, BracketFormat } from "@/components/tournament/BracketView";
+import type { TournamentBracket, BracketFormat } from "@/components/tournament/TournamentBracketViewer";
 import { endpoints } from "@/lib/api";
 import { useAuth } from "@/context/authContext";
 
-const BracketView = dynamic(() => import("@/components/tournament/BracketView"), {
-  ssr: false,
-});
+// FE-121 (#1362): TournamentBracketViewer is the canonical bracket — it
+// supports richer navigation, spectating and Swiss standings, so the simpler
+// BracketView was removed.
+const TournamentBracketViewer = dynamic(
+  () => import("@/components/tournament/TournamentBracketViewer"),
+  { ssr: false },
+);
 
 const FORMAT_OPTIONS: { value: BracketFormat; label: string; description: string }[] = [
   { value: "SingleElimination", label: "Single Elimination", description: "One loss and you're out" },
   { value: "DoubleElimination", label: "Double Elimination", description: "Two losses to be eliminated" },
-  { value: "RoundRobin", label: "Round Robin", description: "Everyone plays everyone" },
+  { value: "Swiss", label: "Swiss", description: "Everyone plays a fixed number of rounds" },
 ];
 
 export default function TournamentPage() {
+  const router = useRouter();
   const [brackets, setBrackets] = useState<TournamentBracket[]>([]);
   const [selected, setSelected] = useState<TournamentBracket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -263,7 +269,10 @@ export default function TournamentPage() {
                       </button>
                     </div>
                   )}
-                  <BracketView bracket={selected} />
+                  <TournamentBracketViewer
+                    bracket={selected}
+                    onSpectate={(matchId) => router.push(`/watch?game=${matchId}`)}
+                  />
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-gray-600">

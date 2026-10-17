@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useParams, useRouter } from "next/navigation";
 import { useChessSocket } from "@/hook/useChessSocket";
-import { FaUser, FaClock, FaSignal } from "react-icons/fa";
+import { FaUser, FaClock } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
@@ -20,6 +20,8 @@ import BlindfoldToggle from "@/components/chess/BlindfoldToggle";
 import { useSpeechSynthesis } from "@/hook/useSpeechSynthesis";
 import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
+import { ReconnectionBanner } from "@/components/ReconnectionBanner";
+import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -323,35 +325,6 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const socketStatusLabel = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "Live";
-      case "connecting":
-        return "Connecting...";
-      case "reconnecting":
-        return "Reconnecting...";
-      case "disconnected":
-        return "Disconnected";
-      case "error":
-        return "Error";
-      default:
-        return "Idle";
-    }
-  };
-
-  const socketStatusColor = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "text-emerald-400";
-      case "connecting":
-      case "reconnecting":
-        return "text-yellow-400";
-      default:
-        return "text-red-400";
-    }
-  };
-
   const movePairs = moveHistory.reduce(
     (acc: string[][], move: string, i: number) => {
       if (i % 2 === 0) acc.push([move]);
@@ -401,6 +374,8 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           </button>
           <Web3StatusBar />
         </div>
+
+        <ReconnectionBanner status={socketStatus} onReconnect={reconnect} />
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           <div
@@ -521,12 +496,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               >
                 Resign
               </button>
-              <div className="flex items-center gap-1.5 px-2 shrink-0">
-                <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                <span className={`text-xs ${socketStatusColor()}`}>
-                  {socketStatusLabel()}
-                </span>
-              </div>
+              <ConnectionStatusIndicator
+                status={socketStatus}
+                className="shrink-0"
+              />
             </div>
           </div>
 
@@ -540,12 +513,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                 <h3 className="text-sm font-semibold text-gray-300">
                   Game Status
                 </h3>
-                <div className="hidden lg:flex items-center gap-1.5">
-                  <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                  <span className={`text-xs ${socketStatusColor()}`}>
-                    {socketStatusLabel()}
-                  </span>
-                </div>
+                <ConnectionStatusIndicator
+                  status={socketStatus}
+                  className="hidden lg:flex"
+                />
               </div>
 
               {gameStatus !== "playing" && (
@@ -652,14 +623,6 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               </button>
             </div>
 
-            {socketStatus === "disconnected" && gameStatus === "playing" && (
-              <button
-                onClick={reconnect}
-                className="w-full py-2.5 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-sm font-medium transition-all duration-300 animate-fade-in"
-              >
-                Reconnect to Game
-              </button>
-            )}
           </div>
         </div>
       </div>

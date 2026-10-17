@@ -1,10 +1,18 @@
 "use client";
 
 import React from "react";
-import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers } from "react-icons/fa";
+import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers, FaClock, FaFlag } from "react-icons/fa";
 import { useFocusTrap } from "@/hook/useFocusTrap";
 
-type GameResult = "white_wins" | "black_wins" | "draw" | "stalemate";
+type GameResult =
+  | "white_wins"
+  | "black_wins"
+  | "draw"
+  | "stalemate"
+  | "win_on_time"
+  | "loss_on_time"
+  | "win_by_resignation"
+  | "loss_by_resignation";
 
 interface GameResultOverlayProps {
   result: GameResult;
@@ -41,6 +49,34 @@ const resultConfig: Record<
     icon: <FaHandshake className="text-5xl text-gray-400 drop-shadow-lg" aria-hidden="true" />,
     title: "Stalemate",
     subtitle: "No legal moves — game drawn",
+    gradient: "from-gray-500/20 to-slate-600/10",
+    borderColor: "border-gray-500/30",
+  },
+  win_on_time: {
+    icon: <FaClock className="text-5xl text-yellow-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "You Win!",
+    subtitle: "Opponent ran out of time ♔",
+    gradient: "from-yellow-500/20 to-amber-600/10",
+    borderColor: "border-yellow-500/30",
+  },
+  loss_on_time: {
+    icon: <FaClock className="text-5xl text-red-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "Time's Up",
+    subtitle: "You ran out of time — better luck next time",
+    gradient: "from-red-500/20 to-rose-600/10",
+    borderColor: "border-red-500/30",
+  },
+  win_by_resignation: {
+    icon: <FaFlag className="text-5xl text-teal-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "You Win!",
+    subtitle: "Opponent resigned ♔",
+    gradient: "from-teal-500/20 to-emerald-600/10",
+    borderColor: "border-teal-500/30",
+  },
+  loss_by_resignation: {
+    icon: <FaFlag className="text-5xl text-gray-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "You Resigned",
+    subtitle: "Game over — your opponent takes the win",
     gradient: "from-gray-500/20 to-slate-600/10",
     borderColor: "border-gray-500/30",
   },

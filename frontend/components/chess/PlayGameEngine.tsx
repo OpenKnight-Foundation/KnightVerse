@@ -44,9 +44,16 @@ const ChessboardComponent = dynamic(
   },
 );
 
-type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
+type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "timeout";
 
-export default function PlayGameEngine({ fen }: { fen?: string }) {
+export default function PlayGameEngine({
+  fen,
+  initialMinutes = 10,
+}: {
+  fen?: string;
+  /** Time control in minutes for each side (FE-116 / #1357). */
+  initialMinutes?: number;
+}) {
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;
@@ -54,10 +61,12 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   const [game] = useState(new Chess(fen));
   const [position, setPosition] = useState(fen || "start");
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [whiteTime, setWhiteTime] = useState(600);
-  const [blackTime, setBlackTime] = useState(600);
+  const [whiteTime, setWhiteTime] = useState(() => Math.max(0, initialMinutes) * 60);
+  const [blackTime, setBlackTime] = useState(() => Math.max(0, initialMinutes) * 60);
   const [playerColor] = useState<"white" | "black">("white");
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
+  const [flaggedColor, setFlaggedColor] = useState<"white" | "black" | null>(null);
+  const [resignation, setResignation] = useState<"self" | "opponent" | null>(null);
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
@@ -75,9 +84,11 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   const {
     status: socketStatus,
     sendMove,
+    sendResign,
     disconnect,
     reconnect,
     lastOpponentMove,
+    opponentResigned,
   } = useChessSocket(gameId);
 
   const checkGameStatus = useCallback(() => {
@@ -178,6 +189,26 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     preferences.ttsVolume,
     preferences.ttsRate,
   ]);
+
+  // FE-116 (#1357): a fallen flag ends the game — loss on time for that side.
+  useEffect(() => {
+    if (gameStatus !== "playing" || socketStatus !== "connected") return;
+    if (whiteTime <= 0) {
+      setFlaggedColor("white");
+      setGameStatus("timeout");
+    } else if (blackTime <= 0) {
+      setFlaggedColor("black");
+      setGameStatus("timeout");
+    }
+  }, [whiteTime, blackTime, gameStatus, socketStatus]);
+
+  // FE-117 (#1358): the opponent resigned — we take the win.
+  useEffect(() => {
+    if (opponentResigned && gameStatus === "playing") {
+      setResignation("opponent");
+      setGameStatus("resigned");
+    }
+  }, [opponentResigned, gameStatus]);
 
   const isMyTurn =
     socketStatus === "connected" &&
@@ -312,10 +343,14 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   }, [blackTime, playerColor, announceTimeAlert]);
 
   const handleResign = useCallback(() => {
+    // FE-117 (#1358): tell the server (and therefore the opponent) before
+    // dropping the socket, so the game completes and the opponent wins.
+    sendResign();
+    setResignation("self");
     setGameStatus("resigned");
     resetCheatDetection();
     disconnect();
-  }, [disconnect, resetCheatDetection]);
+  }, [sendResign, disconnect, resetCheatDetection]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -368,6 +403,11 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     overlayResult = "stalemate";
   } else if (gameStatus === "draw") {
     overlayResult = "draw";
+  } else if (gameStatus === "timeout") {
+    overlayResult = flaggedColor === playerColor ? "loss_on_time" : "win_on_time";
+  } else if (gameStatus === "resigned") {
+    overlayResult =
+      resignation === "self" ? "loss_by_resignation" : "win_by_resignation";
   }
 
   return (
@@ -558,7 +598,14 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                     {gameStatus === "checkmate" && "Checkmate!"}
                     {gameStatus === "stalemate" && "Stalemate!"}
                     {gameStatus === "draw" && "Draw!"}
-                    {gameStatus === "resigned" && "Resigned!"}
+                    {gameStatus === "timeout" &&
+                      (flaggedColor === playerColor
+                        ? "Time's up — you lost on time."
+                        : "Opponent flagged — you win on time!")}
+                    {gameStatus === "resigned" &&
+                      (resignation === "self"
+                        ? "Resigned!"
+                        : "Opponent resigned — you win!")}
                   </p>
                 </div>
               )}

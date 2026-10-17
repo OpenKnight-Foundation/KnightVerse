@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
 import type { TournamentBracket, BracketFormat } from "@/components/tournament/BracketView";
 import { endpoints } from "@/lib/api";
+import { useAuth } from "@/context/authContext";
 
 const BracketView = dynamic(() => import("@/components/tournament/BracketView"), {
   ssr: false,
@@ -33,11 +34,27 @@ export default function TournamentPage() {
   const [registeredIds, setRegisteredIds] = useState<Set<string>>(new Set());
   const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
 
+  // The backend tournament scope is JWT-protected (#FE-100).
+  const { accessToken } = useAuth();
+  const authHeaders = React.useMemo<Record<string, string>>(
+    (): Record<string, string> => (accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    [accessToken],
+  );
+
   const fetchBrackets = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(endpoints.tournaments.list(), { credentials: "include" });
+      const res = await fetch(endpoints.tournaments.list(), {
+        headers: authHeaders,
+        credentials: "include",
+      });
+      // No tournaments endpoint yet (or nothing published) is an empty list,
+      // not an error (#FE-100).
+      if (res.status === 404) {
+        setBrackets([]);
+        return;
+      }
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data: TournamentBracket[] = await res.json();
       setBrackets(data);
@@ -50,7 +67,7 @@ export default function TournamentPage() {
     } finally {
       setLoading(false);
     }
-  }, []); // no deps — uses only stable setters and module-level constants
+  }, [authHeaders]);
 
   useEffect(() => {
     void fetchBrackets();
@@ -63,7 +80,7 @@ export default function TournamentPage() {
     try {
       const res = await fetch(endpoints.tournaments.create(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         credentials: "include",
         body: JSON.stringify({ name: name.trim(), format }),
       });
@@ -87,8 +104,12 @@ export default function TournamentPage() {
     try {
       const res = await fetch(endpoints.tournaments.register(tournament.id), {
         method: "POST",
+        headers: authHeaders,
         credentials: "include",
       });
+      if (res.status === 401) {
+        throw new Error("Sign in to register for tournaments.");
+      }
       if (res.status === 409) {
         setRegisteredIds((prev) => new Set(prev).add(tournament.id));
         throw new Error("You are already registered for this tournament.");

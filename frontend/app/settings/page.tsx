@@ -4,6 +4,7 @@ import React from 'react';
 import AppearanceSettings from '@/components/AppearanceSettings';
 import SoundSettings from '@/components/SoundSettings';
 import GamePreferencesSettings from '@/components/GamePreferencesSettings';
+import LinkedWalletSettings from '@/components/LinkedWalletSettings';
 import { GameSidebar } from '@/components/GameSidebar';
 import { Header } from '@/components/Header';
 
@@ -35,6 +36,7 @@ export default function SettingsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <GamePreferencesSettings />
+              <LinkedWalletSettings />
             </div>
           </div>
         </main>

@@ -14,6 +14,7 @@ pub mod rate_limiter;
 pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
+pub mod wallet_link;
 mod test;
 pub mod ws;
 

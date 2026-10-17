@@ -180,10 +180,14 @@ export const endpoints = {
 
   /** Matchmaking */
   matchmaking: {
-    join: () => `${API_BASE}/v1/matchmaking/join`,
+    joinCasual: () => `${API_BASE}/v1/matchmaking/join-casual`,
+    joinRated: () => `${API_BASE}/v1/matchmaking/join-rated-free`,
+    joinStaked: () => `${API_BASE}/v1/matchmaking/join-rated-staked`,
+    status: (requestId: string) =>
+      `${API_BASE}/v1/matchmaking/status/${encodeURIComponent(requestId)}`,
+    match: (matchId: string) =>
+      `${API_BASE}/v1/matchmaking/match/${encodeURIComponent(matchId)}`,
     cancel: () => `${API_BASE}/v1/matchmaking/cancel`,
-    ws: (sessionId: string) =>
-      `${WS_BASE}/v1/matchmaking/ws?session=${encodeURIComponent(sessionId)}`,
   },
 
   /** Games */
@@ -207,14 +211,23 @@ export const endpoints = {
   players: {
     online: () => `${API_BASE}/v1/players/online`,
     export: () => `${API_BASE}/v1/players/me/export`,
+    /** Wallet linking (#FE-97): challenge → Freighter signMessage → verify. */
+    walletChallenge: () => `${API_BASE}/v1/players/me/wallet/challenge`,
+    walletVerify: () => `${API_BASE}/v1/players/me/wallet/verify`,
+    wallet: () => `${API_BASE}/v1/players/me/wallet`,
   },
 
   /** Tournaments */
+  /**
+   * Tournaments — the backend mounts these under its JWT-protected
+   * `/api/v1/tournaments` scope. Only `register` exists server-side today;
+   * list/create follow the same scope (see BE-114).
+   */
   tournaments: {
-    list: () => `${API_BASE}/v1/tournaments`,
-    create: () => `${API_BASE}/v1/tournaments`,
+    list: () => `${API_BASE}/api/v1/tournaments`,
+    create: () => `${API_BASE}/api/v1/tournaments`,
     register: (id: string) =>
-      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
+      `${API_BASE}/api/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Profile & Preferences */

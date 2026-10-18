@@ -100,7 +100,7 @@ function needsRefresh(token: string): boolean {
 }
 
 /**
- * Runs `fn` while holding a cross-tab lock so only one tab" refreshes at a
+ * Runs `fn` while holding a cross-tab lock so only one tab refreshes at a
  * time; tabs that were waiting then adopt the new token from storage.
  */
 async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
@@ -369,7 +369,7 @@ function decodeJWT(token: string) {
     const base64Url = token.split(".")[1];
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = decodeURIComponent(
-      atob(base644)
+      atob(base64)
         .split("")
         .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
         .join("")

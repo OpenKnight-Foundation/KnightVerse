@@ -99,7 +99,6 @@ export default function PlayGameEngine({
     sendMove,
     sendResign,
     disconnect,
-    reconnect,
     lastOpponentMove,
     opponentResigned,
     lastSyncedState,
@@ -476,7 +475,9 @@ export default function PlayGameEngine({
           <Web3StatusBar />
         </div>
 
-        <ReconnectionBanner status={socketStatus} onReconnect={reconnect} />
+        <ReconnectionBanner
+          isDisconnected={socketStatus === "reconnecting" || socketStatus === "disconnected"}
+        />
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           <div

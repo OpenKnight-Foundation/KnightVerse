@@ -60,11 +60,12 @@ export function Header() {
                     </Button>
 
                     {user ? (
-                        <Button variant="ghost" size="icon" aria-label="User profile">
+                        <Button variant="ghost" size="sm" aria-label="User profile">
                             <UserIcon />
+                            <span data-testid="header-username">{user.username}</span>
                         </Button>
                     ) : (
-                        <Button variant="ghost" size="sm" onClick={() => setSignInOpen(true)} aria-label="Sign in">
+                        <Button variant="ghost" size="sm" onClick={() => setSignInOpen(true)} aria-label="Sign in" data-testid="header-sign-in">
                             Sign In
                         </Button>
                     )}

@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-const API_BASE = process.env.PLAYWRIGHT_API_BASE ?? "http://localhost:8000";
 
 const fakeAuthResponse = {
   access_token: "fake-access-token",
@@ -15,7 +14,7 @@ const fakeAuthResponse = {
 
 test.describe("Sign in flow", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route(`${API_BASE}/auth/login`, async (route) => {
+    await page.route("**/auth/login", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -45,7 +44,7 @@ test.describe("Sign in flow", () => {
   });
 
   test("shows an error on invalid credentials", async ({ page }) => {
-    await page.route(`${API_BASE}/auth/login`, async (route) => {
+    await page.route("**/auth/login", async (route) => {
       await route.fulfill({
         status: 401,
         contentType: "application/json",

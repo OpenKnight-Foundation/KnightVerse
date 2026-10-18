@@ -6,7 +6,6 @@ import { test, expect } from "@playwright/test";
  * is self-contained and does not depend on a running server.
  */
 
-const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 
 /** Build a fake JWT whose `exp` is far enough in the future to avoid refresh. */
 function makeJwt(payload: Record<string, unknown>): string {
@@ -20,7 +19,7 @@ function makeJwt(payload: Record<string, unknown>): string {
 test.describe("sign in", () => {
   test.beforeEach(async ({ page }) => {
     // Mock the login endpoint with a successful AuthResponse.
-    await page.route(`${API_BASE}/auth/login`, (route) => {
+    await page.route("**/auth/login", (route) => {
       const accessToken = makeJwt({
         sub: 1,
         username: "tester",
@@ -62,7 +61,7 @@ test.describe("sign in", () => {
   });
 
   test("shows an error when the API rejects the credentials", async ({ page }) => {
-    await page.route(`${API_BASE}/auth/login`, (route) =>
+    await page.route("**/auth/login", (route) =>
       route.fulfill({
         status: 401,
         contentType: "application/json",

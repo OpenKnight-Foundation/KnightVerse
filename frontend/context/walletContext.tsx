@@ -120,7 +120,6 @@
 "use client";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Server, TransactionBuilder, Operation, Asset } from "stellar-sdk";
-import { Transaction } from "stellar-sdk";
 
 import { HORIZON_URL, SOROBAN_RPC, NETWORK_PASSPHRASE } from "@/lib/api";
 
@@ -257,20 +256,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         signedEnvelopeXDR,
         NETWORK_PASSPHRASE,
       );
-      const res = await server.submitTransaction(txObj);
-      return res;
-    } catch (err) {
-      // some horizon clients expect a TransactionEnvelope object; try submitting as-is
-      try {
-        // fallback: try submitting as-is (deprecated)
-        const res = await server.submitTransaction(
-          signedEnvelopeXDR as unknown as Transaction,
-        );
-        return res;
-      } catch (e) {
-        console.error("submitTransaction failed", e);
-        throw e;
-      }
+      return await server.submitTransaction(txObj);
+    } catch (e) {
+      // Report the real failure: submitting the raw XDR string as a fallback
+      // always threw "Cannot read properties of undefined (reading 'type')"
+      // and hid the original error.
+      console.error("submitTransaction failed", e);
+      throw e;
     }
   };
 

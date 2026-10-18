@@ -32,7 +32,9 @@ sea-orm = { version = "1.1.0", features = [
     "sqlx-postgres",
     "runtime-tokio-native-tls",
     "macros",
-    "with-uuid-with-chrono-with-json",
+    "with-uuid",
+    "with-chrono",
+    "with-json",
 ] }
 security = { path = "../security" }
 serde = { version = "1.0", features = ["derive"] }

@@ -37,4 +37,4 @@ members = [
 
 [workspace.dependencies]
 regex = "1.10.2"
-utoipa = "4.2.0"
+utoipa = "5.4.0"

@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -512,7 +513,7 @@ dependencies = [
  "tracing-actix-web",
  "tracing-subscriber",
  "url",
- "utoipa 4.2.3",
+ "utoipa 5.4.0",
  "utoipa-actix-web",
  "utoipa-redoc",
  "utoipa-swagger-ui",
@@ -1053,6 +1054,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -1546,7 +1548,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "utoipa 4.2.3",
+ "utoipa 5.4.0",
  "uuid",
  "validator",
  "validator_types",
@@ -2366,12 +2368,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4461,7 +4457,7 @@ dependencies = [
  "stellar_sdk",
  "thiserror 1.0.69",
  "tokio",
- "utoipa 4.2.3",
+ "utoipa 5.4.0",
  "uuid",
 ]
 
@@ -4672,7 +4668,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -5112,9 +5108,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
- "regex",
  "syn 2.0.117",
- "uuid",
 ]
 
 [[package]]
@@ -5125,7 +5119,9 @@ checksum = "6d79d08d92ab8af4c5e8a6da20c47ae3f61a0f1dabc1997cdf2d082b757ca08b"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
+ "regex",
  "syn 2.0.117",
+ "uuid",
 ]
 
 [[package]]

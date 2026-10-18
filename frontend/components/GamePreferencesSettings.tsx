@@ -7,6 +7,7 @@ import {
   AutoQueenMode,
   LegalMoveDots,
   BoardCoordinates,
+  BoardRenderer,
 } from "@/context/GamePreferencesContext";
 
 interface Option<T extends string> {
@@ -248,6 +249,17 @@ export default function GamePreferencesSettings() {
           { id: "inside", label: "Inside Board", description: "Show coordinates on the squares" },
           { id: "outside", label: "Outside Board", description: "Show coordinates around the board" },
           { id: "hidden", label: "Hidden", description: "Do not show coordinates" },
+        ]}
+      />
+
+      <RadioGroup<BoardRenderer>
+        label="Board Renderer"
+        value={preferences.boardRenderer}
+        onChange={(v) => setPreference("boardRenderer", v)}
+        tooltip="Choose the board rendering style. 3D requires a WebGL-capable browser."
+        options={[
+          { id: "2d", label: "Classic 2D", description: "Fast, accessible board (default)" },
+          { id: "3d", label: "3D Board", description: "WebGL board with materials, falls back to 2D" },
         ]}
       />
 

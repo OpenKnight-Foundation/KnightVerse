@@ -2,21 +2,28 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
-import type { TournamentBracket, BracketFormat } from "@/components/tournament/BracketView";
+import type { TournamentBracket, BracketFormat } from "@/components/tournament/TournamentBracketViewer";
 import { endpoints } from "@/lib/api";
+import { useAuth } from "@/context/authContext";
 
-const BracketView = dynamic(() => import("@/components/tournament/BracketView"), {
-  ssr: false,
-});
+// FE-121 (#1362): TournamentBracketViewer is the canonical bracket — it
+// supports richer navigation, spectating and Swiss standings, so the simpler
+// BracketView was removed.
+const TournamentBracketViewer = dynamic(
+  () => import("@/components/tournament/TournamentBracketViewer"),
+  { ssr: false },
+);
 
 const FORMAT_OPTIONS: { value: BracketFormat; label: string; description: string }[] = [
   { value: "SingleElimination", label: "Single Elimination", description: "One loss and you're out" },
   { value: "DoubleElimination", label: "Double Elimination", description: "Two losses to be eliminated" },
-  { value: "RoundRobin", label: "Round Robin", description: "Everyone plays everyone" },
+  { value: "Swiss", label: "Swiss", description: "Everyone plays a fixed number of rounds" },
 ];
 
 export default function TournamentPage() {
+  const router = useRouter();
   const [brackets, setBrackets] = useState<TournamentBracket[]>([]);
   const [selected, setSelected] = useState<TournamentBracket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,11 +40,27 @@ export default function TournamentPage() {
   const [registeredIds, setRegisteredIds] = useState<Set<string>>(new Set());
   const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
 
+  // The backend tournament scope is JWT-protected (#FE-100).
+  const { accessToken } = useAuth();
+  const authHeaders = React.useMemo<Record<string, string>>(
+    (): Record<string, string> => (accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    [accessToken],
+  );
+
   const fetchBrackets = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(endpoints.tournaments.list(), { credentials: "include" });
+      const res = await fetch(endpoints.tournaments.list(), {
+        headers: authHeaders,
+        credentials: "include",
+      });
+      // No tournaments endpoint yet (or nothing published) is an empty list,
+      // not an error (#FE-100).
+      if (res.status === 404) {
+        setBrackets([]);
+        return;
+      }
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data: TournamentBracket[] = await res.json();
       setBrackets(data);
@@ -50,7 +73,7 @@ export default function TournamentPage() {
     } finally {
       setLoading(false);
     }
-  }, []); // no deps — uses only stable setters and module-level constants
+  }, [authHeaders]);
 
   useEffect(() => {
     void fetchBrackets();
@@ -63,7 +86,7 @@ export default function TournamentPage() {
     try {
       const res = await fetch(endpoints.tournaments.create(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         credentials: "include",
         body: JSON.stringify({ name: name.trim(), format }),
       });
@@ -87,8 +110,12 @@ export default function TournamentPage() {
     try {
       const res = await fetch(endpoints.tournaments.register(tournament.id), {
         method: "POST",
+        headers: authHeaders,
         credentials: "include",
       });
+      if (res.status === 401) {
+        throw new Error("Sign in to register for tournaments.");
+      }
       if (res.status === 409) {
         setRegisteredIds((prev) => new Set(prev).add(tournament.id));
         throw new Error("You are already registered for this tournament.");
@@ -242,7 +269,10 @@ export default function TournamentPage() {
                       </button>
                     </div>
                   )}
-                  <BracketView bracket={selected} />
+                  <TournamentBracketViewer
+                    bracket={selected}
+                    onSpectate={(matchId) => router.push(`/watch?game=${matchId}`)}
+                  />
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-gray-600">

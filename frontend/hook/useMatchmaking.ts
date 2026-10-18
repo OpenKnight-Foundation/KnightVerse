@@ -1,21 +1,38 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ChessVariant } from "@/lib/chessVariants";
 
-import { API_BASE, endpoints } from "@/lib/api";
-
+import { endpoints } from "@/lib/api";
+import { useAuth } from "@/context/authContext";
+import { useAppContext } from "@/context/walletContext";
 
 export type MatchmakingStatus =
   | "idle"
   | "searching"
   | "match_found"
-  | "connected"
   | "error";
 
-interface MatchFoundPayload {
-  gameId: string;
-  color: "white" | "black";
-  opponentId: string;
+/** How often to ask the backend whether our queued request has been paired. */
+export const MATCHMAKING_POLL_INTERVAL_MS = 2000;
+
+/** Rating sent until the backend derives it from the player record (BE-111). */
+const DEFAULT_ELO = 1200;
+
+interface MatchmakingResponse {
+  status: string;
+  match_id: string | null;
+  request_id: string;
+}
+
+interface StatusResponse {
+  status: string;
+  match_id?: string;
+}
+
+interface MatchDetails {
+  id: string;
+  player1: { wallet_address: string };
+  player2: { wallet_address: string };
 }
 
 interface UseMatchmakingReturn {
@@ -28,194 +45,160 @@ interface UseMatchmakingReturn {
     timeControl?: ChessVariant,
   ) => Promise<void>;
   cancelMatchmaking: () => void;
-  sendMove: (from: string, to: string, promotion?: string) => void;
-  lastOpponentMove: { from: string; to: string; promotion?: string } | null;
 }
 
+/**
+ * Joins the backend matchmaking queue for the selected mode and polls
+ * `/v1/matchmaking/status/{request_id}` until the request is paired (#FE-98).
+ *
+ * The player is identified by their linked wallet (#FE-97), falling back to
+ * the connected Freighter address.
+ */
 export function useMatchmaking(): UseMatchmakingReturn {
+  const { user } = useAuth();
+  const { address: connectedAddress } = useAppContext();
+  const walletAddress = user?.wallet_address ?? connectedAddress ?? null;
+
   const [status, setStatus] = useState<MatchmakingStatus>("idle");
   const [gameId, setGameId] = useState<string | null>(null);
-  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(
-    null,
-  );
+  const [playerColor, setPlayerColor] = useState<"white" | "black" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lastOpponentMove, setLastOpponentMove] = useState<{
-    from: string;
-    to: string;
-    promotion?: string;
-  } | null>(null);
 
-  const matchmakingWsRef = useRef<WebSocket | null>(null);
-  const gameWsRef = useRef<WebSocket | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
+  const requestIdRef = useRef<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped on every join/cancel so stale polls from an earlier search stop.
+  const searchRef = useRef(0);
 
-  // Track current status in a ref so WebSocket callbacks always read the latest
-  // value without capturing a stale closure — avoids adding `status` to every
-  // useCallback dependency array (which would cause infinite re-render loops).
-  const statusRef = useRef<MatchmakingStatus>("idle");
-
-  const setStatusSynced = useCallback((next: MatchmakingStatus) => {
-    statusRef.current = next;
-    setStatus(next);
-  }, []);
-
-  const cleanup = useCallback(() => {
-    if (matchmakingWsRef.current) {
-      matchmakingWsRef.current.close();
-      matchmakingWsRef.current = null;
-    }
-    if (gameWsRef.current) {
-      gameWsRef.current.close();
-      gameWsRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
   }, []);
 
-  const openGameSocket = useCallback(
-    (gId: string) => {
-      const ws = new WebSocket(endpoints.games.ws(gId));
-      gameWsRef.current = ws;
+  const fail = useCallback(
+    (message: string) => {
+      stopPolling();
+      requestIdRef.current = null;
+      setError(message);
+      setStatus("error");
+    },
+    [stopPolling],
+  );
 
-      ws.onopen = () => setStatusSynced("connected");
+  const enterMatch = useCallback(
+    async (matchId: string, search: number, myAddress: string) => {
+      let color: "white" | "black" = "white";
+      try {
+        const res = await fetch(endpoints.matchmaking.match(matchId));
+        if (res.ok) {
+          const details: MatchDetails = await res.json();
+          // player1 is the player who was already waiting; they take White.
+          color = details.player1.wallet_address === myAddress ? "white" : "black";
+        }
+      } catch {
+        // Fall through with White; the game server's state is authoritative.
+      }
+      if (searchRef.current !== search) return;
+      stopPolling();
+      requestIdRef.current = null;
+      setGameId(matchId);
+      setPlayerColor(color);
+      setStatus("match_found");
+    },
+    [stopPolling],
+  );
 
-      ws.onmessage = (event) => {
+  const pollStatus = useCallback(
+    (requestId: string, search: number, myAddress: string) => {
+      pollTimerRef.current = setTimeout(async () => {
+        if (searchRef.current !== search) return;
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === "move") {
-            setLastOpponentMove({
-              from: data.from,
-              to: data.to,
-              promotion: data.promotion,
-            });
+          const res = await fetch(endpoints.matchmaking.status(requestId));
+          if (searchRef.current !== search) return;
+          if (res.status === 404) {
+            fail("Matchmaking request expired. Please search again.");
+            return;
+          }
+          if (!res.ok) throw new Error(`Matchmaking status failed: ${res.status}`);
+          const body: StatusResponse = await res.json();
+          if (body.match_id) {
+            await enterMatch(body.match_id, search, myAddress);
+          } else {
+            pollStatus(requestId, search, myAddress);
           }
         } catch {
-          // ignore malformed messages
+          // Transient network error: keep polling rather than dropping the search.
+          if (searchRef.current === search) pollStatus(requestId, search, myAddress);
         }
-      };
-
-      ws.onerror = () => {
-        setError("Game connection error.");
-        setStatusSynced("error");
-      };
-
-      ws.onclose = () => {
-        // Use statusRef to avoid stale closure — reads the value at close time.
-        if (statusRef.current === "connected") setStatusSynced("idle");
-      };
+      }, MATCHMAKING_POLL_INTERVAL_MS);
     },
-    [setStatusSynced],
+    [enterMatch, fail],
   );
 
   const joinMatchmaking = useCallback(
-    async (
-      matchType: "Rated" | "Casual" = "Casual",
-      timeControl: ChessVariant = "standard",
-    ) => {
-      setStatusSynced("searching");
+    async (matchType: "Rated" | "Casual" = "Casual", timeControl: ChessVariant = "standard") => {
+      stopPolling();
+      const search = ++searchRef.current;
       setError(null);
+      setGameId(null);
+      setPlayerColor(null);
+
+      if (!walletAddress) {
+        fail("Connect your wallet to play online.");
+        return;
+      }
+      setStatus("searching");
 
       try {
-        // wallet_address and elo are resolved server-side from the authenticated session.
-        // The server reads the JWT cookie (credentials: "include") to identify the player.
-        const res = await fetch(endpoints.matchmaking.join(), {
+        const url = matchType === "Rated" ? endpoints.matchmaking.joinRated() : endpoints.matchmaking.joinCasual();
+        const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            match_type: matchType,
+            wallet_address: walletAddress,
+            elo: DEFAULT_ELO,
+            invite_address: null,
+            ...(matchType === "Rated" ? { max_elo_diff: null } : {}),
             time_control: timeControl,
           }),
-          credentials: "include",
         });
-
         if (!res.ok) throw new Error(`Matchmaking failed: ${res.status}`);
 
-        const json = await res.json();
-        const sessionId = json.request_id || json.sessionId;
-        sessionIdRef.current = sessionId;
+        const json: MatchmakingResponse = await res.json();
+        if (searchRef.current !== search) return;
+        requestIdRef.current = json.request_id;
 
-        const ws = new WebSocket(
-          endpoints.matchmaking.ws(sessionId),
-        );
-        matchmakingWsRef.current = ws;
-
-        ws.onmessage = (event) => {
-          try {
-            const data: { type: string } & Partial<MatchFoundPayload> =
-              JSON.parse(event.data);
-
-            if (data.type === "match_found" && data.gameId && data.color) {
-              setGameId(data.gameId);
-              setPlayerColor(data.color);
-              setStatusSynced("match_found");
-              ws.close();
-              matchmakingWsRef.current = null;
-              openGameSocket(data.gameId);
-            }
-          } catch {
-            // ignore malformed messages
-          }
-        };
-
-        ws.onerror = () => {
-          setError("Matchmaking connection error.");
-          setStatusSynced("error");
-        };
-
-        ws.onclose = () => {
-          // Use statusRef.current — not the closed-over `status` state variable —
-          // so we always check the actual current status, not a stale snapshot.
-          // FE-13: reset to idle so the UI doesn't hang in "searching" forever.
-          if (statusRef.current === "searching") {
-            setStatusSynced("idle");
-            setError("Matchmaking ended without finding a match.");
-          }
-        };
+        if (json.match_id) {
+          await enterMatch(json.match_id, search, walletAddress);
+        } else {
+          pollStatus(json.request_id, search, walletAddress);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-        setStatusSynced("error");
+        if (searchRef.current === search) fail(err instanceof Error ? err.message : "Unknown error");
       }
     },
-    [openGameSocket, setStatusSynced],
+    [walletAddress, enterMatch, pollStatus, fail, stopPolling],
   );
 
   const cancelMatchmaking = useCallback(() => {
-    cleanup();
-    if (sessionIdRef.current) {
+    searchRef.current++;
+    stopPolling();
+    if (requestIdRef.current) {
       fetch(endpoints.matchmaking.cancel(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_id: sessionIdRef.current }),
-        credentials: "include",
+        body: JSON.stringify({ request_id: requestIdRef.current }),
       }).catch(() => {});
-      sessionIdRef.current = null;
+      requestIdRef.current = null;
     }
-    setStatusSynced("idle");
+    setStatus("idle");
     setGameId(null);
     setPlayerColor(null);
     setError(null);
-  }, [cleanup, setStatusSynced]);
+  }, [stopPolling]);
 
-  const sendMove = useCallback(
-    (from: string, to: string, promotion = "q") => {
-      if (gameWsRef.current?.readyState === WebSocket.OPEN && gameId) {
-        gameWsRef.current.send(
-          JSON.stringify({ type: "move", gameId, from, to, promotion }),
-        );
-      }
-    },
-    [gameId],
-  );
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
-  // Cleanup on unmount
-  useEffect(() => () => cleanup(), [cleanup]);
-
-  return {
-    status,
-    gameId,
-    playerColor,
-    error,
-    joinMatchmaking,
-    cancelMatchmaking,
-    sendMove,
-    lastOpponentMove,
-  };
+  return { status, gameId, playerColor, error, joinMatchmaking, cancelMatchmaking };
 }

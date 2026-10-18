@@ -7,6 +7,8 @@ interface AuthUser {
   user_id: number;
   username: string;
   email?: string;
+  /** Stellar account linked to this account via the wallet-link flow (#FE-97). */
+  wallet_address?: string | null;
 }
 
 interface AuthResponse {
@@ -17,6 +19,7 @@ interface AuthResponse {
   refresh_token_expires_in: number;
   user_id: number;
   username: string;
+  wallet_address?: string | null;
 }
 
 interface SessionInfo {
@@ -40,6 +43,8 @@ interface AuthContextType {
   getSessions: () => Promise<SessionInfo[]>;
   revokeSession: (sessionId: string) => Promise<void>;
   revokeAllSessions: () => Promise<void>;
+  /** Records the wallet the backend just linked (or unlinked) for this account. */
+  setLinkedWallet: (walletAddress: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -95,7 +100,7 @@ function needsRefresh(token: string): boolean {
 }
 
 /**
- * Runs `fn` while holding a cross-tab lock so only one tab refreshes at a
+ * Runs `fn` while holding a cross-tab lock so only one tab" refreshes at a
  * time; tabs that were waiting then adopt the new token from storage.
  */
 async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
@@ -215,12 +220,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.message || "Login failed");
     }
 
     const data: AuthResponse = await response.json();
-    const sessionUser = { user_id: data.user_id, username: data.username };
+    const sessionUser = {
+      user_id: data.user_id,
+      username: data.username,
+      wallet_address: data.wallet_address ?? null,
+    };
     persistSession(data.access_token, sessionUser);
     applySession({ token: data.access_token, user: sessionUser });
 
@@ -238,12 +247,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.message || "Registration failed");
     }
 
     const data: AuthResponse = await response.json();
-    const sessionUser = { user_id: data.user_id, username: data.username };
+    const sessionUser = {
+      user_id: data.user_id,
+      username: data.username,
+      wallet_address: data.wallet_address ?? null,
+    };
     persistSession(data.access_token, sessionUser);
     applySession({ token: data.access_token, user: sessionUser });
 
@@ -265,6 +278,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearSession();
     }
   }, [clearSession]);
+
+  const setLinkedWallet = useCallback(
+    (walletAddress: string | null) => {
+      const stored = readStoredSession();
+      if (!stored) return;
+      const next = { ...stored, user: { ...stored.user, wallet_address: walletAddress } };
+      persistSession(next.token, next.user);
+      applySession(next);
+    },
+    [applySession],
+  );
 
   const getSessions = useCallback(async (): Promise<SessionInfo[]> => {
     const response = await fetch(endpoints.auth.sessions(), {
@@ -323,6 +347,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         getSessions,
         revokeSession,
         revokeAllSessions,
+        setLinkedWallet,
       }}
     >
       {children}
@@ -344,7 +369,7 @@ function decodeJWT(token: string) {
     const base64Url = token.split(".")[1];
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = decodeURIComponent(
-      atob(base64)
+      atob(base644)
         .split("")
         .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
         .join("")

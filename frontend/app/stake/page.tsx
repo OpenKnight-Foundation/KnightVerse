@@ -3,6 +3,7 @@
 import { useState } from "react";
 import StakingDepositModal from "@/components/StakingDepositModal";
 import { useAppContext } from "@/context/walletContext";
+import { useWalletLink } from "@/hook/useWalletLink";
 import { NETWORK_PASSPHRASE } from "@/lib/api";
 import type { StellarNetwork, SupportedToken } from "@/services/stellarMarketService";
 
@@ -11,11 +12,14 @@ const network: StellarNetwork = NETWORK_PASSPHRASE.startsWith("Public Global") ?
 
 export default function StakePage() {
   const { address, connectWallet, sendXLM } = useAppContext();
+  const { linkedWallet, isMismatched } = useWalletLink();
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
   const handleConfirm = async ({ token, total }: { token: SupportedToken; amount: number; total: number }) => {
     if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
+    // Stakes must come from the wallet linked to the account (#FE-97).
+    if (isMismatched) throw new Error(`Switch Freighter to your linked wallet (${linkedWallet}) to stake.`);
     if (token !== "XLM") throw new Error(`${token} staking is not supported yet.`);
     const result = await sendXLM(STAKING_ESCROW_ADDRESS, total.toFixed(7));
     setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${result?.hash ? ` (tx ${result.hash})` : ""}`);
@@ -28,6 +32,13 @@ export default function StakePage() {
           Staked Match
         </h1>
         <p className="text-gray-400 text-sm mt-1 mb-8">Deposit a stake to play a rated match for XLM.</p>
+
+        {isMismatched && (
+          <div role="alert" className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
+            Your connected wallet isn&apos;t the one linked to your account ({linkedWallet}). Switch Freighter
+            to the linked wallet before staking.
+          </div>
+        )}
 
         {confirmation && (
           <div role="status" className="mb-6 p-4 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-sm">

@@ -91,6 +91,7 @@ pub async fn register(
         refresh_token_expires_in: 604800,
         user_id: 1,
         username: payload.username.clone(),
+        wallet_address: None,
     })
 }
 
@@ -187,6 +188,7 @@ pub async fn login(
         refresh_token_expires_in: (refresh_ttl * 86400) as usize,
         user_id,
         username,
+        wallet_address: player.wallet_address.clone(),
     });
 
     let cookie = Cookie::build("refresh_token", refresh_token)

@@ -76,7 +76,6 @@ export default function Home() {
     error: matchmakingError,
     joinMatchmaking,
     cancelMatchmaking,
-    sendMove: matchmakingSendMove,
     gameId,
   } = useMatchmaking();
 
@@ -115,16 +114,14 @@ export default function Home() {
     [game],
   );
 
-  // Choose which sendMove to use based on game state
   const sendMove = useCallback(
     (from: string, to: string, promotion?: string) => {
+      // Moves only go out once matchmaking has produced a game to play.
       if (gameId) {
         socketSendMove({ from, to, promotion: promotion || "q" });
-      } else {
-        matchmakingSendMove(from, to, promotion);
       }
     },
-    [gameId, socketSendMove, matchmakingSendMove],
+    [gameId, socketSendMove],
   );
 
   // Kick off matchmaking → route to game

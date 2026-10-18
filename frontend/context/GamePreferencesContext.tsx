@@ -7,6 +7,7 @@ export type AutoQueenMode = "always" | "prompt" | "premoves";
 export type LegalMoveDots = "enabled" | "disabled";
 export type BoardCoordinates = "inside" | "outside" | "hidden";
 export type PieceSet = "neo" | "staunton" | "alpha" | "medieval" | "cyberpunk";
+export type BoardRenderer = "2d" | "3d";
 
 export interface GamePreferences {
   pieceInputMethod: PieceInputMethod;
@@ -20,6 +21,12 @@ export interface GamePreferences {
   ttsOpponentMoves: boolean;
   ttsVolume: number;
   ttsRate: number;
+  /**
+   * Which chessboard renderer to use (FE-123 / #1364). The canonical board is
+   * the 2D `ChessboardComponent`; the WebGL 3D board is opt-in behind this
+   * explicit appearance setting so only one implementation is live by default.
+   */
+  boardRenderer: BoardRenderer;
 }
 
 export const DEFAULT_PREFERENCES: GamePreferences = {
@@ -34,6 +41,7 @@ export const DEFAULT_PREFERENCES: GamePreferences = {
   ttsOpponentMoves: true,
   ttsVolume: 80,
   ttsRate: 1,
+  boardRenderer: "2d",
 };
 
 const STORAGE_KEY = "knightverse_game_preferences";

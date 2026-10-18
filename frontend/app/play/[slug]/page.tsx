@@ -57,6 +57,9 @@ const PlayGameEngine = dynamic(
 );
 
 export default function PlayOnlinePage() {
-  const fen = useSearchParams().get("fen") ?? undefined;
-  return <PlayGameEngine fen={fen} />;
+  const searchParams = useSearchParams();
+  const fen = searchParams.get("fen") ?? undefined;
+  // FE-115: matchmaking passes the assigned colour (e.g. ?color=black).
+  const playerColor = searchParams.get("color") === "black" ? "black" : "white";
+  return <PlayGameEngine fen={fen} playerColor={playerColor} />;
 }

@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -1053,6 +1054,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -2039,6 +2041,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
 name = "hashlink"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2243,13 +2251,14 @@ checksum = "e8a5a9a0ff0086c7a148acb942baaabeadf9504d10400b5a05645853729b9cd2"
 
 [[package]]
 name = "indexmap"
-version = "2.2.6"
+version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.5",
+ "hashbrown 0.17.1",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2366,12 +2375,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]

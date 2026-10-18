@@ -200,7 +200,7 @@ jobs:
           echo "Branch: ${{ github.ref_name }}" >> deployment-artifacts/deployment-log.txt
 
       - name: Upload deployment artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: soroban-deployment-artifacts
           path: deployment-artifacts/

@@ -175,7 +175,7 @@ jobs:
           PYTHONPATH: .
 
       - name: Upload stress test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stress-test-results
           path: |

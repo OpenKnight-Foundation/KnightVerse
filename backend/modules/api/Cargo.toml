@@ -33,7 +33,7 @@ chess = { path = "../chess" }
 engine = { path = "../engine" }
 challenge = { path = "../challenge" }
 actix-cors = "0.7.0"
-utoipa-redoc = { version = "3", features = ["actix-web"] }
+utoipa-redoc = { version = "7", features = ["actix-web"] }
 url = "=2.5.0"
 indexmap = "=2.2.6"
 db_entity = { path = "../db/entity" }

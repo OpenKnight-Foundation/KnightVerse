@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -536,7 +537,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -1045,7 +1046,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shakmaty 0.23.1",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
@@ -1053,6 +1054,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -1061,7 +1063,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "shakmaty 0.27.3",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
@@ -1603,7 +1605,7 @@ dependencies = [
  "dto",
  "log",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -2366,12 +2368,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4459,7 +4455,7 @@ dependencies = [
  "serde_json",
  "stellar-base 0.7.0",
  "stellar_sdk",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "utoipa 4.2.3",
  "uuid",

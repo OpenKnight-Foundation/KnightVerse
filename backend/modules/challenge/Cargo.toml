@@ -9,7 +9,7 @@ serde_json = "1"
 shakmaty = "0.23.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-thiserror = "1.0"
+thiserror = "2.0"
 jsonwebtoken = "9.3.1"
 security = { path = "../security" }
 actix-web = "4"

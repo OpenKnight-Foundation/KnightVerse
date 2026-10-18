@@ -1,4 +1,4 @@
-use crate::{ai, auth, games, players};
+use crate::{ai, auth, chess960, games, lc0, players};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
 use utoipa::OpenApi;
@@ -47,6 +47,17 @@ impl Modify for SecurityAddon {
         // AI suggestion endpoints
         ai::get_ai_suggestion,
         ai::analyze_position,
+
+        // Lc0 endpoints (BE-132)
+        lc0::lc0_analyze,
+        lc0::lc0_health,
+
+        // Chess960 endpoints (BE-132)
+        chess960::get_position,
+        chess960::get_fen,
+        chess960::verify_fen,
+        chess960::get_stats,
+        chess960::export_json,
 
         // NFT endpoints
         st_core::endpoint::mint_nft,
@@ -101,6 +112,7 @@ impl Modify for SecurityAddon {
         (name = "Games", description = "Game management operations"),
         (name = "Authentication", description = "Authentication operations"),
         (name = "AI", description = "AI suggestion operations"),
+        (name = "Chess960", description = "Chess960 starting-position library"),
         (name = "NFT", description = "NFT minting and metadata operations"),
         (name = "WebSocket", description = "WebSocket communication protocol")
     ),

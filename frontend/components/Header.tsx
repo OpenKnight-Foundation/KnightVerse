@@ -60,9 +60,11 @@ export function Header() {
                     </Button>
 
                     {user ? (
-                        <Button variant="ghost" size="icon" aria-label="User profile">
-                            <UserIcon />
-                        </Button>
+                        <Link href="/profile" aria-label="User profile">
+                            <Button variant="ghost" size="icon">
+                                <UserIcon />
+                            </Button>
+                        </Link>
                     ) : (
                         <Button variant="ghost" size="sm" onClick={() => setSignInOpen(true)} aria-label="Sign in">
                             Sign In

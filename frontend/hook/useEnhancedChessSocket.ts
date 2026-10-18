@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { WS_BASE, endpoints } from "@/lib/api";
+import { debugLog } from "@/lib/debugLogger";
 
 export type EnhancedSocketStatus =
   | "idle"
@@ -126,21 +127,21 @@ export function useEnhancedChessSocket(
 
       if (attemptReconnect) {
         setStatus("reconnecting");
-        console.log(`[EnhancedWebSocket] Reconnecting to game ${gameId} (attempt ${reconnectAttemptsRef.current + 1})`);
+        debugLog(`[EnhancedWebSocket] Reconnecting to game ${gameId} (attempt ${reconnectAttemptsRef.current + 1})`);
       } else {
         setStatus("connecting");
-        console.log(`[EnhancedWebSocket] Connecting to game ${gameId}`);
+        debugLog(`[EnhancedWebSocket] Connecting to game ${gameId}`);
       }
 
       ws.onopen = () => {
-        console.log(`[EnhancedWebSocket] ${attemptReconnect ? 'Reconnected' : 'Connected'} to game ${gameId}`);
+        debugLog(`[EnhancedWebSocket] ${attemptReconnect ? 'Reconnected' : 'Connected'} to game ${gameId}`);
         setStatus("connected");
         reconnectAttemptsRef.current = 0;
         setConnectionInfo(prev => ({ ...prev, reconnectAttempts: 0 }));
 
         // Send queued moves immediately upon reconnection
         if (moveQueueRef.current.length > 0) {
-          console.log(`[EnhancedWebSocket] Dispatching ${moveQueueRef.current.length} queued moves`);
+          debugLog(`[EnhancedWebSocket] Dispatching ${moveQueueRef.current.length} queued moves`);
           moveQueueRef.current.forEach(move => {
             ws.send(JSON.stringify({
               type: "move",
@@ -179,7 +180,7 @@ export function useEnhancedChessSocket(
                 console.warn("[EnhancedWebSocket] Received move message with missing `to` field:", data);
                 break;
               }
-              console.log(`[EnhancedWebSocket] Received opponent move:`, data);
+              debugLog(`[EnhancedWebSocket] Received opponent move:`, data);
               setLastOpponentMove({
                 from: data.from,
                 to: data.to,
@@ -189,12 +190,12 @@ export function useEnhancedChessSocket(
             }
 
             case "clock":
-              console.log(`[EnhancedWebSocket] Clock update:`, data);
+              debugLog(`[EnhancedWebSocket] Clock update:`, data);
               // Handle clock updates
               break;
 
             case "end":
-              console.log(`[EnhancedWebSocket] Game ended:`, data);
+              debugLog(`[EnhancedWebSocket] Game ended:`, data);
               // Handle game end
               break;
 
@@ -202,7 +203,7 @@ export function useEnhancedChessSocket(
               // Validate token is a non-empty string before storing it
               if (typeof data.token === "string" && data.token.trim() !== "") {
                 reconnectTokenRef.current = data.token;
-                console.log(`[EnhancedWebSocket] Received reconnection token (expires in ${data.expires_in}s)`);
+                debugLog(`[EnhancedWebSocket] Received reconnection token (expires in ${data.expires_in}s)`);
               } else {
                 console.warn("[EnhancedWebSocket] Received reconnect_token message with invalid token:", data);
               }
@@ -221,7 +222,7 @@ export function useEnhancedChessSocket(
               break;
 
             default:
-              console.log(`[EnhancedWebSocket] Unknown message type:`, data);
+              debugLog(`[EnhancedWebSocket] Unknown message type:`, data);
           }
         } catch (error) {
           console.error("[EnhancedWebSocket] Failed to parse message:", error);
@@ -234,7 +235,7 @@ export function useEnhancedChessSocket(
       };
 
       ws.onclose = (event) => {
-        console.log(`[EnhancedWebSocket] Closed for game ${gameId}. Code: ${event.code}, Reason: ${event.reason}`);
+        debugLog(`[EnhancedWebSocket] Closed for game ${gameId}. Code: ${event.code}, Reason: ${event.reason}`);
 
         if (!isManualDisconnectRef.current) {
           setStatus("disconnected");
@@ -242,7 +243,7 @@ export function useEnhancedChessSocket(
           // Attempt reconnection with exponential backoff
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             const delay = calculateReconnectDelay(reconnectAttemptsRef.current);
-            console.log(`[EnhancedWebSocket] Reconnecting in ${Math.round(delay)}ms`);
+            debugLog(`[EnhancedWebSocket] Reconnecting in ${Math.round(delay)}ms`);
 
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectAttemptsRef.current++;
@@ -253,7 +254,7 @@ export function useEnhancedChessSocket(
               createWebSocket(true);
             }, delay);
           } else {
-            console.log("[EnhancedWebSocket] Max reconnection attempts reached");
+            debugLog("[EnhancedWebSocket] Max reconnection attempts reached");
             setStatus("error");
           }
         } else {
@@ -293,10 +294,10 @@ export function useEnhancedChessSocket(
         to: move.to,
         promotion: move.promotion,
       }));
-      console.log("[EnhancedWebSocket] Move sent:", move);
+      debugLog("[EnhancedWebSocket] Move sent:", move);
     } else {
       moveQueueRef.current.push(move);
-      console.log("[EnhancedWebSocket] Move queued:", move);
+      debugLog("[EnhancedWebSocket] Move queued:", move);
 
       if (status === "disconnected" || status === "idle") {
         reconnectAttemptsRef.current = 0;
@@ -316,7 +317,7 @@ export function useEnhancedChessSocket(
 
     moveQueueRef.current = [];
     reconnectAttemptsRef.current = 0;
-    console.log("[EnhancedWebSocket] Manually disconnected");
+    debugLog("[EnhancedWebSocket] Manually disconnected");
   }, [clearReconnectTimeout]);
 
   const reconnect = useCallback(() => {
@@ -329,7 +330,7 @@ export function useEnhancedChessSocket(
     }
 
     reconnectAttemptsRef.current = 0;
-    console.log("[EnhancedWebSocket] Manual reconnection initiated");
+    debugLog("[EnhancedWebSocket] Manual reconnection initiated");
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket]);
 

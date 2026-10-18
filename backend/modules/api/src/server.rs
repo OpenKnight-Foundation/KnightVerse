@@ -8,7 +8,9 @@ use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,
 };
+use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
+use crate::lc0::{lc0_analyze, lc0_health};
 use crate::players::{add_player, delete_player, export_player_data, find_player_by_id, update_player};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
@@ -20,6 +22,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use challenge::api::configure_puzzle_routes;
 use challenge::puzzle_validation::PuzzleValidationService;
 use db::DbPool;
+use engine::Lc0Orchestrator;
 use dotenv::dotenv;
 use matchmaking::redis::{create_redis_pool, test_redis_connection};
 use matchmaking::MatchmakingService;
@@ -258,6 +261,8 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(redis_broadcaster.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            // Lc0 orchestrator is process-wide and internally bounded (BE-132).
+            .app_data(web::Data::new(Arc::new(Lc0Orchestrator::from_env())))
             // Register your routes
             .route("/health", web::get().to(health))
             .route("/health/redis", web::get().to(health_redis))
@@ -265,6 +270,9 @@ pub async fn main() -> std::io::Result<()> {
             .route("/metrics", web::get().to(metrics_endpoint))
             // Puzzle routes
             .configure(configure_puzzle_routes)
+            // Chess960 position library (BE-132) — previously unreachable
+            // because it lived in the `knightverse-core` shell crate.
+            .configure(configure_chess960_routes)
             // Player routes
             .service(
                 web::scope("/v1/players")
@@ -403,7 +411,9 @@ pub async fn main() -> std::io::Result<()> {
                         Some(redis_pool.clone()),
                     ))
                     .service(get_ai_suggestion)
-                    .service(analyze_position),
+                    .service(analyze_position)
+                    .service(lc0_analyze)
+                    .service(lc0_health),
             )
             // NFT routes (placeholder — not yet implemented)
             // .service(web::scope("/api/v1").configure(configure_nft_routes))

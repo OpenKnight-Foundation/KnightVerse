@@ -3,23 +3,16 @@ name = "knightverse-core"
 version = "0.1.0"
 edition = "2021"
 
+# This crate is now only the `knightverse-server` entry point: it boots
+# `api::server::main` and nothing else. The library target was removed in
+# BE-132 once `chess960` and the Lc0 orchestrator moved into `modules/chess`
+# and `modules/engine` (where `api::server` can actually reach them).
 [dependencies]
+# `#[actix_web::main]` in main.rs.
 actix-web = "4"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-rand = "0.8"
-lazy_static = "1.4"
 api = { path = "../modules/api" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-
-[dev-dependencies]
-tokio = { version = "1", features = ["full"] }
-
-[lib]
-name = "knightverse_core"
-path = "lib.rs"
 
 [[bin]]
 name = "knightverse-server"

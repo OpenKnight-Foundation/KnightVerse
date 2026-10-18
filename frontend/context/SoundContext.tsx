@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
+import { debugLog } from '@/lib/debugLogger';
+
 type SoundPack = 'standard' | 'arcade' | 'minimalist';
 
 interface SoundContextType {
@@ -23,12 +25,12 @@ export function SoundProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Mock pre-loading audio assets
-    console.log(`Pre-loading audio assets for sound pack: ${soundPack}`);
+    debugLog(`Pre-loading audio assets for sound pack: ${soundPack}`);
   }, [soundPack]);
 
   const playSound = (event: 'move' | 'capture' | 'check') => {
     if (isMuted) return;
-    console.log(`Playing ${event} sound from ${soundPack} pack at volume ${volume}`);
+    debugLog(`Playing ${event} sound from ${soundPack} pack at volume ${volume}`);
     // In a real implementation, we would play the actual audio file here
   };
 

@@ -23,6 +23,7 @@ import {
   StakeIcon,
   GuildIcon,
   CompanionsIcon,
+  UserIcon,
 } from "@/components/icons"
 
 interface SidebarProps {
@@ -169,6 +170,13 @@ export function GameSidebar({
             href="/openings"
             collapsed={collapsed && !isHovered}
             active={pathname === "/openings"}
+          />
+          <SidebarItem
+            icon={<UserIcon />}
+            label="Profile"
+            href="/profile"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/profile")}
           />
           <SidebarItem
             icon={<SettingsIcon />}
@@ -324,6 +332,7 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
         <MobileSidebarItem icon={<GuildIcon />} label="Guilds" href="/guilds" active={pathname.startsWith("/guilds")} />
         <MobileSidebarItem icon={<StakeIcon />} label="Stake" href="/stake" active={pathname.startsWith("/stake")} />
         <MobileSidebarItem icon={<LearnIcon />} label="Openings" href="/openings" active={pathname === "/openings"} />
+        <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname.startsWith("/profile")} />
         <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" active={pathname === "/settings"} />
       </nav>
       <div className="p-4 space-y-2">

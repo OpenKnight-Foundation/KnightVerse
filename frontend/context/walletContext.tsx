@@ -129,6 +129,16 @@ type AppContextType = {
   balance?: string | React.ReactNode;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
+  /**
+   * Send a classic payment. Omit `asset` for native XLM; pass `{ code, issuer }`
+   * for an issued asset such as Circle's USDC/EURC (FE-133).
+   */
+  sendPayment: (
+    destination: string,
+    amount: string | number,
+    asset?: { code: string; issuer: string },
+  ) => Promise<any>;
+  /** Convenience wrapper over {@link sendPayment} for native XLM. */
   sendXLM: (destination: string, amount: string | number) => Promise<any>;
   invokeSorobanContract: (
     contractId: string,
@@ -229,8 +239,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const sendXLM = async (destination: string, amount: string | number) => {
+  const sendPayment = async (
+    destination: string,
+    amount: string | number,
+    asset?: { code: string; issuer: string },
+  ) => {
     if (!address) throw new Error("No wallet connected");
+    // Issued assets must be addressed by code *and* issuer — the code alone is
+    // not unique on Stellar (FE-133).
+    const paymentAsset = asset
+      ? new Asset(asset.code, asset.issuer)
+      : Asset.native();
     const acct = await server.loadAccount(address);
     const fee = await server.fetchBaseFee();
     const tx = new TransactionBuilder(acct, {
@@ -240,7 +259,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .addOperation(
         Operation.payment({
           destination,
-          asset: Asset.native(),
+          asset: paymentAsset,
           amount: String(amount),
         }),
       )
@@ -265,6 +284,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw e;
     }
   };
+
+  const sendXLM = (destination: string, amount: string | number) =>
+    sendPayment(destination, amount);
 
   const invokeSorobanContract = async (
     contractId: string,
@@ -298,6 +320,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         balance: undefined,
         connectWallet,
         disconnectWallet,
+        sendPayment,
         sendXLM,
         invokeSorobanContract,
       }}

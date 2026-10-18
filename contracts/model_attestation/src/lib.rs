@@ -6,8 +6,7 @@
 //! throughout a tournament.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, panic_with_error,
-    Address, Bytes, Env, String,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
 };
 
 #[contracttype]
@@ -91,7 +90,11 @@ impl ModelAttestation {
 
     /// Verify a hash matches the stored attestation. Returns true if it matches.
     pub fn verify(env: Env, model_id: String, hash: String) -> bool {
-        match env.storage().persistent().get::<_, ModelRecord>(&DataKey::Model(model_id)) {
+        match env
+            .storage()
+            .persistent()
+            .get::<_, ModelRecord>(&DataKey::Model(model_id))
+        {
             Some(record) => record.hash == hash,
             None => false,
         }

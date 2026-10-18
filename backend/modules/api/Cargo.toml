@@ -34,6 +34,7 @@ chess = { path = "../chess" }
 archiving = { path = "../archiving" }
 pairing = { path = "../pairing" }
 move_protocol = { path = "../move_protocol" }
+engine = { path = "../engine" }
 challenge = { path = "../challenge" }
 actix-cors = "0.7.0"
 utoipa-redoc = { version = "3", features = ["actix-web"] }

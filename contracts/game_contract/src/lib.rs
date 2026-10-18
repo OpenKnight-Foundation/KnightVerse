@@ -402,10 +402,10 @@ impl GameContract {
     /// before that.
     pub fn add_whitelisted_token(env: Env, admin: Address, token: Address) {
         admin.require_auth();
-        if let Some(stored_admin) = env.storage().instance().get::<_, Address>(&CONTRACT_ADMIN) {
-            if admin != stored_admin {
-                panic!("Not admin");
-            }
+        if let Some(stored_admin) = env.storage().instance().get::<_, Address>(&CONTRACT_ADMIN)
+            && admin != stored_admin
+        {
+            panic!("Not admin");
         }
         let mut tokens: Vec<Address> = env
             .storage()
@@ -627,9 +627,7 @@ impl GameContract {
             // invariant silently. A typed error is safer than a panic (and
             // than depending on the check above never being separated from
             // this loop by a future refactor).
-            let pct = percentages
-                .get(i)
-                .ok_or(ContractError::MismatchedLengths)?;
+            let pct = percentages.get(i).ok_or(ContractError::MismatchedLengths)?;
             total_pct = total_pct
                 .checked_add(pct)
                 .ok_or(ContractError::InvalidPercentage)?;
@@ -1499,9 +1497,7 @@ impl GameContract {
             // the length check above makes this unreachable today, but a
             // typed error is safer than a panic in a payout loop.
             let winner = winners.get(i).ok_or(ContractError::MismatchedLengths)?;
-            let percentage = percentages
-                .get(i)
-                .ok_or(ContractError::MismatchedLengths)?;
+            let percentage = percentages.get(i).ok_or(ContractError::MismatchedLengths)?;
             total_percentage = total_percentage
                 .checked_add(percentage)
                 .ok_or(ContractError::InvalidPercentage)?;
@@ -1533,7 +1529,7 @@ impl GameContract {
         // Emit tournament payout event
         env.events().publish(
             (symbol_short!("game"), symbol_short!("payout_t")),
-            (game_id, winners.len() as u32),
+            (game_id, winners.len()),
         );
 
         Self::non_reentrant_exit(&env);
@@ -3831,18 +3827,8 @@ impl GameContract {
             .unwrap_or(Map::new(&env));
 
         let mut result: Vec<PlayerRating> = Vec::new(&env);
-        let mut count = 0;
-        let mut current = 0;
-
-        for (_, profile) in profiles.iter() {
-            if current >= offset && count < limit {
-                result.push_back(profile);
-                count += 1;
-            }
-            current += 1;
-            if count >= limit {
-                break;
-            }
+        for (_, profile) in profiles.iter().skip(offset as usize).take(limit as usize) {
+            result.push_back(profile);
         }
 
         result
@@ -3887,10 +3873,10 @@ impl GameContract {
         }
 
         // Prevent a player from creating a tournament escrow against themselves (#933)
-        if let Some(ref player2) = game.player2 {
-            if game.player1 == *player2 {
-                return Err(ContractError::AlreadyJoined);
-            }
+        if let Some(ref player2) = game.player2
+            && game.player1 == *player2
+        {
+            return Err(ContractError::AlreadyJoined);
         }
 
         game.player1.require_auth();
@@ -4021,9 +4007,7 @@ impl GameContract {
 
         let mut total_pct: u32 = 0;
         for i in 0..percentages.len() {
-            let pct = percentages
-                .get(i)
-                .ok_or(ContractError::MismatchedLengths)?;
+            let pct = percentages.get(i).ok_or(ContractError::MismatchedLengths)?;
             total_pct = total_pct
                 .checked_add(pct)
                 .ok_or(ContractError::InvalidPercentage)?;
@@ -4047,9 +4031,7 @@ impl GameContract {
             // above; a typed error here is defense-in-depth, not a
             // currently-reachable path.
             let winner = winners.get(i).ok_or(ContractError::MismatchedLengths)?;
-            let pct = percentages
-                .get(i)
-                .ok_or(ContractError::MismatchedLengths)?;
+            let pct = percentages.get(i).ok_or(ContractError::MismatchedLengths)?;
             let amount = (total * pct as i128) / 100;
             distributed += amount;
             token_client.transfer(&contract_address, &winner, &amount);

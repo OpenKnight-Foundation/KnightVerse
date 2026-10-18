@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
 import type { TournamentBracket, BracketFormat } from "@/components/tournament/TournamentBracketViewer";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { endpoints } from "@/lib/api";
 import { useAuth } from "@/context/authContext";
 
@@ -204,9 +205,9 @@ export default function TournamentPage() {
 
         {/* Error */}
         {error && (
-          <div role="alert" className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
-            {error}
-          </div>
+          <Alert variant="destructive" className="mb-6 text-sm text-red-300">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {/* Loading */}

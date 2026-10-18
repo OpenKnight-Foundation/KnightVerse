@@ -6,6 +6,11 @@ KnightVerse.ai — The free, decentralized chess platform for intelligent agents
 
 Target audience: Chess enthusiasts, AI researchers, competitive gamers, and developers interested in AI-human collaboration, decentralized gaming, and blockchain rewards.
 
+## Documentation
+
+- **[docs/](./docs/)** — quick reference and archived implementation notes
+- Package READMEs: [backend](./backend/README.md), [frontend](./frontend/README.md), [contracts](./contracts/README.md)
+
 ## Features
 - Real-time multiplayer chess with AI co-pilots
 - Customizable AI agents for suggestions and analysis
@@ -30,6 +35,7 @@ KnightVerse/
 ├── frontend/           # Next.js web app (the live frontend)
 ├── agent-engines/      # Python engine workers & AI agents
 ├── docker-compose.yml  # Local services
+├── docs/               # Guides + archived status notes (see docs/README.md)
 │
 │   # Not built, imported, or deployed (see each folder's README):
 ├── apps/web/           # Unused: earlier sound/analysis/offline components
@@ -50,7 +56,13 @@ folders, port it into the live app.
 - Node.js (v18+): https://nodejs.org/
 - npm / yarn
 - Docker & Docker Compose
-- Soroban CLI: Install via `cargo install_soroban` (see https://soroban.stellar.org/docs/getting-started/setup)
+- Stellar CLI (`stellar-cli` **21.x**, matches the version table below): install with
+  ```bash
+  cargo install --locked stellar-cli --features opt
+  # or: brew install stellar-cli
+  stellar --version
+  ```
+  Docs: https://developers.stellar.org/docs/tools/cli/install-cli
 - Stellar account (Freighter wallet recommended): https://freighter.app/
 - PostgreSQL (local or Docker)
 
@@ -98,7 +110,7 @@ stellar contract deploy \
   --source your-account-alias \
   --network testnet
 ```
-See full Soroban docs: https://soroban.stellar.org/docs
+See Stellar/Soroban docs: https://developers.stellar.org/docs
 
 ### 4. Backend Setup
 ```bash
@@ -161,8 +173,8 @@ Please review our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
 
 ## Helpful Links
 - Stellar Developer Docs: https://developers.stellar.org/
-- Soroban Docs & Tutorials: https://soroban.stellar.org/docs
-- Soroban Examples: https://github.com/stellar/soroban-examples
+- Stellar docs: https://developers.stellar.org/docs
+- Soroban examples: https://github.com/stellar/soroban-examples
 - Freighter Wallet: https://freighter.app/
 - Stellar Laboratory (tx builder, faucet): https://laboratory.stellar.org/
 

@@ -98,7 +98,7 @@ fn test_payout_tournament() {
 
         // Calculate total sum of payouts
         let total_distributed = w1_escrow + w2_escrow + w3_escrow;
-        assert_eq!(total_distributed, (wager * 2) as i128);
+        assert_eq!(total_distributed, wager * 2);
 
         // Player1 and Player2 escrows should be subtracted by wager amount
         let p1_escrow = escrow.get(player1.clone()).unwrap_or(0);
@@ -155,7 +155,7 @@ fn test_payout_tournament_dust() {
         assert_eq!(w3_escrow, 133);
 
         let total_distributed = w1_escrow + w2_escrow + w3_escrow;
-        assert_eq!(total_distributed, (wager * 2) as i128); // 666
+        assert_eq!(total_distributed, wager * 2); // 666
     });
 }
 
@@ -911,7 +911,7 @@ fn to_soroban(env: &Env, pcts: &[u32]) -> Vec<u32> {
 fn dust(total_pool: i128, pcts: &Vec<u32>) -> i128 {
     let mut d: i128 = 0;
     for i in 0..pcts.len() {
-        d += (total_pool * pcts.get(i as u32).unwrap() as i128) / 100;
+        d += (total_pool * pcts.get(i).unwrap() as i128) / 100;
     }
     total_pool - d
 }
@@ -941,9 +941,8 @@ fn fuzz_payout_total_invariant() {
             .payout_tournament(&gid, &winners, &spcts);
         env.as_contract(&cid, || {
             let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
-            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
-                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
-            });
+            let sum: i128 = (0..winners.len())
+                .fold(0, |a, i| a + esc.get(winners.get(i).unwrap()).unwrap_or(0));
             assert_eq!(sum, pool, "[iter {iter}] sum={sum} != pool={pool}");
         });
     }
@@ -1131,9 +1130,8 @@ fn fuzz_payout_extreme_wagers() {
             .payout_tournament(&gid, &winners, &spcts);
         env.as_contract(&cid, || {
             let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
-            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
-                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
-            });
+            let sum: i128 = (0..winners.len())
+                .fold(0, |a, i| a + esc.get(winners.get(i).unwrap()).unwrap_or(0));
             assert_eq!(sum, pool, "[edge {idx}: {wager}] sum={sum} pool={pool}");
         });
     }
@@ -1163,9 +1161,8 @@ fn fuzz_payout_many_winners() {
             .payout_tournament(&gid, &winners, &spcts);
         env.as_contract(&cid, || {
             let esc: Map<Address, i128> = env.storage().instance().get(&ESCROW).unwrap();
-            let sum: i128 = (0..winners.len()).fold(0, |a, i| {
-                a + esc.get(winners.get(i as u32).unwrap()).unwrap_or(0)
-            });
+            let sum: i128 = (0..winners.len())
+                .fold(0, |a, i| a + esc.get(winners.get(i).unwrap()).unwrap_or(0));
             assert_eq!(sum, pool, "[n={n}] sum={sum} != pool={pool}");
             for i in 0..n {
                 let payout = esc.get(winners.get(i as u32).unwrap()).unwrap_or(0);

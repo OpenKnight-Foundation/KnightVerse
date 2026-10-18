@@ -2,11 +2,13 @@ pub mod admin;
 pub mod archive;
 pub mod ai;
 pub mod auth;
+pub mod chess960;
 #[cfg(test)]
 mod auth_tests;
 pub mod config;
 pub mod games;
 pub mod idempotency;
+pub mod lc0;
 pub mod metrics;
 pub mod move_order;
 pub mod moderation;

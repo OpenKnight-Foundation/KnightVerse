@@ -19,6 +19,7 @@ import {
   YAxis,
 } from "recharts";
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
+import { EmptyState } from "@/components/ui/empty-state";
 import { DEFAULT_OPENINGS, buildColorWinBreakdown, buildOpeningWinRates, formatRatingDelta } from "@/lib/eloStatsUtils";
 
 interface AnalyticsChartsProps {
@@ -78,14 +79,12 @@ export default function AnalyticsCharts({ data, range }: AnalyticsChartsProps) {
         aria-label="Player analytics charts"
         className="grid gap-6 xl:grid-cols-2"
       >
-        <div className="rounded-2xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-center text-gray-300 xl:col-span-2">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-teal-500/10 text-teal-300">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <h3 className="text-lg font-semibold text-white">No analytics yet</h3>
-          <p className="mt-2 text-sm text-gray-400">
-            Play at least 5 games to unlock rating progression, color split, and repertoire insights.
-          </p>
+        <div className="rounded-2xl border border-dashed border-gray-700 bg-gray-900/40 xl:col-span-2">
+          <EmptyState
+            icon={<Sparkles className="h-12 w-12 text-teal-300" />}
+            title="No analytics yet"
+            description="Play at least 5 games to unlock rating progression, color split, and repertoire insights."
+          />
         </div>
       </section>
     );

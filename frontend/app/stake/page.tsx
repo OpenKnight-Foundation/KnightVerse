@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import StakingDepositModal from "@/components/StakingDepositModal";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAppContext } from "@/context/walletContext";
 import { useWalletLink } from "@/hook/useWalletLink";
 import { NETWORK_PASSPHRASE } from "@/lib/api";
@@ -34,10 +35,12 @@ export default function StakePage() {
         <p className="text-gray-400 text-sm mt-1 mb-8">Deposit a stake to play a rated match for XLM.</p>
 
         {isMismatched && (
-          <div role="alert" className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
-            Your connected wallet isn&apos;t the one linked to your account ({linkedWallet}). Switch Freighter
-            to the linked wallet before staking.
-          </div>
+          <Alert variant="warning" className="mb-6 text-sm text-amber-200">
+            <AlertDescription>
+              Your connected wallet isn&apos;t the one linked to your account ({linkedWallet}). Switch Freighter
+              to the linked wallet before staking.
+            </AlertDescription>
+          </Alert>
         )}
 
         {confirmation && (

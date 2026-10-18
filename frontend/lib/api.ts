@@ -180,10 +180,14 @@ export const endpoints = {
 
   /** Matchmaking */
   matchmaking: {
-    join: () => `${API_BASE}/v1/matchmaking/join`,
+    joinCasual: () => `${API_BASE}/v1/matchmaking/join-casual`,
+    joinRated: () => `${API_BASE}/v1/matchmaking/join-rated-free`,
+    joinStaked: () => `${API_BASE}/v1/matchmaking/join-rated-staked`,
+    status: (requestId: string) =>
+      `${API_BASE}/v1/matchmaking/status/${encodeURIComponent(requestId)}`,
+    match: (matchId: string) =>
+      `${API_BASE}/v1/matchmaking/match/${encodeURIComponent(matchId)}`,
     cancel: () => `${API_BASE}/v1/matchmaking/cancel`,
-    ws: (sessionId: string) =>
-      `${WS_BASE}/v1/matchmaking/ws?session=${encodeURIComponent(sessionId)}`,
   },
 
   /** Games */
@@ -205,22 +209,42 @@ export const endpoints = {
 
   /** Players */
   players: {
+    /**
+     * Live online-player count.
+     *
+     * NOTE (#FE-102): the backend does not expose this route yet, so callers
+     * must hide the counter gracefully when a request fails instead of polling
+     * it on a tight interval. Pair with the backend "players online" endpoint
+     * issue before surfacing a count to users.
+     */
     online: () => `${API_BASE}/v1/players/online`,
     export: () => `${API_BASE}/v1/players/me/export`,
+    /**
+     * Rating (ELO) history for a single player.
+     *
+     * NOTE (#FE-103): players are keyed by their UUID / wallet address on the
+     * backend, *not* by the integer `user_id`. Pass the player identifier the
+     * backend expects. Pairs with the backend player-stats endpoint issue.
+     */
+    eloHistory: (playerId: string) =>
+      `${API_BASE}/v1/players/${encodeURIComponent(playerId)}/elo-history`,
+    /** Wallet linking (#FE-97): challenge → Freighter signMessage → verify. */
+    walletChallenge: () => `${API_BASE}/v1/players/me/wallet/challenge`,
+    walletVerify: () => `${API_BASE}/v1/players/me/wallet/verify`,
+    wallet: () => `${API_BASE}/v1/players/me/wallet`,
   },
 
   /** Tournaments */
+  /**
+   * Tournaments — the backend mounts these under its JWT-protected
+   * `/api/v1/tournaments` scope. Only `register` exists server-side today;
+   * list/create follow the same scope (see BE-114).
+   */
   tournaments: {
-    list: () => `${API_BASE}/v1/tournaments`,
-    create: () => `${API_BASE}/v1/tournaments`,
+    list: () => `${API_BASE}/api/v1/tournaments`,
+    create: () => `${API_BASE}/api/v1/tournaments`,
     register: (id: string) =>
-      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
-  },
-
-  /** Profile & Preferences */
-  profile: {
-    preferences: () => `${API_BASE}/v1/profile/preferences`,
-    theme: () => `${API_BASE}/v1/profile/theme`,
+      `${API_BASE}/api/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Horizon */

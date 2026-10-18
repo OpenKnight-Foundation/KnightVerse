@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { EnhancedSocketStatus } from "@/hook/useEnhancedChessSocket";
 
 interface ConnectionStatusIndicatorProps {
@@ -13,6 +15,20 @@ export function ConnectionStatusIndicator({
   reconnectAttempts,
   latency,
 }: ConnectionStatusIndicatorProps) {
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    if (status === "connected" && latency === null && reconnectAttempts === 0) {
+      setIsVisible(false);
+    } else {
+      setIsVisible(true);
+    }
+  }, [status, latency, reconnectAttempts]);
+
+  if (!isVisible) {
+    return null;
+  }
+
   const getStatusColor = () => {
     switch (status) {
       case "connected":

@@ -90,6 +90,7 @@ pub struct DisplayPlayer {
     pub country: Option<String>,
     pub flair: Option<String>,
     pub real_name: String,
+    pub wallet_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -133,6 +134,34 @@ impl From<Model> for DisplayPlayer {
             country: Some(value.country),
             flair: Some(value.flair),
             real_name: value.real_name,
+            wallet_address: value.wallet_address,
         }
     }
+}
+
+/// `POST /v1/players/me/wallet/challenge` body (FE-97).
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WalletChallengeRequest {
+    pub wallet_address: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WalletChallengeResponse {
+    /// Message the wallet must sign (Freighter `signMessage`).
+    pub message: String,
+    /// Seconds until the challenge expires.
+    pub expires_in: u64,
+}
+
+/// `POST /v1/players/me/wallet/verify` body.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WalletVerifyRequest {
+    pub wallet_address: String,
+    /// ed25519 signature of the challenge message, base64 (or hex).
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WalletLinkResponse {
+    pub wallet_address: Option<String>,
 }

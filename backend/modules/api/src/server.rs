@@ -274,6 +274,9 @@ pub async fn main() -> std::io::Result<()> {
                         Some(redis_pool.clone()),
                     ))
                     .service(export_player_data)
+                    .service(crate::wallet_link::wallet_challenge)
+                    .service(crate::wallet_link::wallet_verify)
+                    .service(crate::wallet_link::wallet_unlink)
                     .service(add_player)
                     .service(find_player_by_id)
                     .service(update_player)

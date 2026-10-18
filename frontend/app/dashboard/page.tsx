@@ -16,10 +16,11 @@ import RecentMatches from "@/components/dashboard/RecentMatches";
 import StatCard from "@/components/dashboard/StatCard";
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
 import { useAuth } from "@/context/authContext";
+import { useAppContext } from "@/context/walletContext";
 import { useEloStats, type TimeRange } from "@/hook/useEloStats";
 import { cn } from "@/lib/utils";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
-import { API_BASE } from "@/lib/api";
+import { endpoints } from "@/lib/api";
 
 const EloChart = dynamic(() => import("@/components/dashboard/EloChart"), {
   ssr: false,
@@ -64,23 +65,41 @@ const TIME_RANGES: Array<{ label: string; value: TimeRange }> = [
 
 export default function DashboardPage() {
   const { accessToken, user, isLoading: authLoading } = useAuth();
+  const { address } = useAppContext();
   const [range, setRange] = useState<TimeRange>("30d");
   const [eloData, setEloData] = useState<EloDataPoint[]>([]);
   const [fetchLoading, setFetchLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Fetch real ELO history from the backend whenever the authenticated user changes.
+  // The backend keys players by their UUID / wallet address, not the integer
+  // `user_id`, so resolve the player identifier the API actually expects
+  // (#FE-103). Pairs with the backend player-stats endpoint issue.
+  const playerId = address ?? user?.username ?? null;
+
+  // Fetch real ELO history from the backend whenever the authenticated player changes.
   useEffect(() => {
     if (authLoading || !accessToken || !user) return;
+
+    if (!playerId) {
+      setEloData([]);
+      setFetchError(null);
+      setFetchLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setFetchLoading(true);
     setFetchError(null);
 
-    fetch(`${API_BASE}/v1/users/${user.user_id}/elo-history`, {
+    fetch(endpoints.players.eloHistory(playerId), {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then(async (res) => {
+        if (res.status === 404) {
+          // Endpoint not live yet — degrade gracefully instead of surfacing a
+          // hard error or hammering a missing route (#FE-103).
+          return [] as EloDataPoint[];
+        }
         if (!res.ok) {
           throw new Error(`Failed to load ELO history (${res.status})`);
         }
@@ -101,7 +120,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, user, authLoading]);
+  }, [accessToken, user, authLoading, playerId]);
 
   const isLoading = authLoading || fetchLoading;
 

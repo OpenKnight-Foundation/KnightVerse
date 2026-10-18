@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -10,7 +12,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 
 from gpu_worker.anomaly import BotFarmAnomalyDetector
-from gpu_worker.config import WorkerConfig
+from gpu_worker.config import EngineBackend, WorkerConfig
 from gpu_worker.pool import WorkerPool
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
 from gpu_worker.models import AnalysisRequest, AnalysisResult, NodeInfo
@@ -62,7 +64,9 @@ class AgentEngineOrchestrator:
     """
     
     def __init__(self, node_id: Optional[str] = None):
-        self.config = WorkerConfig()
+        self.config = WorkerConfig(
+            engine_backend=os.environ.get("ENGINE_BACKEND", EngineBackend.LC0.value)
+        )
         self.bot_farm_detector = BotFarmAnomalyDetector()
         self.pool = WorkerPool([self.config], [], anomaly_detector=self.bot_farm_detector)
         self.nl_agent = NaturalLanguageAgent(self.pool)
@@ -74,16 +78,21 @@ class AgentEngineOrchestrator:
         self._resource_allocations: Dict[str, ResourceLimits] = {}
         # Track active WebSocket connections to push updates
         self._active_connections: Dict[str, Any] = {}
+        self._ws_server = None
 
-    async def websocket_handler(self, websocket, path):
+    async def websocket_handler(self, websocket):
         """Handle incoming WebSocket connections with real-time push updates.
-        
+
+        Uses the single-argument handler signature required by websockets>=13;
+        the request path is available via ``websocket.request.path``.
         Supports both analysis requests and natural language requests,
         pushing thinking state updates and final results without client polling.
         """
         connection_id = str(uuid.uuid4())
         self._active_connections[connection_id] = websocket
-        logger.info(f"New WebSocket connection: {connection_id}")
+        request = getattr(websocket, "request", None)
+        path = request.path if request is not None else "/"
+        logger.info(f"New WebSocket connection: {connection_id} (path={path})")
         
         try:
             async for message in websocket:
@@ -180,12 +189,17 @@ class AgentEngineOrchestrator:
     async def start(self):
         """Start the orchestrator services."""
         await self.decentralized.start()
-        start_server = websockets.serve(self.websocket_handler, "localhost", 8765)
-        await start_server
-        logger.info("WebSocket server started on ws://localhost:8765")
+        host = os.environ.get("AGENT_WS_HOST", "0.0.0.0")
+        port = int(os.environ.get("AGENT_WS_PORT", "8765"))
+        self._ws_server = await websockets.serve(self.websocket_handler, host, port)
+        logger.info(f"WebSocket server started on ws://{host}:{port}")
 
     async def shutdown(self):
         """Shutdown the orchestrator services."""
+        if self._ws_server is not None:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+            self._ws_server = None
         await self.decentralized.shutdown()
 
     async def provision_engine(
@@ -352,7 +366,7 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     for signal_name in ('SIGINT', 'SIGTERM'):
         loop.add_signal_handler(
-            getattr(asyncio, signal_name),
+            getattr(signal, signal_name),
             handle_shutdown_signal
         )
     

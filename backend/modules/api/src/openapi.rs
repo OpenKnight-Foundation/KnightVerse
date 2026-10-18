@@ -1,4 +1,4 @@
-use crate::{ai, auth, games, players};
+use crate::{ai, auth, games, pairings, players};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
 use utoipa::OpenApi;
@@ -44,9 +44,13 @@ impl Modify for SecurityAddon {
         auth::login,
         auth::register,
 
+        // Tournament pairing (BE-135)
+        pairings::build_pairing_round,
+
         // AI suggestion endpoints
         ai::get_ai_suggestion,
         ai::analyze_position,
+        ai::ai_health,
 
         // NFT endpoints
         st_core::endpoint::mint_nft,
@@ -99,6 +103,7 @@ impl Modify for SecurityAddon {
     tags(
         (name = "Players", description = "Player management operations"),
         (name = "Games", description = "Game management operations"),
+        (name = "Tournaments", description = "Tournament and Swiss pairing operations"),
         (name = "Authentication", description = "Authentication operations"),
         (name = "AI", description = "AI suggestion operations"),
         (name = "NFT", description = "NFT minting and metadata operations"),

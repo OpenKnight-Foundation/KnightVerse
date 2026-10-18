@@ -30,6 +30,10 @@ matchmaking = { path = "../matchmaking" }
 error = { path = "../error" }
 security = { path = "../security" }
 chess = { path = "../chess" }
+# BE-135: workspace crates that were built but never called from the API.
+archiving = { path = "../archiving" }
+pairing = { path = "../pairing" }
+move_protocol = { path = "../move_protocol" }
 challenge = { path = "../challenge" }
 actix-cors = "0.7.0"
 utoipa-redoc = { version = "3", features = ["actix-web"] }

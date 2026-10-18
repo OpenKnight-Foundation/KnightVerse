@@ -1,7 +1,7 @@
 // src/server.rs
 
 use crate::admin::{list_actions, record_action};
-use crate::ai::{analyze_position, get_ai_suggestion};
+use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
 use crate::games::{
@@ -224,6 +224,15 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
+        // BE-137: engine calls are CPU-bound, so `/v1/ai` gets a tighter
+        // per-second budget than games.
+        let ai_governor_conf = GovernorConfigBuilder::default()
+            .per_second(config.ai_rate_limit_per_sec)
+            .burst_size(config.ai_rate_limit_burst)
+            .use_headers()
+            .finish()
+            .unwrap();
+
         // Create Redis-backed rate limiters (shared across workers via Redis)
         let auth_redis_limiter = RedisRateLimiter::new(
             rate_limiter_pool.clone(),
@@ -235,6 +244,12 @@ pub async fn main() -> std::io::Result<()> {
             rate_limiter_pool.clone(),
             config.redis_game_rate_limit,
             config.redis_game_rate_limit_window,
+        );
+
+        let ai_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_ai_rate_limit,
+            config.redis_ai_rate_limit_window,
         );
 
         // BE-46: Redis-backed IdempotencyMiddleware for mutating financial, staking & tournament requests
@@ -258,6 +273,8 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(redis_broadcaster.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            // BE-137: bounded admission control in front of the engine.
+            .app_data(web::Data::new(EnginePool::from_env()))
             // Register your routes
             .route("/health", web::get().to(health))
             .route("/health/redis", web::get().to(health_redis))
@@ -341,6 +358,9 @@ pub async fn main() -> std::io::Result<()> {
                         jwt_expiration,
                         Some(redis_pool.clone()),
                     ))
+                    // BE-135: Swiss round generation, previously unreachable
+                    // because nothing depended on the `pairing` crate.
+                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
                     .route(
                         "/{id}/register",
                         web::post().to(|path: web::Path<String>| async move {
@@ -397,6 +417,8 @@ pub async fn main() -> std::io::Result<()> {
             // AI routes
             .service(
                 web::scope("/v1/ai")
+                    .wrap(Governor::new(&ai_governor_conf))
+                    .wrap(ai_redis_limiter)
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -405,6 +427,10 @@ pub async fn main() -> std::io::Result<()> {
                     .service(get_ai_suggestion)
                     .service(analyze_position),
             )
+            // Engine-pool saturation is exactly what an operator needs to see
+            // during an incident, so this one route stays outside the auth
+            // gate and the limiters.
+            .route("/health/engine", web::get().to(ai_health))
             // NFT routes (placeholder — not yet implemented)
             // .service(web::scope("/api/v1").configure(configure_nft_routes))
             // Swagger UI integration

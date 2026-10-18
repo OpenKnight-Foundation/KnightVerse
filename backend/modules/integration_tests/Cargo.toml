@@ -2,29 +2,41 @@
 name = "integration_tests"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
-[[bin]]
+# BE-134: this used to be a `[[bin]]` whose `main()` drove a hand-rolled harness
+# calling `Tournament::new`/`BracketConfig` (both gone since the bracket/swiss
+# refactor) and the deleted `validation` crate. It was dropped from the
+# workspace because it had not compiled in years.
+#
+# It is now a real test crate: `#[actix_web::test]`s that drive the HTTP
+# handlers against a migrated PostgreSQL instance. Tests that need a database
+# skip unless `TEST_DATABASE_URL` is set (see `support`), so `cargo test
+# --workspace` stays green on a machine without one.
+
+[lib]
 name = "integration_tests"
-path = "src/main.rs"
+path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-log = "0.4"
-env_logger = "0.11"
-
-# XLMate modules
-metrics = { path = "../metrics" }
-tournament = { path = "../tournament" }
-validation = { path = "../validation" }
-archiving = { path = "../archiving" }
-api = { path = "../api" }
-
-sea-orm = { version = "1.1.0", features = ["sqlx-postgres", "sqlx-sqlite", "runtime-tokio-native-tls", "macros"] }
-
-# Test dependencies
-reqwest = { version = "0.11", features = ["json"] }
+actix-web = "4"
 actix-rt = "2.9"
+chrono = { version = "0.4", features = ["serde"] }
+api = { path = "../api" }
+db = { path = "../db" }
+db_entity = { path = "../db/entity" }
+dto = { path = "../dto" }
+error = { path = "../error" }
+migration = { path = "../db/migrations" }
+sea-orm = { version = "1.1.0", features = [
+    "sqlx-postgres",
+    "runtime-tokio-native-tls",
+    "macros",
+    "with-uuid-with-chrono-with-json",
+] }
+security = { path = "../security" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+service = { path = "../service" }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }

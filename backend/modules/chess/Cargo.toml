@@ -13,6 +13,5 @@ db_entity = { path = "../db/entity" }
 error = { path = "../error" }
 matchmaking = { path = "../matchmaking" }
 serde = { version = "1.0", features = ["derive"] }
-
-[dev-dependencies]
+# BE-133: Chess960 start-position generation (`start_position`).
 rand = "0.8"

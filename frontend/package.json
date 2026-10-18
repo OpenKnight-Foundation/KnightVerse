@@ -51,7 +51,7 @@
     "@types/react-dom": "^19",
     "@types/webpack": "^5.28.5",
     "@vitejs/plugin-react": "^6.0.4",
-    "axe-core": "^4.13.0",
+    "axe-core": "^4.14.0",
     "eslint": "^9",
     "eslint-config-next": "15.2.3",
     "jsdom": "^29.0.2",

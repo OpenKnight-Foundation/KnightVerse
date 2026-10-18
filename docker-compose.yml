@@ -1,4 +1,19 @@
-version: '3.8'
+# KnightVerse local dependencies (Redis + Postgres).
+#
+# Monitoring (Prometheus / Grafana) is gated behind the "monitoring" profile
+# so a plain `docker compose up` does not require GRAFANA_ADMIN_PASSWORD (#1431)
+# and prometheus/grafana are real services (not volume definitions) (#1430).
+#
+# Start core services:
+#   docker compose up -d
+#
+# Start monitoring as well:
+#   GRAFANA_ADMIN_PASSWORD=changeme docker compose --profile monitoring up -d
+#
+# Or use the dedicated monitoring compose file:
+#   docker compose -f backend/docker-compose.monitoring.yml --project-directory backend up -d
+
+version: "3.8"
 
 services:
   redis:
@@ -34,6 +49,42 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Optional monitoring profile (#1430 / #1431). Not started by default.
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    container_name: knightverse-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    container_name: knightverse-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Default keeps local profile usable; override in production (#1431).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-knightverse}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
 volumes:
   redis_data:
     driver: local
@@ -43,35 +94,3 @@ volumes:
     driver: local
   grafana_data:
     driver: local
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: xlmate-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: xlmate-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?must be set}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning
-    restart: unless-stopped
-    depends_on:
-      - prometheus

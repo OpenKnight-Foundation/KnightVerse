@@ -72,6 +72,10 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+        env:
+          # NEXT_PUBLIC_* values are inlined at build time, so the test-only
+          # escrow account must be set here for the staking spec.
+          NEXT_PUBLIC_STAKING_ESCROW_ADDRESS: GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA
 
       - name: Run Playwright E2E
         run: npm run test:e2e

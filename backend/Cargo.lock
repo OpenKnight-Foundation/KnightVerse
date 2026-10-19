@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -1053,6 +1054,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -2366,12 +2368,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3996,9 +3992,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { FaUser } from "react-icons/fa";
@@ -59,7 +59,7 @@ export default function HeroChessGame({
   onlinePlayerCount,
   heroBranding,
 }: HeroChessGameProps) {
-  const [game] = useState(new Chess());
+  const gameRef = useRef(new Chess());
   const [position, setPosition] = useState("start");
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [gameMode, setGameMode] = useState<"online" | "bot" | null>(null);
@@ -100,6 +100,8 @@ export default function HeroChessGame({
     jsBridgePath: "/assets/stockfish.js",
     defaultTimeLimit: 250,
   });
+
+  const game = gameRef.current;
 
   const currentDisplayPosition = React.useMemo(() => {
     if (viewIndex === null) return position;

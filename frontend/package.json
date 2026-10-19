@@ -27,7 +27,7 @@
     "react": "^19.0.0",
     "react-chessboard": "^4.7.3",
     "react-dom": "^19.0.0",
-    "react-icons": "^5.5.0",
+    "react-icons": "^5.7.0",
     "recharts": "^3.8.1",
     "soroban-client": "^0.1.0",
     "stellar-sdk": "10.4.0",

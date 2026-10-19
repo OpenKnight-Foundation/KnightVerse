@@ -1,11 +1,21 @@
-# KnightVerse local dependencies (Redis + Postgres).
+# KnightVerse local stack — one command brings up the data stores and all
+# three applications (backend, frontend, agent-engines).
+#
+#   cp .env.example .env     # then edit JWT_SECRET etc.
+#   docker compose up -d
+#
+# Apps started by a plain `docker compose up`:
+#   - redis          (data store)
+#   - postgres       (data store)
+#   - backend        (Rust/actix API + game WebSocket, http://localhost:8080)
+#   - frontend       (Next.js, http://localhost:3000)
+#   - agent-engines  (AI co-pilot WebSocket server, ws://localhost:8765)
 #
 # Monitoring (Prometheus / Grafana) is gated behind the "monitoring" profile
 # so a plain `docker compose up` does not require GRAFANA_ADMIN_PASSWORD (#1431)
 # and prometheus/grafana are real services (not volume definitions) (#1430).
-#
-# Start core services:
-#   docker compose up -d
+# NOTE: grafana also maps host port 3000; if you start the monitoring profile
+# alongside the frontend, remap one of them to avoid a host port conflict.
 #
 # Start monitoring as well:
 #   GRAFANA_ADMIN_PASSWORD=changeme docker compose --profile monitoring up -d
@@ -47,6 +57,103 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Backend — Rust/actix API server + game WebSocket.
+  # Built from backend/Dockerfile. Binds 0.0.0.0:8080 and exposes /health.
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    container_name: knightverse-backend
+    environment:
+      # Bind all interfaces inside the container so the published port works.
+      SERVER_ADDR: "0.0.0.0:8080"
+      # DATABASE_URL/REDIS_URL are derived from the data-store services above so
+      # a single .env stays the source of truth for credentials.
+      DATABASE_URL: "postgres://${POSTGRES_USER:-knightverse}:${POSTGRES_PASSWORD:-knightverse_password}@postgres:5432/${POSTGRES_DB:-knightverse_db}"
+      REDIS_URL: "redis://redis:6379"
+      # The backend refuses to start on a missing/known-insecure secret, so a
+      # dev default is supplied only to keep `docker compose up` one-command.
+      # Override JWT_SECRET in .env for anything beyond local development.
+      JWT_SECRET: "${JWT_SECRET:-knightverse_local_dev_jwt_secret_replace_before_production_0123456789abcdef}"
+      JWT_EXPIRATION_SECS: "${JWT_EXPIRATION_SECS:-3600}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3000}"
+      RUST_LOG: "${RUST_LOG:-info,xlmate=debug}"
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Next.js app.
+  # Built from frontend/Dockerfile. NEXT_PUBLIC_* values are inlined at build
+  # time, so the API URL is a build arg defaulting to the backend's host port.
+  # The browser reaches the backend through that host-published port.
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
+        NEXT_PUBLIC_BACKEND_URL: "${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}"
+    container_name: knightverse-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Agent engines — AI co-pilot WebSocket server (Stockfish CPU backend).
+  # Built from agent-engines/Dockerfile. Exposes a WS server on 8765; the
+  # browser connects directly through the host-published port.
+  # ---------------------------------------------------------------------------
+  agent-engines:
+    build:
+      context: ./agent-engines
+    container_name: knightverse-agent-engines
+    environment:
+      AGENT_WS_HOST: "0.0.0.0"
+      AGENT_WS_PORT: "${AGENT_WS_PORT:-8765}"
+      ENGINE_BACKEND: "${ENGINE_BACKEND:-stockfish}"
+      STOCKFISH_PATH: "/usr/games/stockfish"
+      STOCKFISH_THREADS: "${STOCKFISH_THREADS:-2}"
+      STOCKFISH_HASH_MB: "${STOCKFISH_HASH_MB:-256}"
+    ports:
+      - "8765:8765"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The service speaks WebSocket, not HTTP; verify the listener accepts TCP
+      # connections on its bound port.
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1',8765),timeout=2).close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   # Optional monitoring profile (#1430 / #1431). Not started by default.

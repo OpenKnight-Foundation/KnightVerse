@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -525,7 +526,7 @@ dependencies = [
 name = "archiving"
 version = "0.1.0"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "db_entity",
  "env_logger",
@@ -1053,6 +1054,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -2366,12 +2368,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3918,7 +3914,7 @@ name = "security"
 version = "0.1.0"
 dependencies = [
  "actix-web",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "db_entity",
  "deadpool-redis",
@@ -4452,7 +4448,7 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "anyhow",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "reqwest",
  "serde",

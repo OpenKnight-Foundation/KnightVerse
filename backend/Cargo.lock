@@ -488,6 +488,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -497,7 +498,7 @@ dependencies = [
  "migration",
  "once_cell",
  "prometheus",
- "rand 0.8.6",
+ "rand 0.10.2",
  "redis",
  "reqwest",
  "sea-orm",
@@ -1053,10 +1054,11 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
- "rand 0.8.6",
+ "rand 0.10.2",
  "regex",
  "sea-orm",
  "serde",
@@ -1383,7 +1385,7 @@ dependencies = [
  "dotenv",
  "once_cell",
  "prometheus",
- "rand 0.8.6",
+ "rand 0.10.2",
  "sea-orm",
  "serde_json",
  "tokio",
@@ -1397,7 +1399,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dotenv",
- "rand 0.8.6",
+ "rand 0.10.2",
  "sea-orm",
  "serde",
  "serde_json",
@@ -1542,7 +1544,7 @@ dependencies = [
  "chrono",
  "db_entity",
  "once_cell",
- "rand 0.9.4",
+ "rand 0.10.2",
  "regex",
  "serde",
  "serde_json",
@@ -1988,7 +1990,7 @@ dependencies = [
  "parking_lot",
  "portable-atomic",
  "quanta",
- "rand 0.8.6",
+ "rand 0.8.8",
  "smallvec",
  "spinning_top",
 ]
@@ -2366,12 +2368,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2732,7 +2728,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "smallvec",
  "zeroize",
 ]
@@ -3304,9 +3300,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -3620,7 +3616,7 @@ dependencies = [
  "borsh",
  "bytes",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rkyv",
  "serde",
  "serde_json",
@@ -3925,7 +3921,7 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "log",
- "rand 0.8.6",
+ "rand 0.10.2",
  "redis",
  "sea-orm",
  "serde",
@@ -4032,7 +4028,7 @@ dependencies = [
  "dto",
  "engine",
  "error",
- "rand 0.8.6",
+ "rand 0.10.2",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4360,7 +4356,7 @@ dependencies = [
  "memchr",
  "once_cell",
  "percent-encoding",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rsa",
  "rust_decimal",
  "serde",
@@ -4404,7 +4400,7 @@ dependencies = [
  "memchr",
  "num-bigint 0.4.6",
  "once_cell",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -4514,7 +4510,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-rational 0.4.2",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -4560,7 +4556,7 @@ dependencies = [
  "crc",
  "data-encoding",
  "nacl",
- "rand 0.8.6",
+ "rand 0.8.8",
  "regex",
  "serde",
  "serde_json",

@@ -166,45 +166,47 @@ fn test_multi_token_deposits_and_milestone_payouts() {
     );
 
     // Sponsor A deposits 10,000 XLM and 5,000 USDC
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.usdc_token,
-        &5_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.usdc_token, &5_000);
 
     // Sponsor B deposits 20,000 XLM and 15,000 USDC
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.xlm_token,
-        &20_000,
-    );
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.usdc_token,
-        &15_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.xlm_token, &20_000);
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.usdc_token, &15_000);
 
     // Verify deposits: Total XLM = 30,000, Total USDC = 20,000
-    assert_eq!(ctx.client.get_total_deposited(&tournament_id, &ctx.xlm_token), 30_000);
-    assert_eq!(ctx.client.get_total_deposited(&tournament_id, &ctx.usdc_token), 20_000);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 30_000);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 20_000);
+    assert_eq!(
+        ctx.client
+            .get_total_deposited(&tournament_id, &ctx.xlm_token),
+        30_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_total_deposited(&tournament_id, &ctx.usdc_token),
+        20_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        30_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        20_000
+    );
 
     assert_eq!(
-        ctx.client.get_sponsor_deposit(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token),
+        ctx.client
+            .get_sponsor_deposit(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token),
         10_000
     );
     assert_eq!(
-        ctx.client.get_sponsor_deposit(&tournament_id, &ctx.sponsor_b, &ctx.usdc_token),
+        ctx.client
+            .get_sponsor_deposit(&tournament_id, &ctx.sponsor_b, &ctx.usdc_token),
         15_000
     );
 
@@ -227,10 +229,26 @@ fn test_multi_token_deposits_and_milestone_payouts() {
     assert_eq!(ctx.xlm_client.balance(&ctx.reg_recipient), 6_000);
     assert_eq!(ctx.usdc_client.balance(&ctx.reg_recipient), 4_000);
 
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 24_000);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 16_000);
-    assert_eq!(ctx.client.get_total_disbursed(&tournament_id, &ctx.xlm_token), 6_000);
-    assert_eq!(ctx.client.get_total_disbursed(&tournament_id, &ctx.usdc_token), 4_000);
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        24_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        16_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_total_disbursed(&tournament_id, &ctx.xlm_token),
+        6_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_total_disbursed(&tournament_id, &ctx.usdc_token),
+        4_000
+    );
 
     let ms0_state = ctx.client.get_milestone_state(&tournament_id, &0).unwrap();
     assert!(ms0_state.completed);
@@ -249,14 +267,23 @@ fn test_multi_token_deposits_and_milestone_payouts() {
     assert_eq!(ctx.xlm_client.balance(&ctx.quarter_recipient), 9_000);
     assert_eq!(ctx.usdc_client.balance(&ctx.quarter_recipient), 6_000);
 
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 15_000);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 10_000);
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        15_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        10_000
+    );
 
     // =========================================================================
     // STAGE 2: Grand Final (50% disbursement with dynamic winner override)
     // =========================================================================
     let champion = Address::generate(&ctx.env);
-    ctx.client.complete_stage(&tournament_id, &2, &Some(champion.clone()));
+    ctx.client
+        .complete_stage(&tournament_id, &2, &Some(champion.clone()));
 
     let t_after_s2 = ctx.client.get_tournament(&tournament_id).unwrap();
     assert_eq!(t_after_s2.status, TournamentStatus::Completed);
@@ -267,10 +294,26 @@ fn test_multi_token_deposits_and_milestone_payouts() {
     assert_eq!(ctx.usdc_client.balance(&champion), 10_000);
 
     // Total escrow remaining balance should now be exactly 0
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 0);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 0);
-    assert_eq!(ctx.client.get_total_disbursed(&tournament_id, &ctx.xlm_token), 30_000);
-    assert_eq!(ctx.client.get_total_disbursed(&tournament_id, &ctx.usdc_token), 20_000);
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        0
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        0
+    );
+    assert_eq!(
+        ctx.client
+            .get_total_disbursed(&tournament_id, &ctx.xlm_token),
+        30_000
+    );
+    assert_eq!(
+        ctx.client
+            .get_total_disbursed(&tournament_id, &ctx.usdc_token),
+        20_000
+    );
 
     let ms2_state = ctx.client.get_milestone_state(&tournament_id, &2).unwrap();
     assert!(ms2_state.completed);
@@ -293,31 +336,15 @@ fn test_sponsor_refund_when_cancelled_before_kickoff() {
     );
 
     // Initial sponsor balances: A has 100k XLM, 50k USDC; B has 100k XLM, 50k USDC
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &12_000,
-    );
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.usdc_token,
-        &8_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &12_000);
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.usdc_token, &8_000);
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.xlm_token,
-        &25_000,
-    );
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.usdc_token,
-        &15_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.xlm_token, &25_000);
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.usdc_token, &15_000);
 
     assert_eq!(ctx.xlm_client.balance(&ctx.sponsor_a), 88_000);
     assert_eq!(ctx.usdc_client.balance(&ctx.sponsor_a), 42_000);
@@ -345,8 +372,16 @@ fn test_sponsor_refund_when_cancelled_before_kickoff() {
     assert_eq!(ctx.usdc_client.balance(&ctx.sponsor_b), 50_000);
 
     // Contract remaining balances should be 0
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 0);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 0);
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        0
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        0
+    );
 }
 
 #[test]
@@ -364,29 +399,30 @@ fn test_admin_emergency_batch_refund_all_sponsors() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &5_000,
-    );
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.usdc_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &5_000);
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.usdc_token, &10_000);
 
     // Admin cancels tournament
     ctx.client.cancel_tournament(&tournament_id, &ctx.admin);
 
     // Admin triggers batch refund for all sponsors
-    ctx.client.admin_refund_all_sponsors(&tournament_id, &ctx.admin);
+    ctx.client
+        .admin_refund_all_sponsors(&tournament_id, &ctx.admin);
 
     assert_eq!(ctx.xlm_client.balance(&ctx.sponsor_a), 100_000);
     assert_eq!(ctx.usdc_client.balance(&ctx.sponsor_b), 50_000);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.xlm_token), 0);
-    assert_eq!(ctx.client.get_remaining_balance(&tournament_id, &ctx.usdc_token), 0);
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.xlm_token),
+        0
+    );
+    assert_eq!(
+        ctx.client
+            .get_remaining_balance(&tournament_id, &ctx.usdc_token),
+        0
+    );
 }
 
 #[test]
@@ -405,18 +441,15 @@ fn test_kickoff_deadline_timeout_cancellation() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &7_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &7_000);
 
     // Advance ledger past kickoff deadline
     ctx.env.ledger().set_sequence_number(150);
 
     let random_caller = Address::generate(&ctx.env);
-    ctx.client.cancel_if_deadline_passed(&tournament_id, &random_caller);
+    ctx.client
+        .cancel_if_deadline_passed(&tournament_id, &random_caller);
 
     let t = ctx.client.get_tournament(&tournament_id).unwrap();
     assert_eq!(t.status, TournamentStatus::Cancelled);
@@ -462,12 +495,8 @@ fn test_custom_milestone_tournament_creation() {
     let t = ctx.client.get_tournament(&tournament_id).unwrap();
     assert_eq!(t.total_milestones, 3);
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     ctx.client.complete_stage(&tournament_id, &0, &None);
     assert_eq!(ctx.xlm_client.balance(&ctx.reg_recipient), 1_000); // 10%
@@ -498,11 +527,8 @@ fn test_update_tournament_oracle() {
     );
 
     let new_oracle = Address::generate(&ctx.env);
-    ctx.client.set_tournament_oracle(
-        &tournament_id,
-        &ctx.organizer,
-        &new_oracle,
-    );
+    ctx.client
+        .set_tournament_oracle(&tournament_id, &ctx.organizer, &new_oracle);
 
     let t = ctx.client.get_tournament(&tournament_id).unwrap();
     assert_eq!(t.oracle, new_oracle);
@@ -548,13 +574,8 @@ fn test_empty_milestones_rejected() {
     let ctx = setup_test_context();
     let empty_milestones = Vec::new(&ctx.env);
 
-    ctx.client.create_tournament(
-        &ctx.organizer,
-        &888u64,
-        &ctx.oracle,
-        &0,
-        &empty_milestones,
-    );
+    ctx.client
+        .create_tournament(&ctx.organizer, &888u64, &ctx.oracle, &0, &empty_milestones);
 }
 
 #[test]
@@ -573,12 +594,8 @@ fn test_zero_deposit_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &0,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &0);
 }
 
 #[test]
@@ -626,12 +643,8 @@ fn test_cancel_after_kickoff_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     // Kickoff stage 0 is completed
     ctx.client.complete_stage(&tournament_id, &0, &None);
@@ -656,12 +669,8 @@ fn test_refund_before_cancellation_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     // Attempting refund while tournament is still active / not cancelled
     ctx.client.claim_refund(&tournament_id, &ctx.sponsor_a);
@@ -683,12 +692,8 @@ fn test_out_of_order_stage_signoff_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     // Attempting stage 1 before stage 0
     ctx.client.complete_stage(&tournament_id, &1, &None);
@@ -710,12 +715,8 @@ fn test_double_refund_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     ctx.client.cancel_tournament(&tournament_id, &ctx.organizer);
 
@@ -745,12 +746,8 @@ fn test_pause_blocks_deposits() {
     ctx.client.pause(&ctx.admin);
 
     // Deposit should fail when paused
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 }
 
 #[test]
@@ -769,22 +766,14 @@ fn test_deposit_after_tournament_completed_rejected() {
         &Some(ctx.grand_winner.clone()),
     );
 
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_a,
-        &ctx.xlm_token,
-        &10_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_a, &ctx.xlm_token, &10_000);
 
     ctx.client.complete_stage(&tournament_id, &0, &None);
     ctx.client.complete_stage(&tournament_id, &1, &None);
     ctx.client.complete_stage(&tournament_id, &2, &None);
 
     // Trying to deposit into completed tournament
-    ctx.client.deposit_sponsorship(
-        &tournament_id,
-        &ctx.sponsor_b,
-        &ctx.xlm_token,
-        &5_000,
-    );
+    ctx.client
+        .deposit_sponsorship(&tournament_id, &ctx.sponsor_b, &ctx.xlm_token, &5_000);
 }

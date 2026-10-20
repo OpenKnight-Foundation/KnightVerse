@@ -23,6 +23,9 @@ pub struct Model {
     pub elo_rating: i32,
     pub social_links: Option<Vec<String>>,
     pub is_enabled: bool,
+    /// Stellar account (G…) linked via the wallet-link challenge (FE-97).
+    #[sea_orm(unique)]
+    pub wallet_address: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

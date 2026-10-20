@@ -10,6 +10,7 @@ members = [
     "sponsorship_escrow",
     "title_badge",
     "arbiter_escrow",
+    "yield_staking",
 ]
 
 [profile.release]

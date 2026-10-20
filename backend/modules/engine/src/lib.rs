@@ -2,9 +2,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod lc0_orchestrator;
 pub mod parser;
 pub mod process;
 pub mod uci;
+
+pub use lc0_orchestrator::{Lc0Analysis, Lc0Orchestrator};
 
 #[derive(Error, Debug)]
 pub enum EngineError {
@@ -20,7 +23,7 @@ pub enum EngineError {
     Unknown(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GoParams {
     pub depth: Option<u8>,
     pub time_limit_ms: Option<u32>,

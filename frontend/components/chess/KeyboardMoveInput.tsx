@@ -9,6 +9,8 @@ interface KeyboardMoveInputProps {
   isGameActive: boolean;
   /** Whether it is the player's turn */
   isMyTurn: boolean;
+  /** Optional legal-move suggestions for auto-complete (FE-52). */
+  suggestions?: string[];
 }
 
 const PLACEHOLDER_HINTS = [
@@ -20,6 +22,7 @@ export function KeyboardMoveInput({
   onSubmitMove,
   isGameActive,
   isMyTurn,
+  suggestions = [],
 }: KeyboardMoveInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +104,7 @@ export function KeyboardMoveInput({
             placeholder={isMyTurn ? PLACEHOLDER_HINTS[0] : "Waiting for opponent..."}
             disabled={!isMyTurn}
             autoComplete="off"
+            list={suggestions.length ? "keyboard-move-suggestions" : undefined}
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
@@ -115,6 +119,13 @@ export function KeyboardMoveInput({
             </span>
           )}
         </div>
+        {suggestions.length > 0 && (
+          <datalist id="keyboard-move-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        )}
         <button
           type="submit"
           disabled={!isMyTurn || !inputValue.trim()}

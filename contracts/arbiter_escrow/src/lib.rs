@@ -336,7 +336,7 @@ impl ArbiterEscrowContract {
         } else {
             escrow.funded_b = true;
         }
-        escrow.pot = escrow.pot + escrow.stake;
+        escrow.pot += escrow.stake;
 
         let both_funded = escrow.funded_a && escrow.funded_b;
         if both_funded {
@@ -485,9 +485,9 @@ impl ArbiterEscrowContract {
         env.storage().instance().set(&vote_key, &choice);
 
         match choice {
-            VoteChoice::PlayerA => escrow.votes_for_a = escrow.votes_for_a + 1,
-            VoteChoice::PlayerB => escrow.votes_for_b = escrow.votes_for_b + 1,
-            VoteChoice::Refund => escrow.votes_for_refund = escrow.votes_for_refund + 1,
+            VoteChoice::PlayerA => escrow.votes_for_a += 1,
+            VoteChoice::PlayerB => escrow.votes_for_b += 1,
+            VoteChoice::Refund => escrow.votes_for_refund += 1,
         }
         env.storage()
             .instance()

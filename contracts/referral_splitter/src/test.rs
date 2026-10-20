@@ -105,7 +105,10 @@ fn test_withdraw_earnings_pays_out_and_resets_balance() {
     assert_eq!(paid, 1_000);
     assert_eq!(ctx.client.get_earnings(&ctx.referrer), 0);
     assert_eq!(ctx.token_client.balance(&ctx.referrer), 1_000);
-    assert_eq!(ctx.token_client.balance(&ctx.contract_id), contract_before - 1_000);
+    assert_eq!(
+        ctx.token_client.balance(&ctx.contract_id),
+        contract_before - 1_000
+    );
 }
 
 #[test]
@@ -115,7 +118,10 @@ fn test_second_withdraw_is_a_noop() {
     ctx.client.register_referral(&ctx.referee_a, &ctx.referrer);
     ctx.client.settle_wager(&ctx.referee_a, &10_000); // 10% -> 1_000
 
-    assert_eq!(ctx.client.withdraw_earnings(&ctx.referrer, &ctx.token), 1_000);
+    assert_eq!(
+        ctx.client.withdraw_earnings(&ctx.referrer, &ctx.token),
+        1_000
+    );
 
     let referrer_after = ctx.token_client.balance(&ctx.referrer);
     let contract_after = ctx.token_client.balance(&ctx.contract_id);
@@ -145,11 +151,12 @@ fn test_withdraw_requires_referrer_auth() {
     // Drop the blanket auth mocking so `require_auth` must be satisfied for real.
     ctx.env.mock_auths(&[]);
 
-    let result = ctx
-        .client
-        .try_withdraw_earnings(&ctx.referrer, &ctx.token);
+    let result = ctx.client.try_withdraw_earnings(&ctx.referrer, &ctx.token);
 
-    assert!(result.is_err(), "withdrawal must require the referrer's auth");
+    assert!(
+        result.is_err(),
+        "withdrawal must require the referrer's auth"
+    );
     // The balance is untouched by the rejected call.
     assert_eq!(ctx.client.get_earnings(&ctx.referrer), 1_000);
 }

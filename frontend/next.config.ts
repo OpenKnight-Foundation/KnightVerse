@@ -1,18 +1,9 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { buildCsp } from "./lib/csp";
 
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://fonts.googleapis.com blob:",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https://gateway.pinata.cloud https://arweave.net",
-  "font-src 'self' https://fonts.gstatic.com",
-  "connect-src 'self' https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org wss://horizon-testnet.stellar.org https://gateway.pinata.cloud https://arweave.net",
-  "worker-src 'self' blob:",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
+// connect-src is derived from the deployment's NEXT_PUBLIC_* config (#FE-87).
+const CSP_DIRECTIVES = buildCsp(process.env);
 
 const securityHeaders = [
   {
@@ -33,7 +24,8 @@ const securityHeaders = [
   },
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=()",
+    // Voice move input (VoiceMoveInput.tsx) needs the microphone on our own origin (#FE-89).
+    value: "camera=(), microphone=(self), geolocation=()",
   },
 ];
 

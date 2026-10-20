@@ -43,7 +43,7 @@ test.describe("Navigation", () => {
   test("can navigate to watch", async ({ page }) => {
     await page.goto("/watch");
     await expect(
-      page.getByRole("region", { name: /live games/i }),
+      page.getByRole("region", { name: /live games lobby/i }),
     ).toBeVisible();
   });
 

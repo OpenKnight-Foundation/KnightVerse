@@ -36,18 +36,10 @@ KnightVerse/
 ├── agent-engines/      # Python engine workers & AI agents
 ├── docker-compose.yml  # Local services
 ├── docs/               # Guides + archived status notes (see docs/README.md)
-│
-│   # Not built, imported, or deployed (see each folder's README):
-├── apps/web/           # Unused: earlier sound/analysis/offline components
-├── src/                # Unused: leaderboard, spectator chat, AI tutor drafts
-├── pers-store/         # Unused: standalone persistence/verification drafts
 └── README.md
 ```
 
-`apps/web/`, `src/` and `pers-store/` are **not** part of any build: nothing in
-`frontend/`, `backend/`, `contracts/` or CI imports them. Make changes in
-`frontend/` (or `backend/`) instead. If you want to revive something from these
-folders, port it into the live app.
+Make changes in `frontend/` (or `backend/`) instead.
 
 ## Setup Instructions (End-to-End)
 

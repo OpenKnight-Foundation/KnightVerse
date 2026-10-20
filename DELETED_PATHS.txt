@@ -1,0 +1,9 @@
+pr_body.txt
+QUICK_REFERENCE.md (moved to docs/)
+CHANGES.md (moved to docs/archive/)
+IMPLEMENTATION_SUMMARY.md (moved to docs/archive/)
+SC-13-EVENT-EMISSIONS-IMPLEMENTATION.md (moved to docs/archive/)
+backend/SETUP_COMPLETE.md
+backend/VERIFY_IMPLEMENTATION.md
+backend/IMPLEMENTATION_SUMMARY.md
+frontend/IMPLEMENTATION_CHECKLIST.md

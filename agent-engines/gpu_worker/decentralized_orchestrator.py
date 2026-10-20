@@ -332,7 +332,7 @@ class DecentralizedOrchestrator:
             challenge_vector = self._select_challenge_vector()
             challenge_request = AnalysisRequest(
                 fen=challenge_vector.fen,
-                depth=max(challenge_vector.min_depth, request.depth),
+                depth=max(challenge_vector.min_depth, request.depth or 0),
                 time_limit_ms=request.time_limit_ms,
                 priority=request.priority,
             )

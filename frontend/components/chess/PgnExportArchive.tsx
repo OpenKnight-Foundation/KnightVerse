@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/authContext";
 import { endpoints, IPFS_GATEWAY } from "@/lib/api";
+import { debugLog } from "@/lib/debugLogger";
 
 interface PgnArchiveResult {
   game_id: string;
@@ -45,7 +46,7 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      console.log("[PGN Export] PGN exported successfully");
+      debugLog("[PGN Export] PGN exported successfully");
     } catch (err) {
       console.error("[PGN Export] Failed to export PGN:", err);
       setError("Failed to export PGN");
@@ -61,7 +62,7 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
     try {
       setError(null);
       await navigator.clipboard.writeText(pgnContent);
-      console.log("[PGN Export] PGN copied to clipboard");
+      debugLog("[PGN Export] PGN copied to clipboard");
     } catch (err) {
       console.error("[PGN Export] Failed to copy PGN:", err);
       setError("Failed to copy PGN to clipboard");
@@ -105,7 +106,7 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
         onArchiveComplete(data.archive_result);
       }
 
-      console.log("[PGN Archive] PGN archived successfully:", data.archive_result);
+      debugLog("[PGN Archive] PGN archived successfully:", data.archive_result);
     } catch (err) {
       console.error("[PGN Archive] Failed to archive PGN:", err);
       setError(err instanceof Error ? err.message : "Failed to archive PGN");

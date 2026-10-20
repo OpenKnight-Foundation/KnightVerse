@@ -11,6 +11,7 @@ mod m20260127_180000_add_game_imported_flag;
 mod m20260127_create_refresh_tokens_table;
 mod m20260924_000001_create_failed_archive_jobs;
 mod m20260925_000001_create_admin_actions_table;
+mod m20261017_000001_add_player_wallet_address;
 
 pub struct Migrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250324_add_elo_rating_to_player::Migration),
             Box::new(m20260924_000001_create_failed_archive_jobs::Migration),
             Box::new(m20260925_000001_create_admin_actions_table::Migration),
+            Box::new(m20261017_000001_add_player_wallet_address::Migration),
         ]
     }
 }

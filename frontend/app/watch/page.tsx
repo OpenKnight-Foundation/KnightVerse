@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Eye, Radio, SearchX } from "lucide-react";
 import { LiveGameCard } from "@/components/watch/LiveGameCard";
 import { SpectatorBoard } from "@/components/watch/SpectatorBoard";
+import { PipWindowLayer } from "@/components/watch/PipWindowLayer";
+import { usePipWindows } from "@/hook/usePipWindows";
 import {
   type LiveGameMode,
   type LiveGameSummary,
@@ -58,6 +60,15 @@ export default function WatchPage() {
   const [liveGames, setLiveGames] = useState<LiveGameRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const {
+    windows: pipWindows,
+    viewport: pipViewport,
+    isOpen: isPipOpen,
+    open: openPip,
+    close: closePip,
+    focus: focusPip,
+    setRect: setPipRect,
+  } = usePipWindows();
 
   useEffect(() => {
     let active = true;
@@ -117,8 +128,26 @@ export default function WatchPage() {
     [liveGames],
   );
 
+  const handleExpandPip = (gameId: string) => {
+    closePip(gameId);
+    setSelectedGameId(gameId);
+  };
+
   if (selectedGameId) {
-    return <SpectatorBoard gameId={selectedGameId} onLeave={() => setSelectedGameId(null)} />;
+    return (
+      <>
+        <SpectatorBoard gameId={selectedGameId} onLeave={() => setSelectedGameId(null)} />
+        <PipWindowLayer
+          windows={pipWindows}
+          viewport={pipViewport}
+          activeGameId={selectedGameId}
+          onFocus={focusPip}
+          onClose={closePip}
+          onExpand={handleExpandPip}
+          onRectChange={setPipRect}
+        />
+      </>
+    );
   }
 
   return (
@@ -193,6 +222,8 @@ export default function WatchPage() {
               timeControl={game.timeControl}
               status={game.status}
               onWatch={setSelectedGameId}
+              onMinimize={openPip}
+              isMinimized={isPipOpen(game.gameId)}
             />
           ))}
         </section>
@@ -206,6 +237,15 @@ export default function WatchPage() {
           ? "Last refresh failed — retrying every 10 seconds"
           : "Live list auto-refreshes every 10 seconds"}
       </div>
+
+      <PipWindowLayer
+        windows={pipWindows}
+        viewport={pipViewport}
+        onFocus={focusPip}
+        onClose={closePip}
+        onExpand={handleExpandPip}
+        onRectChange={setPipRect}
+      />
     </div>
   );
 }

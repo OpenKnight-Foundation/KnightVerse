@@ -7,6 +7,7 @@ import {
   AutoQueenMode,
   LegalMoveDots,
   BoardCoordinates,
+  BoardRenderer,
 } from "@/context/GamePreferencesContext";
 
 interface Option<T extends string> {
@@ -186,6 +187,57 @@ export default function GamePreferencesSettings() {
           onChange={(v) => setPreference("confirmMoveCorrespondence", v)}
           tooltip="Require explicit confirmation before sending a move in correspondence games."
         />
+        <Toggle
+          label="Blindfold mode (hide pieces)"
+          checked={preferences.blindfoldMode}
+          onChange={(v) => setPreference("blindfoldMode", v)}
+          tooltip="Hide piece graphics while keeping board coordinates and move input. Training for visualization."
+        />
+        <Toggle
+          label="Voice move input"
+          checked={preferences.voiceMoveEnabled}
+          onChange={(v) => setPreference("voiceMoveEnabled", v)}
+          tooltip="Dictate moves in English via the Web Speech API (e.g. Knight f3). Falls back to keyboard input."
+        />
+        <Toggle
+          label="Announce opponent moves aloud"
+          checked={preferences.ttsOpponentMoves}
+          onChange={(v) => setPreference("ttsOpponentMoves", v)}
+          tooltip="Use text-to-speech to speak opponent moves. Volume and rate configurable below."
+        />
+      </div>
+
+      <div className="border-t border-gray-800 pt-4 mb-4">
+        <label
+          htmlFor="tts-volume"
+          className="block text-sm text-gray-300 mb-1"
+        >
+          Speech volume: {preferences.ttsVolume}%
+        </label>
+        <input
+          id="tts-volume"
+          type="range"
+          min={0}
+          max={100}
+          value={preferences.ttsVolume}
+          onChange={(e) => setPreference("ttsVolume", Number(e.target.value))}
+          aria-label="Speech volume"
+          className="w-full"
+        />
+        <label htmlFor="tts-rate" className="block text-sm text-gray-300 mt-3 mb-1">
+          Speech rate: {preferences.ttsRate.toFixed(2)}x
+        </label>
+        <input
+          id="tts-rate"
+          type="range"
+          min={0.5}
+          max={2}
+          step={0.1}
+          value={preferences.ttsRate}
+          onChange={(e) => setPreference("ttsRate", Number(e.target.value))}
+          aria-label="Speech rate"
+          className="w-full"
+        />
       </div>
 
       <RadioGroup<BoardCoordinates>
@@ -197,6 +249,17 @@ export default function GamePreferencesSettings() {
           { id: "inside", label: "Inside Board", description: "Show coordinates on the squares" },
           { id: "outside", label: "Outside Board", description: "Show coordinates around the board" },
           { id: "hidden", label: "Hidden", description: "Do not show coordinates" },
+        ]}
+      />
+
+      <RadioGroup<BoardRenderer>
+        label="Board Renderer"
+        value={preferences.boardRenderer}
+        onChange={(v) => setPreference("boardRenderer", v)}
+        tooltip="Choose the board rendering style. 3D requires a WebGL-capable browser."
+        options={[
+          { id: "2d", label: "Classic 2D", description: "Fast, accessible board (default)" },
+          { id: "3d", label: "3D Board", description: "WebGL board with materials, falls back to 2D" },
         ]}
       />
 

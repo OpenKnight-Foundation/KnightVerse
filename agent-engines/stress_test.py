@@ -74,6 +74,8 @@ async def run_stress_test(uri: str, num_users: int, requests_per_user: int):
         print(f"Max Latency: {max(all_latencies):.4f}s")
         print(f"Min Latency: {min(all_latencies):.4f}s")
 
+    return {"latencies": all_latencies, "errors": total_errors}
+
 if __name__ == "__main__":
     import sys
     import json

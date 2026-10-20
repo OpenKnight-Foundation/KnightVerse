@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { API_BASE, WS_BASE } from "@/lib/api";
-import { useWebSocketScaling } from "@/context/webSocketScalingContext";
+import { endpoints } from "@/lib/api";
+import { debugLog } from "@/lib/debugLogger";
 
 export type ChessSocketStatus =
   | "idle"
@@ -10,17 +10,43 @@ export type ChessSocketStatus =
   | "disconnected"
   | "error";
 
-interface ChessMove {
+export interface ChessMove {
   from: string;
   to: string;
   promotion?: string;
+  /**
+   * Half-move (ply) index this move produces. Stamp it on every outgoing move so
+   * the server can reject duplicates and the client can reconcile its offline
+   * queue against the server's authoritative state (FE-114).
+   */
+  ply?: number;
+}
+
+/**
+ * Authoritative board snapshot returned by the server's `sync` reply. The hook
+ * exposes it so the parent (e.g. `PlayGameEngine`) can restore the board after a
+ * reconnect and apply the opponent's missed moves (FE-113).
+ */
+export interface SyncedGameState {
+  fen: string;
+  moves: ChessMove[];
+  whiteTime?: number;
+  blackTime?: number;
+  status?: string;
+  /** Highest ply the server has applied; used to drop already-sent moves. */
+  lastPly: number;
 }
 
 interface UseChessSocketReturn {
   status: ChessSocketStatus;
   gameId: string | null;
   lastOpponentMove: ChessMove | null;
+  /** True once the opponent has resigned (FE-117 / #1358). */
+  opponentResigned: boolean;
+  lastSyncedState: SyncedGameState | null;
   sendMove: (move: ChessMove) => void;
+  /** Sends an explicit resign message to the server (FE-117 / #1358). */
+  sendResign: () => void;
   disconnect: () => void;
   reconnect: () => void;
 }
@@ -30,11 +56,22 @@ const INITIAL_RECONNECT_DELAY = 1000; // 1 second
 const MAX_RECONNECT_DELAY = 30000; // 30 seconds
 const RECONNECT_TIMEOUT = 3000; // 3 seconds timeout for reconnection
 
+function toMove(raw: unknown): ChessMove | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.from !== "string" || typeof r.to !== "string") return null;
+  return {
+    from: r.from,
+    to: r.to,
+    promotion: typeof r.promotion === "string" ? r.promotion : undefined,
+    ply: typeof r.ply === "number" ? r.ply : undefined,
+  };
+}
+
 /**
  * Custom hook for managing WebSocket connection to the chess game server.
  * Handles connection, reconnection with exponential backoff, move queuing, and network state detection.
- * Now supports horizontal load balancing and regional node discovery.
- * 
+ *
  * @param gameId - The unique identifier for the chess game, or null if no game is active
  * @returns Object containing WebSocket status, game state, and control functions
  */
@@ -46,8 +83,9 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     setStatusState(s);
   }, []);
   const [lastOpponentMove, setLastOpponentMove] = useState<ChessMove | null>(null);
-  
-  const { getOptimalNode } = useWebSocketScaling();
+  const [opponentResigned, setOpponentResigned] = useState(false);
+  const [lastSyncedState, setLastSyncedState] = useState<SyncedGameState | null>(null);
+
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -59,6 +97,12 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   // Keep a ref to the latest status so callbacks can read it without being
   // re-created every time status changes (prevents infinite reconnect loop).
   const statusRef = useRef<ChessSocketStatus>("idle");
+  // Highest ply the server has acknowledged/applied. Moves at or below this
+  // index are known to have reached the server and must not be replayed (FE-114).
+  const lastAckedPlyRef = useRef(0);
+  // True while we are waiting for the server's `sync` reply after a reconnect.
+  // The offline queue is only flushed once that authoritative state arrives.
+  const awaitingSyncRef = useRef(false);
 
   /**
    * Clears all pending reconnection timeouts and timers.
@@ -85,53 +129,84 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   }, []);
 
   /**
-   * Creates a new WebSocket connection to the optimal game server node.
-   * 
+   * Sends a move over the socket, always stamping the ply index so the server
+   * can de-duplicate and the client can reconcile it later (FE-114).
+   */
+  const dispatchMove = useCallback(
+    (ws: WebSocket, move: ChessMove) => {
+      ws.send(
+        JSON.stringify({
+          type: "move",
+          gameId,
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion,
+          ply: move.ply,
+        }),
+      );
+    },
+    [gameId],
+  );
+
+  /**
+   * Replays queued offline moves that the server has not applied yet. Moves at or
+   * below `lastAckedPlyRef` are dropped because the server already has them.
+   */
+  const flushQueuedMoves = useCallback(
+    (ws: WebSocket) => {
+      const pending = moveQueueRef.current.filter(
+        (move) => (move.ply ?? Number.POSITIVE_INFINITY) > lastAckedPlyRef.current,
+      );
+      const dropped = moveQueueRef.current.length - pending.length;
+      if (dropped > 0) {
+        debugLog(`[WebSocket] Dropped ${dropped} queued move(s) already applied by the server`);
+      }
+      if (pending.length > 0) {
+        debugLog(`[WebSocket] Dispatching ${pending.length} queued move(s)`);
+        pending.forEach((move) => dispatchMove(ws, move));
+      }
+      moveQueueRef.current = [];
+    },
+    [dispatchMove],
+  );
+
+  /**
+   * Creates a new WebSocket connection to the game server configured via
+   * `NEXT_PUBLIC_API_URL` (see `endpoints.games.ws`).
+   *
    * @param attemptReconnect - Whether this connection attempt is a reconnection
    */
   const createWebSocket = useCallback(async (attemptReconnect = false) => {
     if (!gameId) return null;
 
     try {
-      // Step 1: Discover the optimal horizontal node (Regional Load Balancing)
-      const node = await getOptimalNode(gameId);
-      const wsUrl = `${node.url}/v1/games/${gameId}/ws`;
+      const wsUrl = endpoints.games.ws(gameId);
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       if (attemptReconnect) {
         setStatus("reconnecting");
-        console.log(`[WebSocket] Scaling: Attempting reconnection to ${node.id} (${node.region})`);
+        debugLog(`[WebSocket] Attempting reconnection to ${wsUrl}`);
       } else {
         setStatus("connecting");
-        console.log(`[WebSocket] Scaling: Connecting to ${node.id} for game ${gameId}`);
+        debugLog(`[WebSocket] Connecting to ${wsUrl} for game ${gameId}`);
       }
 
       ws.onopen = () => {
-        console.log(`[WebSocket] ${attemptReconnect ? 'Reconnected' : 'Connected'} for game ${gameId}`);
+        debugLog(`[WebSocket] ${attemptReconnect ? 'Reconnected' : 'Connected'} for game ${gameId}`);
         setStatus("connected");
         reconnectAttemptsRef.current = 0;
-        
-        // Send queued moves immediately upon reconnection
-        if (moveQueueRef.current.length > 0) {
-          console.log(`[WebSocket] Dispatching ${moveQueueRef.current.length} queued moves`);
-          moveQueueRef.current.forEach(move => {
-            ws.send(JSON.stringify({ 
-              type: "move", 
-              gameId, 
-              from: move.from, 
-              to: move.to, 
-              promotion: move.promotion 
-            }));
-          });
-          moveQueueRef.current = [];
-        }
 
-        // Request board state sync after reconnection
         if (attemptReconnect) {
-          console.log(`[WebSocket] Requesting board state sync for game ${gameId}`);
+          // Ask for the authoritative board first; the offline queue is flushed
+          // in the `sync` handler once we know which moves the server applied.
+          awaitingSyncRef.current = true;
+          debugLog(`[WebSocket] Requesting board state sync for game ${gameId}`);
           ws.send(JSON.stringify({ type: "sync", gameId }));
+        } else {
+          // Fresh connection: any moves queued before it opened can be sent now.
+          flushQueuedMoves(ws);
         }
       };
 
@@ -139,16 +214,52 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "move") {
-            console.log(`[WebSocket] Received opponent move:`, data);
-            setLastOpponentMove({
-              from: data.from,
-              to: data.to,
-              promotion: data.promotion,
-            });
+            debugLog(`[WebSocket] Received opponent move:`, data);
+            const move = toMove(data);
+            if (move) {
+              if (typeof move.ply === "number") {
+                lastAckedPlyRef.current = Math.max(lastAckedPlyRef.current, move.ply);
+              }
+              setLastOpponentMove(move);
+            }
+          } else if (data.type === "ack") {
+            // The server confirms it applied a move; drop it from the queue.
+            if (typeof data.ply === "number") {
+              lastAckedPlyRef.current = Math.max(lastAckedPlyRef.current, data.ply);
+              moveQueueRef.current = moveQueueRef.current.filter(
+                (move) => (move.ply ?? 0) > lastAckedPlyRef.current,
+              );
+            }
+          } else if (data.type === "resign" || (data.type === "game_over" && /resign/i.test(String(data.reason ?? "")))) {
+            debugLog(`[WebSocket] Opponent resigned`);
+            setOpponentResigned(true);
           } else if (data.type === "sync") {
-            console.log(`[WebSocket] Received board state sync:`, data);
-            // Handle sync response - this could update the board state
-            // The parent component should handle this via lastOpponentMove or a separate callback
+            debugLog(`[WebSocket] Received board state sync:`, data);
+            const lastPly =
+              typeof data.lastPly === "number"
+                ? data.lastPly
+                : typeof data.ply === "number"
+                  ? data.ply
+                  : lastAckedPlyRef.current;
+            lastAckedPlyRef.current = Math.max(lastAckedPlyRef.current, lastPly);
+            const moves: ChessMove[] = Array.isArray(data.moves)
+              ? (data.moves.map(toMove).filter(Boolean) as ChessMove[])
+              : [];
+            setLastSyncedState({
+              fen: typeof data.fen === "string" ? data.fen : "",
+              moves,
+              whiteTime: typeof data.whiteTime === "number" ? data.whiteTime : undefined,
+              blackTime: typeof data.blackTime === "number" ? data.blackTime : undefined,
+              status: typeof data.status === "string" ? data.status : undefined,
+              lastPly,
+            });
+            // Now that we know the server's position, reconcile and flush.
+            if (awaitingSyncRef.current) {
+              awaitingSyncRef.current = false;
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                flushQueuedMoves(wsRef.current);
+              }
+            }
           }
         } catch (error) {
           console.error("[WebSocket] Failed to parse message:", error);
@@ -161,21 +272,21 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       };
 
       ws.onclose = (event) => {
-        console.log(`[WebSocket] Closed for game ${gameId}. Code: ${event.code}, Reason: ${event.reason}`);
+        debugLog(`[WebSocket] Closed for game ${gameId}. Code: ${event.code}, Reason: ${event.reason}`);
         
         if (!isManualDisconnectRef.current) {
           setStatus("disconnected");
           
           // Check if we're online before attempting reconnection
           if (!isOnlineRef.current) {
-            console.log("[WebSocket] Device is offline, waiting for network...");
+            debugLog("[WebSocket] Device is offline, waiting for network...");
             return;
           }
           
           // Inline reconnection logic to avoid circular dependency
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             const delay = calculateReconnectDelay(reconnectAttemptsRef.current);
-            console.log(`[WebSocket] Attempting reconnection ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS} in ${Math.round(delay)}ms`);
+            debugLog(`[WebSocket] Attempting reconnection ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS} in ${Math.round(delay)}ms`);
             
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectAttemptsRef.current++;
@@ -185,12 +296,12 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
             // Set a timeout to ensure reconnection completes within 3 seconds
             reconnectTimerRef.current = setTimeout(() => {
               if (statusRef.current === "reconnecting") {
-                console.log("[WebSocket] Reconnection timeout exceeded 3 seconds");
+                debugLog("[WebSocket] Reconnection timeout exceeded 3 seconds");
                 // Continue trying but log the timeout
               }
             }, RECONNECT_TIMEOUT);
           } else {
-            console.log("[WebSocket] Max reconnection attempts reached");
+            debugLog("[WebSocket] Max reconnection attempts reached");
             setStatus("error");
           }
         } else {
@@ -205,7 +316,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       setStatus("error");
       return null;
     }
-  }, [gameId, calculateReconnectDelay]);
+  }, [gameId, calculateReconnectDelay, flushQueuedMoves]);
 
   /**
    * Sends a chess move to the server.
@@ -217,18 +328,12 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   const sendMove = useCallback((move: ChessMove) => {
     // If WebSocket is open, send immediately
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ 
-        type: "move", 
-        gameId, 
-        from: move.from, 
-        to: move.to, 
-        promotion: move.promotion 
-      }));
-      console.log("[WebSocket] Move sent immediately:", move);
+      dispatchMove(wsRef.current, move);
+      debugLog("[WebSocket] Move sent immediately:", move);
     } else {
       // Queue the move for when we reconnect
       moveQueueRef.current.push(move);
-      console.log("[WebSocket] Move queued (disconnected):", move);
+      debugLog("[WebSocket] Move queued (disconnected):", move);
       
       // Start reconnection if not already attempting
       if (statusRef.current === "disconnected" || statusRef.current === "idle") {
@@ -236,7 +341,20 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
         createWebSocket(true);
       }
     }
-  }, [gameId, createWebSocket]);
+  }, [createWebSocket, dispatchMove]);
+
+  /**
+   * Sends an explicit resign message so the server can complete the game and
+   * notify the opponent, instead of just dropping the socket (FE-117 / #1358).
+   */
+  const sendResign = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "resign", gameId }));
+      debugLog("[WebSocket] Resign message sent");
+    } else {
+      console.warn("[WebSocket] Cannot resign — socket is not open");
+    }
+  }, [gameId]);
 
   /**
    * Manually disconnects from the WebSocket server.
@@ -254,7 +372,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     // Clear move queue on manual disconnect
     moveQueueRef.current = [];
     reconnectAttemptsRef.current = 0;
-    console.log("[WebSocket] Manually disconnected");
+    debugLog("[WebSocket] Manually disconnected");
   }, [clearReconnectTimeout]);
 
   /**
@@ -271,7 +389,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     }
     
     reconnectAttemptsRef.current = 0;
-    console.log("[WebSocket] Manual reconnection initiated");
+    debugLog("[WebSocket] Manual reconnection initiated");
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket]);
 
@@ -282,12 +400,12 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
      * Triggers reconnection when the device comes back online.
      */
     const handleOnline = () => {
-      console.log("[Network] Device is online");
+      debugLog("[Network] Device is online");
       isOnlineRef.current = true;
       
       // If we were disconnected and are now online, attempt reconnection
       if (statusRef.current === "disconnected" && gameId) {
-        console.log("[Network] Online detected, attempting reconnection...");
+        debugLog("[Network] Online detected, attempting reconnection...");
         reconnectAttemptsRef.current = 0;
         createWebSocket(true);
       }
@@ -298,7 +416,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
      * Clears pending reconnection attempts when the device goes offline.
      */
     const handleOffline = () => {
-      console.log("[Network] Device is offline");
+      debugLog("[Network] Device is offline");
       isOnlineRef.current = false;
       
       // Clear any pending reconnection attempts
@@ -321,6 +439,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   // Initialize WebSocket when gameId changes
   useEffect(() => {
     let active = true;
+    setOpponentResigned(false);
     if (gameId) {
       createWebSocket().then(ws => {
         if (!active && ws) {
@@ -340,6 +459,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     } else {
       setStatus("idle");
       setLastOpponentMove(null);
+      setLastSyncedState(null);
     }
   }, [gameId, createWebSocket, clearReconnectTimeout]);
 
@@ -357,7 +477,10 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     status,
     gameId,
     lastOpponentMove,
+    opponentResigned,
+    lastSyncedState,
     sendMove,
+    sendResign,
     disconnect,
     reconnect,
   };

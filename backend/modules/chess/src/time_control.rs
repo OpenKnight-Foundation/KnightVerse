@@ -124,6 +124,327 @@ impl PlayerClock {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Time-control presets (#1119)
+// ---------------------------------------------------------------------------
+
+/// The time-control systems a preset can describe.
+///
+/// The three "delay" styles are genuinely different and are easy to conflate:
+///
+/// * **Bronstein** — the first `delay` seconds of each move are free, so a move
+///   costs `max(0, elapsed - delay)`.
+/// * **USCF delay** — the clock is granted `delay` seconds per move regardless
+///   of how long the move took, so a move costs `min(elapsed, delay)`.
+/// * **Fischer** — a flat increment is *added*, not refunded. Added before or
+///   after the move changes the result, because adding first can rescue a move
+///   that would otherwise flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeControlKind {
+    Standard,
+    /// Increment added after the move is made.
+    FischerAfter,
+    /// Increment added before the move is made ("Fischer bezoegen").
+    FischerBefore,
+    /// First `delay` seconds of each move refunded, up to that cap.
+    Bronstein,
+    /// Flat `delay` granted per move.
+    UscfDelay,
+    /// Fixed periods; the clock resets at the start of each new period.
+    ByoYomi,
+}
+
+/// A fully specified time control, ready to drive a [`PlayerClock`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeControlPreset {
+    pub kind: TimeControlKind,
+    pub initial_time: Duration,
+    pub increment: Duration,
+    /// Bronstein's per-move refund cap, or USCF delay's flat grant.
+    pub delay: Duration,
+    /// Byo-Yomi periods still available.
+    pub periods: u32,
+    /// Time granted by each Byo-Yomi period.
+    pub period_time: Duration,
+}
+
+impl TimeControlPreset {
+    fn base(kind: TimeControlKind, initial_time: Duration) -> Self {
+        Self {
+            kind,
+            initial_time,
+            increment: Duration::ZERO,
+            delay: Duration::ZERO,
+            periods: 0,
+            period_time: Duration::ZERO,
+        }
+    }
+
+    /// No increment, no delay.
+    pub fn standard(initial_time: Duration) -> Self {
+        Self::base(TimeControlKind::Standard, initial_time)
+    }
+
+    /// Fischer, increment added after the move.
+    pub fn fischer(initial_time: Duration, increment: Duration) -> Self {
+        Self {
+            increment,
+            ..Self::base(TimeControlKind::FischerAfter, initial_time)
+        }
+    }
+
+    /// Fischer with the increment added before the move is made.
+    pub fn fischer_before(initial_time: Duration, increment: Duration) -> Self {
+        Self {
+            increment,
+            ..Self::base(TimeControlKind::FischerBefore, initial_time)
+        }
+    }
+
+    /// Bronstein: the first `max_delay` of each move is refunded.
+    pub fn bronstein(initial_time: Duration, max_delay: Duration) -> Self {
+        Self {
+            delay: max_delay,
+            ..Self::base(TimeControlKind::Bronstein, initial_time)
+        }
+    }
+
+    /// USCF delay: `delay` is granted per move.
+    pub fn uscf_delay(initial_time: Duration, delay: Duration) -> Self {
+        Self {
+            delay,
+            ..Self::base(TimeControlKind::UscfDelay, initial_time)
+        }
+    }
+
+    /// Byo-Yomi: `periods` periods of `period_time` each, on top of
+    /// `initial_time`.
+    pub fn byo_yomi(initial_time: Duration, periods: u32, period_time: Duration) -> Self {
+        Self {
+            periods,
+            period_time,
+            ..Self::base(TimeControlKind::ByoYomi, initial_time)
+        }
+    }
+
+    /// Short human-readable label, e.g. `3+2` or `3x5 Byo-Yomi`.
+    pub fn describe(&self) -> String {
+        let base = self.initial_time.as_secs();
+        match self.kind {
+            TimeControlKind::Standard => format!("{base}"),
+            TimeControlKind::FischerAfter => {
+                format!("{base}+{}", self.increment.as_secs())
+            }
+            TimeControlKind::FischerBefore => {
+                format!("{base}+{} before", self.increment.as_secs())
+            }
+            TimeControlKind::Bronstein => format!("{base}|{} Bronstein", self.delay.as_secs()),
+            TimeControlKind::UscfDelay => format!("{base}|{} delay", self.delay.as_secs()),
+            TimeControlKind::ByoYomi => {
+                format!("{base}+{}x{} Byo-Yomi", self.periods, self.period_time.as_secs())
+            }
+        }
+    }
+}
+
+/// What completing a move did to a clock, so a caller can log or display it
+/// rather than re-deriving the rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClockAdjustment {
+    /// Time actually removed from the mover's clock.
+    pub deducted: Duration,
+    /// Time returned to the mover (Bronstein or USCF delay).
+    pub refunded: Duration,
+    /// Increment added (Fischer).
+    pub increment_added: Duration,
+    /// Byo-Yomi periods consumed because the clock hit zero.
+    pub periods_consumed: u32,
+    /// The mover ran out of time with no period left to save them.
+    pub flagged: bool,
+}
+
+impl PlayerClock {
+    /// Builds a clock positioned at the start of `preset.initial_time`.
+    pub fn from_preset(preset: &TimeControlPreset) -> Self {
+        Self::new(preset.initial_time)
+    }
+
+    /// True once the clock is at or below `threshold`, which is the cue for the
+    /// audible low-time warning.
+    pub fn should_warn(&self, threshold: Duration) -> bool {
+        self.get_real_time_remaining() <= threshold
+    }
+
+    /// Settles a move under `preset` and reports exactly what changed.
+    ///
+    /// The clock must be running; elapsed time is measured once, here, rather
+    /// than by the caller calling [`PlayerClock::stop`] first, so the deduction
+    /// and the refund cannot be computed from two different readings.
+    pub fn complete_move(&mut self, preset: &TimeControlPreset) -> ClockAdjustment {
+        let elapsed = match self.last_move_time {
+            Some(started) if self.is_running => started.elapsed(),
+            _ => Duration::ZERO,
+        };
+        self.is_running = false;
+        self.last_move_time = None;
+
+        let mut adjustment = ClockAdjustment::default();
+
+        // The two delay systems differ in exactly one respect: Bronstein caps
+        // the refund at the time actually spent, so a fast move gains nothing,
+        // whereas USCF delay grants the full delay every move, so a move faster
+        // than the delay actually adds time to the clock.
+        let refund = match preset.kind {
+            TimeControlKind::Bronstein => std::cmp::min(elapsed, preset.delay),
+            TimeControlKind::UscfDelay => preset.delay,
+            _ => Duration::ZERO,
+        };
+        adjustment.refunded = refund;
+
+        // Fischer-before grants the increment up front, so it can offset the
+        // move that is about to be deducted.
+        if preset.kind == TimeControlKind::FischerBefore {
+            self.remaining_time += preset.increment;
+            adjustment.increment_added = preset.increment;
+        }
+
+        self.remaining_time = self
+            .remaining_time
+            .saturating_add(refund)
+            .saturating_sub(elapsed);
+        adjustment.deducted = elapsed;
+
+        // The flag decision is taken here, *before* a Fischer-after increment.
+        // That increment is only paid once the move is completed, so it must not
+        // rescue a mover who was already out of time.
+        if self.remaining_time.is_zero() {
+            if preset.kind == TimeControlKind::ByoYomi && preset.periods > 0 {
+                self.remaining_time = preset.period_time;
+                adjustment.periods_consumed = 1;
+            } else {
+                adjustment.flagged = true;
+            }
+        }
+
+        if preset.kind == TimeControlKind::FischerAfter {
+            self.remaining_time += preset.increment;
+            adjustment.increment_added = preset.increment;
+        }
+
+        adjustment
+    }
+
+    /// Byo-Yomi periods still available, i.e. the clock has not been used up.
+    pub fn periods_left(&self, preset: &TimeControlPreset) -> u32 {
+        if preset.kind == TimeControlKind::ByoYomi {
+            preset.periods
+        } else {
+            0
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Endgame drill timing (#1124)
+// ---------------------------------------------------------------------------
+
+/// Audible warning threshold shared by rated play and drills.
+pub const LOW_TIME_WARNING: Duration = Duration::from_secs(10);
+
+/// How a single drill move is judged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrillVerdict {
+    /// Solved within the target time.
+    Pass,
+    /// Legal, but slower than the target the drill was set to.
+    TooSlow,
+    /// Ran out of time before finishing the move.
+    Flagged,
+}
+
+/// Accumulates per-move timings for one endgame drill attempt.
+///
+/// Only the timing and flagging half of a drill lives here: it reuses the
+/// preset engine so a drill and a rated game are timed by identical rules. The
+/// tablebase evaluation, the position catalogue and the pass/fail record
+/// written to a player profile are not part of this module.
+#[derive(Debug, Clone)]
+pub struct DrillSession {
+    preset: TimeControlPreset,
+    clock: PlayerClock,
+    moves: Vec<Duration>,
+    last_move_started: Option<Instant>,
+    finished: bool,
+}
+
+impl DrillSession {
+    pub fn start(preset: TimeControlPreset) -> Self {
+        let mut clock = PlayerClock::from_preset(&preset);
+        clock.start();
+        Self {
+            preset,
+            clock,
+            moves: Vec::new(),
+            last_move_started: Some(Instant::now()),
+            finished: false,
+        }
+    }
+
+    /// Clocks out the current move, judges it against `target`, and starts the
+    /// next one.
+    pub fn record_move(&mut self, target: Duration) -> DrillVerdict {
+        if self.finished {
+            return DrillVerdict::Flagged;
+        }
+
+        let adjustment = self.clock.complete_move(&self.preset);
+        let elapsed = self
+            .last_move_started
+            .map(|started| started.elapsed())
+            .unwrap_or_default();
+        self.moves.push(elapsed);
+
+        let verdict = if adjustment.flagged {
+            self.finished = true;
+            DrillVerdict::Flagged
+        } else if elapsed > target {
+            DrillVerdict::TooSlow
+        } else {
+            DrillVerdict::Pass
+        };
+
+        if !self.finished {
+            self.clock.start();
+            self.last_move_started = Some(Instant::now());
+        }
+
+        verdict
+    }
+
+    /// True once the clock has flagged and no further moves are accepted.
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    pub fn move_count(&self) -> usize {
+        self.moves.len()
+    }
+
+    pub fn total_time(&self) -> Duration {
+        self.moves.iter().copied().sum()
+    }
+
+    /// Longest single move, used to spot where a solver lost the drill.
+    pub fn slowest_move(&self) -> Option<Duration> {
+        self.moves.iter().copied().max()
+    }
+
+    pub fn remaining_time(&self) -> Duration {
+        self.clock.get_real_time_remaining()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

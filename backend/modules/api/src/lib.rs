@@ -1,11 +1,13 @@
 pub mod admin;
 pub mod ai;
 pub mod auth;
+pub mod chess960;
 #[cfg(test)]
 mod auth_tests;
 pub mod config;
 pub mod games;
 pub mod idempotency;
+pub mod lc0;
 pub mod metrics;
 pub mod moderation;
 pub mod openapi;
@@ -15,6 +17,7 @@ pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
 mod test;
+pub mod wallet_link;
 pub mod ws;
 
 // External modules

@@ -83,8 +83,7 @@ impl AINFTContract {
             panic_with_error!(&env, ContractError::AlreadyPaused);
         }
         env.storage().instance().set(&PAUSED, &true);
-        env.events()
-            .publish((symbol_short!("paused"),), caller);
+        env.events().publish((symbol_short!("paused"),), caller);
     }
 
     /// Unpause the contract — resumes normal operations.
@@ -99,8 +98,7 @@ impl AINFTContract {
             panic_with_error!(&env, ContractError::NotPaused);
         }
         env.storage().instance().set(&PAUSED, &false);
-        env.events()
-            .publish((symbol_short!("unpaused"),), caller);
+        env.events().publish((symbol_short!("unpaused"),), caller);
     }
 
     /// Returns `true` if the contract is currently paused.
@@ -284,13 +282,11 @@ impl AINFTContract {
         }
 
         // Bump version
-        let version: u64 = env
-            .storage()
-            .instance()
-            .get(&METADATA_VERSION)
-            .unwrap_or(0);
+        let version: u64 = env.storage().instance().get(&METADATA_VERSION).unwrap_or(0);
         let new_version = version + 1;
-        env.storage().instance().set(&METADATA_VERSION, &new_version);
+        env.storage()
+            .instance()
+            .set(&METADATA_VERSION, &new_version);
 
         // Update NFT metadata
         nft.metadata_hash = new_metadata_hash.clone();
@@ -626,10 +622,17 @@ mod tests {
         client.initialize(&admin);
 
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[8u8; 32]);
-        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "protected_bot"));
+        let nft_id = client.mint(
+            &minter,
+            &metadata_hash,
+            &String::from_str(&env, "protected_bot"),
+        );
 
         let result = client.try_burn(&attacker, &nft_id);
-        assert!(result.is_err(), "burn should fail when caller is not the owner");
+        assert!(
+            result.is_err(),
+            "burn should fail when caller is not the owner"
+        );
 
         // NFT should be untouched
         assert_eq!(client.owner_of(&nft_id), minter);
@@ -667,7 +670,11 @@ mod tests {
         client.initialize(&admin);
 
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[9u8; 32]);
-        let nft_id = client.mint(&minter, &metadata_hash, &String::from_str(&env, "pausable_bot"));
+        let nft_id = client.mint(
+            &minter,
+            &metadata_hash,
+            &String::from_str(&env, "pausable_bot"),
+        );
 
         client.pause(&admin);
         let result = client.try_burn(&minter, &nft_id);

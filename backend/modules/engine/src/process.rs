@@ -50,7 +50,7 @@ impl ProcessEngine {
         Ok(engine)
     }
 
-    async fn send_command(&mut self, cmd: &str) -> Result<(), EngineError> {
+    pub(crate) async fn send_command(&mut self, cmd: &str) -> Result<(), EngineError> {
         self.stdin
             .write_all(format!("{}\n", cmd).as_bytes())
             .await?;

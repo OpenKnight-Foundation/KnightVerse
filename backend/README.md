@@ -305,7 +305,7 @@ For questions or issues:
 
 ## 📊 Monitoring & Observability
 
-XLMate backend includes comprehensive Prometheus metrics and Grafana dashboards for monitoring system health and performance.
+KnightVerse backend includes comprehensive Prometheus metrics and Grafana dashboards for monitoring system health and performance.
 
 ### Metrics Endpoints
 
@@ -359,7 +359,7 @@ This will start:
 
 The Grafana instance comes pre-configured with:
 - Prometheus datasource
-- XLMate Backend Monitoring dashboard with panels for:
+- KnightVerse Backend Monitoring dashboard with panels for:
   - Active Games (stat panel)
   - WebSocket Connections (stat panel)
   - Database Query Latency P50/P95 (time series)

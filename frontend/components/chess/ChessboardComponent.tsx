@@ -56,6 +56,7 @@ function formatPieceName(piece: string): string {
 }
 
 import { useGamePreferences } from "@/context/GamePreferencesContext";
+import { pieceStyleForBlindfold } from "./BlindfoldToggle";
 
 // Import standard piece set assets
 import StandardWhiteKing from "./chesspieces/white-king.svg";
@@ -114,6 +115,9 @@ interface ChessboardComponentProps {
   "aria-label"?: string;
   legalMoves?: string[];
   onSquareClick?: (square: string) => void;
+  /** FE-52: when true, piece graphics are hidden (opacity 0) while hitboxes,
+   *  drag/click coordinates and legal-move dots keep working. */
+  blindfoldMode?: boolean;
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
@@ -124,8 +128,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   "aria-label": ariaLabel,
   legalMoves,
   onSquareClick,
+  blindfoldMode: blindfoldModeProp,
 }) => {
   const { preferences } = useGamePreferences();
+  // Prop wins when provided (e.g. PlayGameEngine), otherwise fall back to persisted preference.
+  const blindfoldMode = blindfoldModeProp ?? preferences.blindfoldMode ?? false;
   const [premoves, setPremoves] = useState<PreMove[]>([]);
   const premoveService = useRef(new PremoveService());
 
@@ -727,13 +734,30 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
               >
                 {piece && (
                   <div
+                    data-testid={blindfoldMode ? "blindfolded-piece" : undefined}
+                    aria-hidden={blindfoldMode ? true : undefined}
                     style={{
-                      transition: "transform 0.2s ease-out",
+                      ...pieceStyleForBlindfold(blindfoldMode),
+                      transition: "transform 0.2s ease-out, opacity 0.2s ease",
                       transform: `scale(${isSelected ? 1.1 : 1})`,
                     }}
                   >
                     {getPieceImage(piece)}
                   </div>
+                )}
+                {piece && blindfoldMode && (
+                  <div
+                    data-testid="blindfold-dot"
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      width: "18%",
+                      height: "18%",
+                      borderRadius: "50%",
+                      background: "rgba(148, 163, 184, 0.55)",
+                      pointerEvents: "none",
+                    }}
+                  />
                 )}
                 {isLegalTarget && (
                   <div

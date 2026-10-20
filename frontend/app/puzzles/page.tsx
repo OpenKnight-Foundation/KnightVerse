@@ -81,6 +81,7 @@ export default function PuzzlesPage() {
   const [currentMove, setCurrentMove] = useState(0);
   const [showReward, setShowReward] = useState(false);
   const [rewardAmount, setRewardAmount] = useState(0);
+  const [earnedXlm, setEarnedXlm] = useState(0);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [showHint, setShowHint] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
@@ -139,7 +140,7 @@ export default function PuzzlesPage() {
 
   const { execute: executeClaim } = useTrackedTransaction({
     type: "claim",
-    label: `Claim ${rewardAmount || "0.01"} XLM reward`,
+    label: `Claim ${rewardAmount} XLM reward`,
     amount: String(rewardAmount),
   });
 
@@ -175,37 +176,65 @@ export default function PuzzlesPage() {
     const isSolutionCorrect = currentMove === selectedPuzzle.solution.length - 1;
     setIsCorrect(isSolutionCorrect);
 
-    if (isSolutionCorrect) {
-      // Submit to backend (#FE-68)
-      try {
-        const moves = selectedPuzzle.solution.map((m) => `${m.from}${m.to}${m.promotion ?? ""}`);
-        await fetchWithRetry(endpoints.puzzles.submit(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ puzzle_id: selectedPuzzle.id, moves }),
-        });
-      } catch {
-        // Non-blocking: reward flow continues even if submit fails
+    if (!isSolutionCorrect) return;
+
+    // Only grant a completion/reward once the server has verified the solution
+    // and told us the amount (#FE-105). A failed or rejected submission must
+    // surface an error instead of a fake reward.
+    try {
+      const moves = selectedPuzzle.solution.map((m) => `${m.from}${m.to}${m.promotion ?? ""}`);
+      const res = await fetchWithRetry(endpoints.puzzles.submit(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ puzzle_id: selectedPuzzle.id, moves }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Puzzle verification failed (HTTP ${res.status})`);
       }
 
-      // Mark puzzle as completed
-      setCompletedPuzzles((prev: Set<number>) => new Set([...prev, selectedPuzzle.id]));
+      const data = (await res.json()) as {
+        verified?: boolean;
+        reward?: number;
+        reward_amount?: number;
+      };
 
-      // Simulate backend verification and reward
-      const reward = 0.01; // 0.01 XLM reward
+      if (data.verified === false) {
+        throw new Error("The server rejected this solution.");
+      }
+
+      const reward =
+        typeof data.reward === "number"
+          ? data.reward
+          : typeof data.reward_amount === "number"
+            ? data.reward_amount
+            : 0;
+
+      // Mark puzzle as completed and show the server-verified reward.
+      setCompletedPuzzles((prev: Set<number>) => new Set([...prev, selectedPuzzle.id]));
       setRewardAmount(reward);
+      setEarnedXlm((prev) => prev + reward);
       setShowReward(true);
 
       addToast({
         severity: "success",
         title: "Puzzle Complete!",
-        detail: `You earned ${reward} XLM. Click claim to receive your reward.`,
+        detail: `Verified! You earned ${reward} XLM. Click claim to receive your reward.`,
       });
 
       // Hide reward popup after 4 seconds
       setTimeout(() => {
         setShowReward(false);
       }, 4000);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not verify the solution.";
+      setIsCorrect(false);
+      addToast({
+        severity: "error",
+        title: "Verification failed",
+        detail: message,
+      });
     }
   }, [selectedPuzzle, currentMove, addToast]);
 
@@ -494,7 +523,7 @@ export default function PuzzlesPage() {
               <p className="text-sm text-gray-400">Completion Rate</p>
             </div>
             <div className="bg-gray-800/60 px-6 py-4 rounded-xl border border-gray-700/50 animate-scale-in" style={{ animationDelay: "0.3s" }}>
-              <p className="text-2xl font-bold text-emerald-400">{(completedPuzzles.size * 0.01).toFixed(2)}</p>
+              <p className="text-2xl font-bold text-emerald-400">{earnedXlm.toFixed(2)}</p>
               <p className="text-sm text-gray-400">XLM Earned</p>
             </div>
           </div>
@@ -556,7 +585,7 @@ export default function PuzzlesPage() {
 
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">Puzzle #{puzzle.id}</span>
-                    <span className="text-xs text-emerald-400 font-medium">+0.01 XLM</span>
+                    <span className="text-xs text-emerald-400 font-medium">Earn XLM</span>
                   </div>
                 </div>
               );
@@ -578,7 +607,7 @@ export default function PuzzlesPage() {
             </div>
             <div>
               <h4 className="font-semibold text-white mb-2">3. Earn Rewards</h4>
-              <p className="text-sm">Complete puzzles to earn 0.01 XLM each</p>
+              <p className="text-sm">Complete puzzles to earn XLM rewards once the server verifies your solution</p>
             </div>
           </div>
         </div>

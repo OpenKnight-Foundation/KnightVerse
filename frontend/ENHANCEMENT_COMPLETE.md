@@ -6,26 +6,35 @@ Successfully enhanced XLMate with premium Next.js UI components and fluid Web3 i
 
 ## 📦 Deliverables
 
-### 1. UI Components (11 Components)
-✅ **Created:**
-- `components/ui/card.tsx` - Premium card with sub-components
+### 1. UI Components
+✅ **Kept in the live library:**
 - `components/ui/badge.tsx` - Status badges with 7 variants
-- `components/ui/progress.tsx` - Animated progress bar
-- `components/ui/spinner.tsx` - Loading spinner (3 sizes)
 - `components/ui/alert.tsx` - Contextual alerts
-- `components/ui/skeleton.tsx` - Loading skeleton with shimmer
 - `components/ui/empty-state.tsx` - Empty state placeholder
-- `components/ui/stat-card.tsx` - Statistics display
-- `components/ui/tooltip.tsx` - CSS-only tooltips
 - `components/ui/button.tsx` - ✅ Already existed (maintained)
 - `components/ui/toast.tsx` - ✅ Already existed (maintained)
 
-### 2. Web3 Components (4 Components)
-✅ **Created:**
+🗑️ **Deleted as dead code (FE-126 / FE-127 / FE-129):**
+- `components/ui/card.tsx`, `progress.tsx`, `spinner.tsx`, `skeleton.tsx`,
+  `stat-card.tsx`, `tooltip.tsx`, `DotPulseLoader.tsx` — never imported once the
+  duplicated components below were removed. Use `ui/LoadingSkeleton`,
+  `components/dashboard/StatCard`, `components/TransactionStatusIndicator` and
+  `components/Web3StatusBar` instead.
+
+### 2. Web3 Components
+✅ **Kept in the live library:**
 - `components/Web3/WalletButton.tsx` - Premium wallet connection button
-- `components/Web3/TransactionButton.tsx` - Smart transaction button
-- `components/Web3/EnhancedTransactionStatus.tsx` - Transaction lifecycle tracker
 - `components/EnhancedHeader.tsx` - Premium navigation header
+
+🗑️ **Deleted as dead code (FE-126):**
+- `components/Web3/TransactionButton.tsx` - superseded by `Button` +
+  `hook/useTrackedTransaction`; the puzzle-claim flow already tracks its own
+  loading state.
+- `components/Web3/EnhancedTransactionStatus.tsx` - duplicated the globally
+  mounted `components/TransactionStatusIndicator.tsx`.
+- `components/ui/ToastNotificationCenter.tsx` - unreachable by construction:
+  its notification list was local state with no setter exposed, so it could
+  never render anything. The `ui/toast` context is the live notification path.
 
 ### 3. Enhanced Utilities
 ✅ **Updated `lib/utils.ts` with:**
@@ -57,7 +66,9 @@ Successfully enhanced XLMate with premium Next.js UI components and fluid Web3 i
 
 ### 5. Layout Updates
 ✅ **Updated:**
-- `app/layout.tsx` - Added EnhancedHeader and EnhancedTransactionStatus
+- `app/layout.tsx` - Added EnhancedHeader; `components/ClientRoot.tsx` mounts
+  `TransactionStatusIndicator` (replacing `EnhancedTransactionStatus`, removed
+  in FE-126).
 - `app/page.tsx` - Removed redundant Web3StatusBar
 
 ### 6. Documentation (5 Documents)

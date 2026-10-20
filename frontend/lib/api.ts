@@ -7,40 +7,49 @@
  * `process.env` directly.
  */
 
-function env(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+/**
+ * Returns `value` unless it is unset or empty.
+ *
+ * Every call site below passes `process.env.NEXT_PUBLIC_…` as a *literal*
+ * property access. Next.js only inlines `NEXT_PUBLIC_*` variables into the
+ * client bundle when they are written that way; indexing `process.env` with a
+ * variable is left as-is and is always `undefined` in the browser (#FE-86).
+ * Don't refactor these back into a name-based helper.
+ */
+function withDefault(value: string | undefined, fallback: string): string {
+  return value ? value : fallback;
 }
 
 /** Backend / game-server base URL (REST + WebSocket) */
-export const API_BASE = env("NEXT_PUBLIC_API_URL", "http://localhost:8000");
+export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8000");
 
 /** Derive the WebSocket base from the HTTP base automatically */
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 /** Legacy alias — some older services read `NEXT_PUBLIC_BACKEND_URL` */
-export const BACKEND_BASE = env("NEXT_PUBLIC_BACKEND_URL", API_BASE);
+export const BACKEND_BASE = withDefault(process.env.NEXT_PUBLIC_BACKEND_URL, API_BASE);
 
 /** Stellar Horizon API */
-export const HORIZON_URL = env(
-  "NEXT_PUBLIC_HORIZON_URL",
+export const HORIZON_URL = withDefault(
+  process.env.NEXT_PUBLIC_HORIZON_URL,
   "https://horizon-testnet.stellar.org",
 );
 
 /** Soroban RPC endpoint */
-export const SOROBAN_RPC = env(
-  "NEXT_PUBLIC_SOROBAN_RPC",
+export const SOROBAN_RPC = withDefault(
+  process.env.NEXT_PUBLIC_SOROBAN_RPC,
   "https://soroban-testnet.stellar.org:443",
 );
 
 /** Stellar network passphrase */
-export const NETWORK_PASSPHRASE = env(
-  "NEXT_PUBLIC_NETWORK_PASSPHRASE",
+export const NETWORK_PASSPHRASE = withDefault(
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
   "Test SDF Network ; September 2015",
 );
 
 /** IPFS gateway for decentralized storage */
-export const IPFS_GATEWAY = env(
-  "NEXT_PUBLIC_IPFS_GATEWAY",
+export const IPFS_GATEWAY = withDefault(
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY,
   "https://gateway.pinata.cloud",
 );
 
@@ -171,17 +180,22 @@ export const endpoints = {
 
   /** Matchmaking */
   matchmaking: {
-    join: () => `${API_BASE}/v1/matchmaking/join`,
+    joinCasual: () => `${API_BASE}/v1/matchmaking/join-casual`,
+    joinRated: () => `${API_BASE}/v1/matchmaking/join-rated-free`,
+    joinStaked: () => `${API_BASE}/v1/matchmaking/join-rated-staked`,
+    status: (requestId: string) =>
+      `${API_BASE}/v1/matchmaking/status/${encodeURIComponent(requestId)}`,
+    match: (matchId: string) =>
+      `${API_BASE}/v1/matchmaking/match/${encodeURIComponent(matchId)}`,
     cancel: () => `${API_BASE}/v1/matchmaking/cancel`,
-    ws: (sessionId: string) =>
-      `${WS_BASE}/v1/matchmaking/ws?session=${encodeURIComponent(sessionId)}`,
   },
 
   /** Games */
   games: {
     live: () => `${API_BASE}/v1/games/live`,
+    /** Game socket — served by the backend at `/v1/ws/game/{game_id}`. */
     ws: (gameId: string) =>
-      `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/ws`,
+      `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}`,
     spectate: (gameId: string) =>
       `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/spectate`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
@@ -195,22 +209,42 @@ export const endpoints = {
 
   /** Players */
   players: {
+    /**
+     * Live online-player count.
+     *
+     * NOTE (#FE-102): the backend does not expose this route yet, so callers
+     * must hide the counter gracefully when a request fails instead of polling
+     * it on a tight interval. Pair with the backend "players online" endpoint
+     * issue before surfacing a count to users.
+     */
     online: () => `${API_BASE}/v1/players/online`,
     export: () => `${API_BASE}/v1/players/me/export`,
+    /**
+     * Rating (ELO) history for a single player.
+     *
+     * NOTE (#FE-103): players are keyed by their UUID / wallet address on the
+     * backend, *not* by the integer `user_id`. Pass the player identifier the
+     * backend expects. Pairs with the backend player-stats endpoint issue.
+     */
+    eloHistory: (playerId: string) =>
+      `${API_BASE}/v1/players/${encodeURIComponent(playerId)}/elo-history`,
+    /** Wallet linking (#FE-97): challenge → Freighter signMessage → verify. */
+    walletChallenge: () => `${API_BASE}/v1/players/me/wallet/challenge`,
+    walletVerify: () => `${API_BASE}/v1/players/me/wallet/verify`,
+    wallet: () => `${API_BASE}/v1/players/me/wallet`,
   },
 
   /** Tournaments */
+  /**
+   * Tournaments — the backend mounts these under its JWT-protected
+   * `/api/v1/tournaments` scope. Only `register` exists server-side today;
+   * list/create follow the same scope (see BE-114).
+   */
   tournaments: {
-    list: () => `${API_BASE}/v1/tournaments`,
-    create: () => `${API_BASE}/v1/tournaments`,
+    list: () => `${API_BASE}/api/v1/tournaments`,
+    create: () => `${API_BASE}/api/v1/tournaments`,
     register: (id: string) =>
-      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
-  },
-
-  /** Profile & Preferences */
-  profile: {
-    preferences: () => `${API_BASE}/v1/profile/preferences`,
-    theme: () => `${API_BASE}/v1/profile/theme`,
+      `${API_BASE}/api/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Horizon */

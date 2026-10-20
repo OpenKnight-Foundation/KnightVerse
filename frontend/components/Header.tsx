@@ -8,10 +8,14 @@ import { useTheme } from 'next-themes'
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet'
 import { GameSidebar } from './GameSidebar'
 import { MoonIcon, SunIcon } from 'lucide-react'
+import { useAuth } from '../context/authContext'
+import { SignInModal } from './SignInModal'
 
 export function Header() {
     const { theme, setTheme } = useTheme()
     const [collapsed, setCollapsed] = React.useState(false)
+    const { user } = useAuth()
+    const [signInOpen, setSignInOpen] = React.useState(false)
 
     return (
         <header className="h-16 border-b border-border bg-card/80 backdrop-blur-sm fixed top-0 left-0 right-0 z-50" role="banner">
@@ -25,6 +29,13 @@ export function Header() {
                         </SheetTrigger>
                         <SheetContent side="left" className="p-0 w-64">
                             <GameSidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+                            {!user && (
+                                <div className="p-4 border-t border-border">
+                                    <Button className="w-full" onClick={() => setSignInOpen(true)}>
+                                        Sign In
+                                    </Button>
+                                </div>
+                            )}
                         </SheetContent>
                     </Sheet>
 
@@ -48,11 +59,20 @@ export function Header() {
                         {theme === 'dark' ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
                     </Button>
 
-                    <Button variant="ghost" size="icon" className="md:hidden" aria-label="User profile">
-                        <UserIcon />
-                    </Button>
+                    {user ? (
+                        <Link href="/profile" aria-label="User profile">
+                            <Button variant="ghost" size="icon">
+                                <UserIcon />
+                            </Button>
+                        </Link>
+                    ) : (
+                        <Button variant="ghost" size="sm" onClick={() => setSignInOpen(true)} aria-label="Sign in">
+                            Sign In
+                        </Button>
+                    )}
                 </div>
             </div>
+            <SignInModal open={signInOpen} onOpenChange={setSignInOpen} />
         </header>
     )
 }

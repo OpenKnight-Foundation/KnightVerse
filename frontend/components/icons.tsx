@@ -11,6 +11,10 @@ import {
   LifeBuoy,
   Wallet,
   Menu,
+  Trophy,
+  Coins,
+  Shield,
+  Bot,
 } from "lucide-react"
 
 export function ChessIcon() {
@@ -74,4 +78,20 @@ export function WalletIcon() {
 
 export function MenuIcon() {
   return <Menu size={24} />
+}
+
+export function TournamentIcon() {
+  return <Trophy size={20} />
+}
+
+export function StakeIcon() {
+  return <Coins size={20} />
+}
+
+export function GuildIcon() {
+  return <Shield size={20} />
+}
+
+export function CompanionsIcon() {
+  return <Bot size={20} />
 }

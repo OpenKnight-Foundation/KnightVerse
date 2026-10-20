@@ -9,6 +9,8 @@ members = [
     "model_attestation",
     "sponsorship_escrow",
     "title_badge",
+    "arbiter_escrow",
+    "yield_staking",
 ]
 
 # title_badge is intentionally excluded: it pins soroban-sdk = "0.10.1" (every

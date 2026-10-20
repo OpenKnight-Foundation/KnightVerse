@@ -55,6 +55,9 @@ pub struct CancelRequest {
 pub struct StatusResponse {
     pub status: String,
     pub queue_status: Option<QueueStatus>,
+    /// Set once the request has been paired; the client should open the match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -193,14 +196,28 @@ async fn get_status(
 ) -> impl Responder {
     let request_id = path.into_inner();
 
+    match service.get_matched_id(request_id).await {
+        Ok(Some(match_id)) => {
+            return HttpResponse::Ok().json(StatusResponse {
+                status: "matched".to_string(),
+                queue_status: None,
+                match_id: Some(match_id),
+            })
+        }
+        Ok(None) => {}
+        Err(e) => error!("Failed to look up matched request: {}", e),
+    }
+
     match service.get_queue_status(request_id).await {
         Ok(Some(status)) => HttpResponse::Ok().json(StatusResponse {
             status: "In queue".to_string(),
             queue_status: Some(status),
+            match_id: None,
         }),
         Ok(None) => HttpResponse::NotFound().json(StatusResponse {
             status: "Request not found".to_string(),
             queue_status: None,
+            match_id: None,
         }),
         Err(e) => {
             error!("Failed to get queue status: {}", e);

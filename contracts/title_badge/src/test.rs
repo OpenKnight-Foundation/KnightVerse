@@ -1,7 +1,7 @@
 //! Unit tests for the TitleBadge registry.
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
 fn setup() -> (Env, TitleBadgeContractClient<'static>, Address) {
     let env = Env::default();

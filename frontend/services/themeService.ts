@@ -1,4 +1,3 @@
-import { endpoints } from "@/lib/api";
 import type { BoardTheme, ThemeColors } from "@/context/ThemeContext";
 
 export interface ThemePreferencesPayload {
@@ -7,77 +6,78 @@ export interface ThemePreferencesPayload {
 }
 
 /**
- * Sync user theme preferences with backend profile API when authenticated.
- * Fails gracefully and silently logs errors if server is unreachable or offline.
+ * Callback invoked with a human-readable, non-blocking warning whenever a
+ * preference save could not be synced to the backend.
  */
-export async function syncThemeWithBackend(
-  payload: ThemePreferencesPayload,
-  token?: string | null
-): Promise<boolean> {
-  const authToken =
-    token ??
-    (typeof window !== "undefined"
-      ? localStorage.getItem("access_token")
-      : null);
-  if (!authToken) {
-    return false;
-  }
+export type ThemeSyncWarning = (message: string) => void;
 
+/** Local-only persistence key. */
+export const THEME_PREFERENCES_STORAGE_KEY = "knightverse_theme_preferences";
+
+const SYNC_UNAVAILABLE_WARNING =
+  "Theme preferences are saved on this device only. Cross-device sync is unavailable until the backend exposes a preferences endpoint (#FE-104).";
+
+function readLocalPreferences(): ThemePreferencesPayload | null {
+  if (typeof window === "undefined") return null;
   try {
-    const response = await fetch(endpoints.profile.theme(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    return response.ok;
+    const raw = localStorage.getItem(THEME_PREFERENCES_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as ThemePreferencesPayload;
   } catch (error) {
-    // Graceful fallback for offline / mock server environments
-    console.warn("Could not sync theme with backend:", error);
-    return false;
+    console.warn("Could not read local theme preferences:", error);
+    return null;
+  }
+}
+
+function writeLocalPreferences(payload: ThemePreferencesPayload): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      THEME_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(payload)
+    );
+  } catch (error) {
+    console.warn("Could not persist theme preferences locally:", error);
   }
 }
 
 /**
- * Fetch user theme preferences from backend profile API when authenticated.
+ * Persist theme preferences for the current user.
+ *
+ * TODO(#FE-104): the backend has no `profile` scope, so `/v1/profile/theme`
+ * and `/v1/profile/preferences` do not exist. Until a real preferences
+ * endpoint is paired with a backend issue, preferences are stored client-side
+ * only and a non-blocking warning is surfaced so callers can tell the user
+ * their choice will not roam between devices. Do NOT reintroduce a profile
+ * fetch here without that backend endpoint.
+ *
+ * Returns `false` while server sync is unavailable (preferences are still
+ * saved locally).
+ */
+export async function syncThemeWithBackend(
+  payload: ThemePreferencesPayload,
+  token?: string | null,
+  onWarning?: ThemeSyncWarning,
+): Promise<boolean> {
+  void token; // No backend endpoint to authenticate against yet (#FE-104).
+
+  writeLocalPreferences(payload);
+
+  const warning = onWarning ?? ((message: string) => console.warn(message));
+  warning(SYNC_UNAVAILABLE_WARNING);
+
+  return false;
+}
+
+/**
+ * Load the current user's theme preferences.
+ *
+ * Reads from local storage because the backend preferences route does not
+ * exist yet (#FE-104). Returns `null` when nothing has been saved.
  */
 export async function fetchThemePreferencesFromBackend(
-  token?: string | null
+  token?: string | null,
 ): Promise<ThemePreferencesPayload | null> {
-  const authToken =
-    token ??
-    (typeof window !== "undefined"
-      ? localStorage.getItem("access_token")
-      : null);
-  if (!authToken) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(endpoints.profile.preferences(), {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    if (data && data.boardTheme) {
-      return {
-        boardTheme: data.boardTheme,
-        customPalette: data.customPalette,
-      };
-    }
-    return null;
-  } catch (error) {
-    console.warn("Could not fetch theme preferences from backend:", error);
-    return null;
-  }
+  void token; // No backend endpoint to authenticate against yet (#FE-104).
+  return readLocalPreferences();
 }

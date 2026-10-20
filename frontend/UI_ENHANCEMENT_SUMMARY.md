@@ -1,5 +1,15 @@
 # UI Enhancement Summary
 
+> **Note (FE-126 / FE-127 / FE-129):** Several components this guide once
+> described were deleted as dead code — `ui/card`, `ui/progress`, `ui/spinner`,
+> `ui/skeleton`, `ui/stat-card`, `ui/tooltip`, `ui/DotPulseLoader`,
+> `Web3/TransactionButton`, `Web3/EnhancedTransactionStatus` and
+> `ui/ToastNotificationCenter`. The live replacements are
+> `ui/LoadingSkeleton`, `components/dashboard/StatCard`,
+> `components/TransactionStatusIndicator`, `components/Web3StatusBar`,
+> `hook/useTrackedTransaction` and the `ui/toast` context. Examples below that
+> import the removed files are kept only as historical notes.
+
 ## 🎯 Overview
 
 This document summarizes the premium UI components and fluid Web3 interactions implemented for XLMate. All enhancements follow established design patterns, ensure efficient resource utilization, and maintain full accessibility compliance.

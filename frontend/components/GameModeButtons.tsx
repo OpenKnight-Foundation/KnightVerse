@@ -61,7 +61,7 @@ const GameModeButtons: React.FC<GameModeButtonsProps> = ({ setGameMode }) => {
       <div className="play-button-container relative">
         <button
           onClick={() => setGameMode("bot")}
-          aria-label="Play Bots — Play vs customizable training bots"
+          aria-label="Play Bots — Play vs bot opponents for training"
           className="play-button w-full p-4 relative border-none outline-none cursor-pointer transition-all duration-300 ease-in-out z-[2] overflow-hidden flex items-center justify-center bg-transparent"
         >
           <span className="button-text flex items-center gap-6 z-[3]">

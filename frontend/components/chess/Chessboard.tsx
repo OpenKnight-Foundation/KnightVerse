@@ -2,6 +2,14 @@ import React, { useState, useMemo } from "react";
 import { Chess, type Move, type Square } from "chess.js";
 import ChessboardComponent from "./ChessboardComponent";
 
+/**
+ * Thin adapter over the canonical `ChessboardComponent` (FE-123 / #1364).
+ *
+ * `ChessboardComponent` is the single board implementation; this wrapper only
+ * adds click-to-select legal-move handling for callers that want the simpler
+ * `onMove` API. The duplicate `OptimizedChessboard` renderer was removed and the
+ * WebGL board is opt-in via the `boardRenderer` appearance setting.
+ */
 interface ChessboardProps {
   position: string;
   onMove: (move: Move) => void;

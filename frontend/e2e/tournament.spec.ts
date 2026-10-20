@@ -50,6 +50,9 @@ async function mockTournamentApi(page: Page) {
 }
 
 test.describe("Tournament registration", () => {
+  // First visit compiles /tournament on the dev server.
+  test.setTimeout(60_000);
+
   test("registers for an open tournament", async ({ page }) => {
     const registrations = await mockTournamentApi(page);
     await page.goto("/tournament");
@@ -75,5 +78,31 @@ test.describe("Tournament registration", () => {
     await expect(page.getByText("You are already registered for this tournament.")).toBeVisible();
     await expect(page.getByText("You're registered for E2E Open.")).toBeHidden();
     expect(registrations.count).toBe(2);
+  });
+
+  test("shows an empty state when the tournament list isn't available yet (#FE-100)", async ({ page }) => {
+    await page.context().route(/\/v1\/tournaments$/, (route) =>
+      route.request().method() === "OPTIONS"
+        ? route.fulfill({ status: 204, headers: CORS_HEADERS })
+        : route.fulfill({ status: 404, headers: CORS_HEADERS, json: { error: "not found" } }),
+    );
+    await page.goto("/tournament");
+
+    await expect(page.getByText("No tournaments yet. Create one above.")).toBeVisible();
+    await expect(page.getByText(/server error/i)).toBeHidden();
+  });
+
+  test("calls the backend's /api/v1/tournaments scope", async ({ page }) => {
+    const seen: string[] = [];
+    page.on("request", (req) => {
+      if (/\/tournaments/.test(req.url())) seen.push(new URL(req.url()).pathname);
+    });
+    await mockTournamentApi(page);
+    await page.goto("/tournament");
+    await page.getByRole("button", { name: /^register$/i }).click();
+    await expect(page.getByText("You're registered for E2E Open.")).toBeVisible();
+
+    expect(seen).toContain("/api/v1/tournaments");
+    expect(seen).toContain(`/api/v1/tournaments/${TOURNAMENT.id}/register`);
   });
 });

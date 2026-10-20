@@ -6,12 +6,14 @@ interface ReconnectionBannerProps {
   isDisconnected: boolean;
   onReconnected?: () => void;
   gracePeriodSeconds?: number;
+  className?: string;
 }
 
-export function ReconnectionBanner({
+export function ReconnectionBanner( {
   isDisconnected,
   onReconnected,
   gracePeriodSeconds = 60,
+  className,
 }: ReconnectionBannerProps) {
   const [secondsLeft, setSecondsLeft] = useState(gracePeriodSeconds);
   const [reconnected, setReconnected] = useState(false);
@@ -42,9 +44,10 @@ export function ReconnectionBanner({
   return (
     <div
       role="status"
-      className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-lg px-4 py-2 shadow-lg text-sm font-medium ${
+      aria-live="polite"
+      className={`fixed top-4 left-1/2 -x-translate-x-1/2 z-50 rounded-lg px-4 py-2 shadow-lg text-sm font-medium ${
         reconnected ? "bg-green-600 text-white" : "bg-amber-500 text-black"
-      }`}
+      } ${className ?? ""}`}
     >
       {reconnected
         ? "Reconnected"

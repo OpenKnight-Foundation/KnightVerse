@@ -13,6 +13,12 @@ const ELO_RANGE_INCREMENT_PER_5_SECONDS: u32 = 25;
 const INITIAL_ELO_RANGE: u32 = 50;
 const MAX_ELO_RANGE: u32 = 300;
 const DEFAULT_ESTIMATED_WAIT_TIME: Duration = Duration::from_secs(60);
+/// How long a matched request id keeps resolving to its match id via `/status`.
+const MATCHED_REQUEST_TTL_SECS: u64 = 600;
+
+fn matched_request_key(request_id: Uuid) -> String {
+    format!("matchmaking:matched:{}", request_id)
+}
 
 #[derive(Clone)]
 pub struct MatchmakingService {
@@ -254,6 +260,8 @@ impl MatchmakingService {
                     time_control: invite_request.time_control.clone(),
                 };
 
+                self.remember_match(&mut conn, &[inviter_request_id], match_id)
+                    .await?;
                 let mut active_matches = self.active_matches.lock().unwrap();
                 active_matches.insert(match_id, new_match);
 
@@ -334,6 +342,36 @@ impl MatchmakingService {
         }
 
         Ok(false)
+    }
+
+    /// Records which match each request ended up in, so a player who was
+    /// already waiting in the queue can discover it by polling `/status`.
+    async fn remember_match(
+        &self,
+        conn: &mut deadpool_redis::Connection,
+        request_ids: &[Uuid],
+        match_id: Uuid,
+    ) -> Result<(), String> {
+        for request_id in request_ids {
+            conn.set_ex::<_, _, ()>(
+                matched_request_key(*request_id),
+                match_id.to_string(),
+                MATCHED_REQUEST_TTL_SECS,
+            )
+            .await
+            .map_err(|e| format!("Redis SETEX failed: {}", e))?;
+        }
+        Ok(())
+    }
+
+    /// The match a request was paired into, if it has been matched.
+    pub async fn get_matched_id(&self, request_id: Uuid) -> Result<Option<Uuid>, String> {
+        let mut conn = self.get_redis_connection().await?;
+        let value: Option<String> = conn
+            .get(matched_request_key(request_id))
+            .await
+            .map_err(|e| format!("Redis GET failed: {}", e))?;
+        Ok(value.and_then(|v| Uuid::parse_str(&v).ok()))
     }
 
     pub async fn get_queue_status(&self, request_id: Uuid) -> Result<Option<QueueStatus>, String> {
@@ -480,6 +518,8 @@ impl MatchmakingService {
                     time_control: request.time_control.clone(),
                 };
 
+                self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
+                    .await?;
                 let mut active_matches = self.active_matches.lock().unwrap();
                 active_matches.insert(match_id, new_match);
 
@@ -533,6 +573,8 @@ impl MatchmakingService {
                     time_control: request.time_control.clone(),
                 };
 
+                self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
+                    .await?;
                 let mut active_matches = self.active_matches.lock().unwrap();
                 active_matches.insert(match_id, new_match);
 
@@ -657,6 +699,8 @@ impl MatchmakingService {
                     time_control: request.time_control.clone(),
                 };
 
+                self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
+                    .await?;
                 let mut active_matches = self.active_matches.lock().unwrap();
                 active_matches.insert(match_id, new_match);
 

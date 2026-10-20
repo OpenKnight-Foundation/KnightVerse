@@ -13,13 +13,17 @@ import {
   ChessIcon,
   DashboardIcon,
   WatchIcon,
-  NewsIcon,
-  UserIcon,
   SettingsIcon,
-  SupportIcon,
   WalletIcon,
   MenuIcon,
   CollapseIcon,
+  PuzzleIcon,
+  LearnIcon,
+  TournamentIcon,
+  StakeIcon,
+  GuildIcon,
+  CompanionsIcon,
+  UserIcon,
 } from "@/components/icons"
 
 interface SidebarProps {
@@ -126,18 +130,53 @@ export function GameSidebar({
             active={pathname === "/watch"}
           />
           <SidebarItem
-            icon={<NewsIcon />}
-            label="News"
-            href="/news"
+            icon={<TournamentIcon />}
+            label="Tournaments"
+            href="/tournament"
             collapsed={collapsed && !isHovered}
-            active={pathname === "/news"}
+            active={pathname.startsWith("/tournament")}
+          />
+          <SidebarItem
+            icon={<PuzzleIcon />}
+            label="Puzzles"
+            href="/puzzles"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/puzzles")}
+          />
+          <SidebarItem
+            icon={<CompanionsIcon />}
+            label="Companions"
+            href="/companions"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/companions")}
+          />
+          <SidebarItem
+            icon={<GuildIcon />}
+            label="Guilds"
+            href="/guilds"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/guilds")}
+          />
+          <SidebarItem
+            icon={<StakeIcon />}
+            label="Stake"
+            href="/stake"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/stake")}
+          />
+          <SidebarItem
+            icon={<LearnIcon />}
+            label="Openings"
+            href="/openings"
+            collapsed={collapsed && !isHovered}
+            active={pathname === "/openings"}
           />
           <SidebarItem
             icon={<UserIcon />}
             label="Profile"
             href="/profile"
             collapsed={collapsed && !isHovered}
-            active={pathname === "/profile"}
+            active={pathname.startsWith("/profile")}
           />
           <SidebarItem
             icon={<SettingsIcon />}
@@ -145,13 +184,6 @@ export function GameSidebar({
             href="/settings"
             collapsed={collapsed && !isHovered}
             active={pathname === "/settings"}
-          />
-          <SidebarItem
-            icon={<SupportIcon />}
-            label="Support"
-            href="/support"
-            collapsed={collapsed && !isHovered}
-            active={pathname === "/support"}
           />
         </nav>
 
@@ -294,10 +326,14 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
         <MobileSidebarItem icon={<ChessIcon />} label="Play" href="/" active={pathname === "/"} />
         <MobileSidebarItem icon={<DashboardIcon />} label="Dashboard" href="/dashboard" active={pathname === "/dashboard"} />
         <MobileSidebarItem icon={<WatchIcon />} label="Watch" href="/watch" active={pathname === "/watch"} />
-        <MobileSidebarItem icon={<NewsIcon />} label="News" href="/news" active={pathname === "/news"} />
-        <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname === "/profile"} />
+        <MobileSidebarItem icon={<TournamentIcon />} label="Tournaments" href="/tournament" active={pathname.startsWith("/tournament")} />
+        <MobileSidebarItem icon={<PuzzleIcon />} label="Puzzles" href="/puzzles" active={pathname.startsWith("/puzzles")} />
+        <MobileSidebarItem icon={<CompanionsIcon />} label="Companions" href="/companions" active={pathname.startsWith("/companions")} />
+        <MobileSidebarItem icon={<GuildIcon />} label="Guilds" href="/guilds" active={pathname.startsWith("/guilds")} />
+        <MobileSidebarItem icon={<StakeIcon />} label="Stake" href="/stake" active={pathname.startsWith("/stake")} />
+        <MobileSidebarItem icon={<LearnIcon />} label="Openings" href="/openings" active={pathname === "/openings"} />
+        <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname.startsWith("/profile")} />
         <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" active={pathname === "/settings"} />
-        <MobileSidebarItem icon={<SupportIcon />} label="Support" href="/support" active={pathname === "/support"} />
       </nav>
       <div className="p-4 space-y-2">
         {status === "connected" && address ? (

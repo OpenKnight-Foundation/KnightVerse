@@ -57,7 +57,9 @@ impl ReferralSplitter {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::CommissionBps, &commission_bps);
+        env.storage()
+            .instance()
+            .set(&DataKey::CommissionBps, &commission_bps);
     }
 
     /// Register a referee→referrer binding. Permanent once set; self-referral rejected.
@@ -83,10 +85,7 @@ impl ReferralSplitter {
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }
-        let referrer: Option<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Referrer(referee));
+        let referrer: Option<Address> = env.storage().persistent().get(&DataKey::Referrer(referee));
         if let Some(ref r) = referrer {
             let bps: u32 = env
                 .storage()
@@ -103,10 +102,8 @@ impl ReferralSplitter {
                 env.storage()
                     .persistent()
                     .set(&DataKey::Earnings(r.clone()), &(prev + cut));
-                env.events().publish(
-                    (symbol_short!("ref_earn"),),
-                    (r.clone(), cut),
-                );
+                env.events()
+                    .publish((symbol_short!("ref_earn"),), (r.clone(), cut));
                 return cut;
             }
         }
@@ -142,10 +139,8 @@ impl ReferralSplitter {
             &balance,
         );
 
-        env.events().publish(
-            (symbol_short!("ref_wd"),),
-            (referrer, token, balance),
-        );
+        env.events()
+            .publish((symbol_short!("ref_wd"),), (referrer, token, balance));
 
         balance
     }
@@ -160,9 +155,7 @@ impl ReferralSplitter {
 
     /// Returns the referrer registered for a referee, if any.
     pub fn get_referrer(env: Env, referee: Address) -> Option<Address> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Referrer(referee))
+        env.storage().persistent().get(&DataKey::Referrer(referee))
     }
 
     /// Returns the configured commission in basis points.

@@ -70,6 +70,12 @@ async function setUpMockWallet(page: Page, { xlm, usdc }: MockBalances): Promise
           ],
           signers: [{ key: accountId, weight: 1, type: "ed25519_public_key" }],
           data: {},
+          // Real Horizon responses carry _links; stellar-sdk only exposes `data_attr`
+          // (read by its memo-required check before submitting) when _links.data exists.
+          _links: {
+            self: { href: `https://horizon-testnet.stellar.org/accounts/${accountId}` },
+            data: { href: `https://horizon-testnet.stellar.org/accounts/${accountId}/data/{key}`, templated: true },
+          },
         },
       });
     }

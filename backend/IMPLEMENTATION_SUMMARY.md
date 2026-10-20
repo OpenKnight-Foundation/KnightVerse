@@ -1,11 +1,11 @@
-# XLMate Backend Implementation Summary
+# KnightVerse Backend Implementation Summary
 
-This document summarizes the implementation of the four major backend features requested for the XLMate chess platform.
+This document summarizes the implementation of the four major backend features requested for the KnightVerse chess platform.
 
 ## 1. Prometheus and Grafana Metrics Integration
 
 ### Overview
-Implemented a comprehensive metrics collection system using Prometheus and Grafana for monitoring the XLMate backend performance and user activity.
+Implemented a comprehensive metrics collection system using Prometheus and Grafana for monitoring the KnightVerse backend performance and user activity.
 
 ### Components Created
 
@@ -35,7 +35,7 @@ Implemented a comprehensive metrics collection system using Prometheus and Grafa
 docker-compose -f docker-compose.monitoring.yml up -d
 
 # Access Grafana
-http://localhost:3000 (admin/xlmate123)
+http://localhost:3000 (admin/knightverse)
 
 # Access Prometheus
 http://localhost:9090
@@ -156,7 +156,7 @@ Implemented a comprehensive PGN archiving system that automatically stores chess
 
 ### PGN Features
 - Standard PGN format compliance
-- Custom XLMate metadata tags
+- Custom KnightVerse metadata tags
 - Move annotations and evaluations
 - Tournament information
 - Time control categorization
@@ -295,7 +295,7 @@ Real-time features integrated with existing WebSocket infrastructure:
 ### Environment Variables
 ```bash
 # Database
-DATABASE_URL=postgresql://user:pass@localhost/xlmate
+DATABASE_URL=postgresql://user:pass@localhost/knightverse
 
 # Redis
 REDIS_URL=redis://localhost:6379

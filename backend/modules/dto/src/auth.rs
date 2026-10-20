@@ -55,6 +55,10 @@ pub struct AuthResponse {
 
     #[schema(example = "chess_master")]
     pub username: String,
+
+    /// Stellar account linked to this player, if any (FE-97).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

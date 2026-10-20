@@ -213,6 +213,7 @@ mod player_service_routing {
             elo_rating: 1200,
             social_links: None,
             is_enabled: true,
+            wallet_address: None,
         }
     }
 

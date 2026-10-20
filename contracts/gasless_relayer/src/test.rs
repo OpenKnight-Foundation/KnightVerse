@@ -6,8 +6,9 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::rngs::OsRng;
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
 use soroban_sdk::{
-    contract, contractimpl, testutils::{Address as _, Ledger}, vec,
-    Address, BytesN, Env, IntoVal, Symbol, Val,
+    contract, contractimpl,
+    testutils::{Address as _, Ledger},
+    vec, Address, BytesN, Env, IntoVal, Symbol, Val,
 };
 
 // ── Mock Target Contract for Generic Forwarding Tests ───────────────────────
@@ -18,10 +19,18 @@ pub struct MockTargetContract;
 #[contractimpl]
 impl MockTargetContract {
     pub fn record_action(env: Env, caller: Address, score: u64) -> u64 {
-        let current: u64 = env.storage().instance().get(&Symbol::new(&env, "score")).unwrap_or(0);
+        let current: u64 = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "score"))
+            .unwrap_or(0);
         let updated = current + score;
-        env.storage().instance().set(&Symbol::new(&env, "score"), &updated);
-        env.storage().instance().set(&Symbol::new(&env, "last_caller"), &caller);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "score"), &updated);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "last_caller"), &caller);
         updated
     }
 }
@@ -71,11 +80,7 @@ fn setup_test_context() -> TestContext {
     }
 }
 
-fn fund_and_approve_player(
-    ctx: &TestContext,
-    player: &Address,
-    amount: i128,
-) {
+fn fund_and_approve_player(ctx: &TestContext, player: &Address, amount: i128) {
     ctx.token_admin.mint(player, &amount);
     ctx.token_client.approve(
         player,
@@ -165,12 +170,9 @@ fn test_e2e_signed_gasless_match_staking_and_payout() {
     let (p1_pubkey, p1_sig) = sign_match_stake(env, &ctx.client, &p1_key, &p1_stake_req);
 
     // 4. Relayer submits Player 1's signed gasless transaction to the forwarder contract
-    let res1 = ctx.client.try_gasless_stake_match(
-        &ctx.relayer,
-        &p1_stake_req,
-        &p1_pubkey,
-        &p1_sig,
-    );
+    let res1 = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &p1_stake_req, &p1_pubkey, &p1_sig);
     assert!(res1.is_ok());
 
     // Verify Player 1 tokens were escrowed and nonce incremented to 1
@@ -198,12 +200,9 @@ fn test_e2e_signed_gasless_match_staking_and_payout() {
     let (p2_pubkey, p2_sig) = sign_match_stake(env, &ctx.client, &p2_key, &p2_stake_req);
 
     // 6. Relayer submits Player 2's signed gasless transaction
-    let res2 = ctx.client.try_gasless_stake_match(
-        &ctx.relayer,
-        &p2_stake_req,
-        &p2_pubkey,
-        &p2_sig,
-    );
+    let res2 = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &p2_stake_req, &p2_pubkey, &p2_sig);
     assert!(res2.is_ok());
 
     // Verify Player 2 tokens were escrowed and nonce incremented to 1
@@ -258,7 +257,8 @@ fn test_gasless_match_staking_draw_refund() {
         valid_until: 0,
     };
     let (pk1, sig1) = sign_match_stake(env, &ctx.client, &p1_key, &req1);
-    ctx.client.gasless_stake_match(&ctx.relayer, &req1, &pk1, &sig1);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &req1, &pk1, &sig1);
 
     // Player 2 joins match
     let req2 = GaslessMatchStakeRequest {
@@ -271,7 +271,8 @@ fn test_gasless_match_staking_draw_refund() {
         valid_until: 0,
     };
     let (pk2, sig2) = sign_match_stake(env, &ctx.client, &p2_key, &req2);
-    ctx.client.gasless_stake_match(&ctx.relayer, &req2, &pk2, &sig2);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &req2, &pk2, &sig2);
 
     // Settle as Draw (winner = None)
     ctx.client.settle_match(&game_id, &None);
@@ -310,16 +311,17 @@ fn test_nonce_replay_attack_prevention() {
     let (pk, sig) = sign_match_stake(env, &ctx.client, &key, &req);
 
     // 1st submission succeeds
-    let res1 = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    let res1 = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
     assert!(res1.is_ok());
     assert_eq!(ctx.client.get_nonce(&player), 1);
 
     // 2nd submission (exact same payload & signature / replay attack) MUST fail
-    let res2 = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
-    assert_eq!(
-        res2.unwrap_err().unwrap(),
-        RelayerError::NonceAlreadyUsed.into()
-    );
+    let res2 = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    assert_eq!(res2.unwrap_err().unwrap(), RelayerError::NonceAlreadyUsed);
 }
 
 #[test]
@@ -343,11 +345,10 @@ fn test_out_of_order_nonce_rejection() {
     };
     let (pk, sig) = sign_match_stake(env, &ctx.client, &key, &req);
 
-    let res = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::NonceMismatch.into()
-    );
+    let res = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::NonceMismatch);
 }
 
 #[test]
@@ -376,11 +377,10 @@ fn test_player_bump_nonce_revokes_pending_transactions() {
     assert_eq!(ctx.client.get_nonce(&player), 1);
 
     // Now submitting the previously signed nonce 0 request fails
-    let res = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::NonceAlreadyUsed.into()
-    );
+    let res = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::NonceAlreadyUsed);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -414,7 +414,8 @@ fn test_tampered_signature_fails_verification() {
     sig = BytesN::from_array(env, &sig_arr);
 
     // ed25519_verify panics on invalid signature
-    ctx.client.gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
 }
 
 #[test]
@@ -443,7 +444,8 @@ fn test_tampered_payload_amount_fails_verification() {
     tampered_req.amount = 1_000;
 
     // Must panic due to digest mismatch during verification
-    ctx.client.gasless_stake_match(&ctx.relayer, &tampered_req, &pk, &sig);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &tampered_req, &pk, &sig);
 }
 
 #[test]
@@ -475,16 +477,10 @@ fn test_registered_signer_key_mismatch_rejected() {
     };
     let (impostor_pk, impostor_sig) = sign_match_stake(env, &ctx.client, &impostor_key, &req);
 
-    let res = ctx.client.try_gasless_stake_match(
-        &ctx.relayer,
-        &req,
-        &impostor_pk,
-        &impostor_sig,
-    );
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::SignerMismatch.into()
-    );
+    let res = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &impostor_pk, &impostor_sig);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::SignerMismatch);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -514,7 +510,9 @@ fn test_generic_forward_request_execution() {
 
     let (pk, sig) = sign_forward_req(env, &ctx.client, &key, &req);
 
-    let res = ctx.client.execute_meta_transaction(&ctx.relayer, &req, &pk, &sig);
+    let res = ctx
+        .client
+        .execute_meta_transaction(&ctx.relayer, &req, &pk, &sig);
     assert_eq!(res.get_score(), 42u64);
     assert_eq!(ctx.client.get_nonce(&user), 1);
 }
@@ -569,7 +567,9 @@ fn test_batch_meta_transaction_execution() {
     let pubkeys = vec![env, pk1, pk2];
     let signatures = vec![env, sig1, sig2];
 
-    let results = ctx.client.execute_meta_tx_batch(&ctx.relayer, &requests, &pubkeys, &signatures);
+    let results = ctx
+        .client
+        .execute_meta_tx_batch(&ctx.relayer, &requests, &pubkeys, &signatures);
     assert_eq!(results.len(), 2);
     assert_eq!(ctx.client.get_nonce(&user1), 1);
     assert_eq!(ctx.client.get_nonce(&user2), 1);
@@ -602,11 +602,10 @@ fn test_expired_meta_transaction_rejected() {
     };
     let (pk, sig) = sign_match_stake(env, &ctx.client, &key, &req);
 
-    let res = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::ExpiredTransaction.into()
-    );
+    let res = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::ExpiredTransaction);
 }
 
 #[test]
@@ -634,10 +633,12 @@ fn test_pause_and_unpause_behavior() {
     assert!(ctx.client.is_paused());
 
     // Execution must fail when paused
-    let res_paused = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    let res_paused = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
     assert_eq!(
         res_paused.unwrap_err().unwrap(),
-        RelayerError::ContractPaused.into()
+        RelayerError::ContractPaused
     );
 
     // Admin unpauses
@@ -645,7 +646,9 @@ fn test_pause_and_unpause_behavior() {
     assert!(!ctx.client.is_paused());
 
     // Execution succeeds
-    let res_unpaused = ctx.client.try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    let res_unpaused = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
     assert!(res_unpaused.is_ok());
 }
 
@@ -680,24 +683,18 @@ fn test_whitelisted_relayer_policy() {
     let (pk, sig) = sign_match_stake(env, &ctx.client, &key, &req);
 
     // Unauthorized relayer fails
-    let res_unauth = ctx.client.try_gasless_stake_match(
-        &unauthorized_relayer,
-        &req,
-        &pk,
-        &sig,
-    );
+    let res_unauth = ctx
+        .client
+        .try_gasless_stake_match(&unauthorized_relayer, &req, &pk, &sig);
     assert_eq!(
         res_unauth.unwrap_err().unwrap(),
-        RelayerError::RelayerNotAuthorized.into()
+        RelayerError::RelayerNotAuthorized
     );
 
     // Authorized relayer succeeds
-    let res_auth = ctx.client.try_gasless_stake_match(
-        &authorized_relayer,
-        &req,
-        &pk,
-        &sig,
-    );
+    let res_auth = ctx
+        .client
+        .try_gasless_stake_match(&authorized_relayer, &req, &pk, &sig);
     assert!(res_auth.is_ok());
 }
 
@@ -725,7 +722,8 @@ fn test_cancel_unmatched_game_refunds_creator() {
     };
     let (pk, sig) = sign_match_stake(env, &ctx.client, &key, &req);
 
-    ctx.client.gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &req, &pk, &sig);
     assert_eq!(ctx.token_client.balance(&player), initial_balance - wager);
 
     // Creator cancels unmatched game
@@ -759,7 +757,8 @@ fn test_same_player_cannot_join_own_game() {
         valid_until: 0,
     };
     let (pk1, sig1) = sign_match_stake(env, &ctx.client, &key, &req1);
-    ctx.client.gasless_stake_match(&ctx.relayer, &req1, &pk1, &sig1);
+    ctx.client
+        .gasless_stake_match(&ctx.relayer, &req1, &pk1, &sig1);
 
     // Try joining same match with same player address
     let req2 = GaslessMatchStakeRequest {
@@ -773,11 +772,10 @@ fn test_same_player_cannot_join_own_game() {
     };
     let (pk2, sig2) = sign_match_stake(env, &ctx.client, &key, &req2);
 
-    let res = ctx.client.try_gasless_stake_match(&ctx.relayer, &req2, &pk2, &sig2);
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::SamePlayerJoining.into()
-    );
+    let res = ctx
+        .client
+        .try_gasless_stake_match(&ctx.relayer, &req2, &pk2, &sig2);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::SamePlayerJoining);
 }
 
 #[test]
@@ -785,9 +783,8 @@ fn test_double_initialize_rejected() {
     let ctx = setup_test_context();
     let new_admin = Address::generate(&ctx.env);
 
-    let res = ctx.client.try_initialize(&new_admin, &ctx.network_hash, &true);
-    assert_eq!(
-        res.unwrap_err().unwrap(),
-        RelayerError::AlreadyInitialized.into()
-    );
+    let res = ctx
+        .client
+        .try_initialize(&new_admin, &ctx.network_hash, &true);
+    assert_eq!(res.unwrap_err().unwrap(), RelayerError::AlreadyInitialized);
 }

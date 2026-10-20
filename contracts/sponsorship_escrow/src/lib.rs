@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
-    token, Address, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
+    Address, Env, Symbol, Vec,
 };
 
 /// Structured error codes for SponsorshipEscrowContract.
@@ -322,6 +322,7 @@ impl SponsorshipEscrowContract {
     /// - Stage 1: Registration Complete (default 2000 bps = 20%)
     /// - Stage 2: Quarter-Finals (default 3000 bps = 30%)
     /// - Stage 3: Grand Final (default 5000 bps = 50%)
+    #[allow(clippy::too_many_arguments)]
     pub fn create_standard_tournament(
         env: Env,
         organizer: Address,
@@ -418,9 +419,7 @@ impl SponsorshipEscrowContract {
         let new_sponsor_dep = current_sponsor_dep
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        env.storage()
-            .instance()
-            .set(&sponsor_key, &new_sponsor_dep);
+        env.storage().instance().set(&sponsor_key, &new_sponsor_dep);
 
         // Record token in tournament's token list if not present
         let tokens_key = DataKey::TournamentTokens(tournament_id);
@@ -716,11 +715,7 @@ impl SponsorshipEscrowContract {
 
                 // Transfer tokens back to sponsor
                 let token_client = token::Client::new(&env, &token);
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &sponsor,
-                    &deposit_amount,
-                );
+                token_client.transfer(&env.current_contract_address(), &sponsor, &deposit_amount);
 
                 env.events().publish(
                     (symbol_short!("refund"), tournament_id, sponsor.clone()),
@@ -765,8 +760,7 @@ impl SponsorshipEscrowContract {
                 let token = tokens.get(t_idx).unwrap();
                 let sponsor_key =
                     DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-                let deposit_amount: i128 =
-                    env.storage().instance().get(&sponsor_key).unwrap_or(0);
+                let deposit_amount: i128 = env.storage().instance().get(&sponsor_key).unwrap_or(0);
 
                 if deposit_amount > 0 {
                     env.storage().instance().set(&sponsor_key, &0i128);

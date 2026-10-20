@@ -60,10 +60,7 @@ impl GaslessRelayer {
             .set(&DataKey::TotalVolumeStaked, &0i128);
 
         env.events().publish(
-            (
-                Symbol::new(&env, "gasless"),
-                Symbol::new(&env, "init"),
-            ),
+            (Symbol::new(&env, "gasless"), Symbol::new(&env, "init")),
             (admin, network_passphrase_hash, open_relayers),
         );
 
@@ -138,10 +135,7 @@ impl GaslessRelayer {
         Self::require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         env.events().publish(
-            (
-                Symbol::new(&env, "gasless"),
-                Symbol::new(&env, "paused"),
-            ),
+            (Symbol::new(&env, "gasless"), Symbol::new(&env, "paused")),
             (),
         );
         Ok(())
@@ -152,10 +146,7 @@ impl GaslessRelayer {
         Self::require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         env.events().publish(
-            (
-                Symbol::new(&env, "gasless"),
-                Symbol::new(&env, "unpaused"),
-            ),
+            (Symbol::new(&env, "gasless"), Symbol::new(&env, "unpaused")),
             (),
         );
         Ok(())
@@ -211,9 +202,7 @@ impl GaslessRelayer {
 
     /// Get registered Ed25519 signer public key for a player address.
     pub fn get_signer_key(env: Env, player: Address) -> Option<BytesN<32>> {
-        env.storage()
-            .instance()
-            .get(&DataKey::PlayerSigner(player))
+        env.storage().instance().get(&DataKey::PlayerSigner(player))
     }
 
     /// Retrieve the current expected replay-prevention nonce for a user.
@@ -257,18 +246,12 @@ impl GaslessRelayer {
     }
 
     /// Compute the structured typed data digest for a gasless match stake request.
-    pub fn get_match_stake_digest(
-        env: Env,
-        request: GaslessMatchStakeRequest,
-    ) -> BytesN<32> {
+    pub fn get_match_stake_digest(env: Env, request: GaslessMatchStakeRequest) -> BytesN<32> {
         Self::compute_match_stake_digest(&env, &request)
     }
 
     /// Compute the structured typed data digest for a generic forward request.
-    pub fn get_forward_request_digest(
-        env: Env,
-        request: ForwardRequest,
-    ) -> BytesN<32> {
+    pub fn get_forward_request_digest(env: Env, request: ForwardRequest) -> BytesN<32> {
         Self::compute_forward_request_digest(&env, &request)
     }
 
@@ -344,9 +327,10 @@ impl GaslessRelayer {
             .ed25519_verify(&signer_pubkey, &digest_bytes, &signature);
 
         // 6. State update before external interactions (checks-effects-interactions)
-        env.storage()
-            .instance()
-            .set(&DataKey::UserNonce(request.player.clone()), &(current_nonce + 1));
+        env.storage().instance().set(
+            &DataKey::UserNonce(request.player.clone()),
+            &(current_nonce + 1),
+        );
 
         Self::reentrancy_enter(&env)?;
 
@@ -383,11 +367,8 @@ impl GaslessRelayer {
             };
             env.storage().instance().set(&game_key, &escrow);
         } else {
-            let mut escrow: MatchEscrow = env
-                .storage()
-                .instance()
-                .get(&game_key)
-                .ok_or_else(|| {
+            let mut escrow: MatchEscrow =
+                env.storage().instance().get(&game_key).ok_or_else(|| {
                     Self::reentrancy_exit(&env);
                     RelayerError::MatchNotFound
                 })?;
@@ -430,9 +411,10 @@ impl GaslessRelayer {
             .instance()
             .get(&DataKey::TotalVolumeStaked)
             .unwrap_or(0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalVolumeStaked, &(total_volume + request.amount));
+        env.storage().instance().set(
+            &DataKey::TotalVolumeStaked,
+            &(total_volume + request.amount),
+        );
 
         Self::reentrancy_exit(&env);
 
@@ -514,13 +496,7 @@ impl GaslessRelayer {
             let pk = signer_pubkeys.get(i).unwrap();
             let sig = signatures.get(i).unwrap();
 
-            let val = Self::execute_meta_tx_internal(
-                &env,
-                &relayer,
-                &req,
-                &pk,
-                &sig,
-            )?;
+            let val = Self::execute_meta_tx_internal(&env, &relayer, &req, &pk, &sig)?;
             results.push_back(val);
         }
 
@@ -572,14 +548,16 @@ impl GaslessRelayer {
             .ed25519_verify(signer_pubkey, &digest_bytes, signature);
 
         // 5. Update nonce
-        env.storage()
-            .instance()
-            .set(&DataKey::UserNonce(request.from.clone()), &(current_nonce + 1));
+        env.storage().instance().set(
+            &DataKey::UserNonce(request.from.clone()),
+            &(current_nonce + 1),
+        );
 
         Self::reentrancy_enter(env)?;
 
         // 6. Execute target invocation
-        let result: Val = env.invoke_contract(&request.target, &request.function, request.args.clone());
+        let result: Val =
+            env.invoke_contract(&request.target, &request.function, request.args.clone());
 
         // 7. Optional relayer fee compensation in tokens
         if request.fee_amount > 0 {
@@ -608,10 +586,7 @@ impl GaslessRelayer {
 
         // 9. Event
         env.events().publish(
-            (
-                Symbol::new(env, "gasless"),
-                Symbol::new(env, "forwarded"),
-            ),
+            (Symbol::new(env, "gasless"), Symbol::new(env, "forwarded")),
             (
                 request.from.clone(),
                 request.target.clone(),
@@ -650,7 +625,10 @@ impl GaslessRelayer {
             return Err(RelayerError::MatchNotInProgress);
         }
 
-        let player2 = escrow.player2.clone().ok_or(RelayerError::MatchNotInProgress)?;
+        let player2 = escrow
+            .player2
+            .clone()
+            .ok_or(RelayerError::MatchNotInProgress)?;
         let token_client = TokenClient::new(&env, &escrow.token);
         let contract_address = env.current_contract_address();
 
@@ -814,10 +792,7 @@ impl GaslessRelayer {
         env.crypto().sha256(&domain_data).into()
     }
 
-    fn compute_match_stake_digest(
-        env: &Env,
-        req: &GaslessMatchStakeRequest,
-    ) -> BytesN<32> {
+    fn compute_match_stake_digest(env: &Env, req: &GaslessMatchStakeRequest) -> BytesN<32> {
         let domain_sep = Self::compute_domain_separator(env);
 
         let mut msg_data = Bytes::new(env);
@@ -848,10 +823,7 @@ impl GaslessRelayer {
         env.crypto().sha256(&typed_data).into()
     }
 
-    fn compute_forward_request_digest(
-        env: &Env,
-        req: &ForwardRequest,
-    ) -> BytesN<32> {
+    fn compute_forward_request_digest(env: &Env, req: &ForwardRequest) -> BytesN<32> {
         let domain_sep = Self::compute_domain_separator(env);
 
         let mut msg_data = Bytes::new(env);

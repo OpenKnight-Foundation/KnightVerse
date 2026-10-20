@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useParams, useRouter } from "next/navigation";
 import { useChessSocket } from "@/hook/useChessSocket";
-import { FaUser, FaClock, FaSignal } from "react-icons/fa";
+import { FaUser, FaClock } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
@@ -15,7 +15,13 @@ import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
 import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
+import { VoiceMoveInput } from "@/components/chess/VoiceMoveInput";
+import BlindfoldToggle from "@/components/chess/BlindfoldToggle";
+import { useSpeechSynthesis } from "@/hook/useSpeechSynthesis";
+import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
+import { ReconnectionBanner } from "@/components/ReconnectionBanner";
+import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -40,9 +46,28 @@ const ChessboardComponent = dynamic(
   },
 );
 
-type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned";
+const ChessboardWebGL3D = dynamic(
+  () => import("@/components/chess/ChessboardWebGL3D").then((m) => m.ChessboardWebGL3D),
+  { ssr: false },
+);
 
-export default function PlayGameEngine({ fen }: { fen?: string }) {
+type GameStatus = "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "timeout";
+
+export default function PlayGameEngine({
+  fen,
+  initialMinutes = 10,
+  playerColor = "white",
+}: {
+  fen?: string;
+  /** Time control in minutes for each side (FE-116 / #1357). */
+  initialMinutes?: number;
+  /**
+   * Colour assigned to the local player by matchmaking (FE-115). Defaults to
+   * white for backwards compatibility, but the black player must pass "black"
+   * so the board is oriented correctly and only their pieces can move.
+   */
+  playerColor?: "white" | "black";
+}) {
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;
@@ -50,17 +75,20 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   const [game] = useState(new Chess(fen));
   const [position, setPosition] = useState(fen || "start");
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [whiteTime, setWhiteTime] = useState(600);
-  const [blackTime, setBlackTime] = useState(600);
-  const [playerColor] = useState<"white" | "black">("white");
+  const [whiteTime, setWhiteTime] = useState(() => Math.max(0, initialMinutes) * 60);
+  const [blackTime, setBlackTime] = useState(() => Math.max(0, initialMinutes) * 60);
   const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
+  const [flaggedColor, setFlaggedColor] = useState<"white" | "black" | null>(null);
+  const [resignation, setResignation] = useState<"self" | "opponent" | null>(null);
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
-    "white",
+    playerColor,
   );
   const isMobile = useIsMobile();
   const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
+  const { preferences, setPreference } = useGamePreferences();
+  const { speak: speakOpponentMove } = useSpeechSynthesis();
 
   const handleFlipBoard = useCallback(() => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -69,9 +97,11 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   const {
     status: socketStatus,
     sendMove,
+    sendResign,
     disconnect,
-    reconnect,
     lastOpponentMove,
+    opponentResigned,
+    lastSyncedState,
   } = useChessSocket(gameId);
 
   const checkGameStatus = useCallback(() => {
@@ -147,6 +177,15 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           from: move.from,
           to: move.to,
         });
+
+        // FE-52: spoken announcement of opponent moves (configurable volume/rate)
+        if (preferences.ttsOpponentMoves) {
+          speakOpponentMove(`Opponent played ${move.san}`, {
+            volume: preferences.ttsVolume,
+            rate: preferences.ttsRate,
+            lang: "en-US",
+          });
+        }
       }
     } catch {
       // illegal move from server — ignore
@@ -158,7 +197,63 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     recordCheatMove,
     playerColor,
     announceMove,
+    speakOpponentMove,
+    preferences.ttsOpponentMoves,
+    preferences.ttsVolume,
+    preferences.ttsRate,
   ]);
+
+  // FE-116 (#1357): a fallen flag ends the game — loss on time for that side.
+  useEffect(() => {
+    if (gameStatus !== "playing" || socketStatus !== "connected") return;
+    if (whiteTime <= 0) {
+      setFlaggedColor("white");
+      setGameStatus("timeout");
+    } else if (blackTime <= 0) {
+      setFlaggedColor("black");
+      setGameStatus("timeout");
+    }
+  }, [whiteTime, blackTime, gameStatus, socketStatus]);
+
+  // FE-117 (#1358): the opponent resigned — we take the win.
+  useEffect(() => {
+    if (opponentResigned && gameStatus === "playing") {
+      setResignation("opponent");
+      setGameStatus("resigned");
+    }
+  }, [opponentResigned, gameStatus]);
+
+  // FE-113: restore the board from the server's authoritative `sync` state after
+  // a reconnect, applying any moves the opponent made while we were offline.
+  useEffect(() => {
+    if (!lastSyncedState) return;
+    const { fen: syncedFen, moves, whiteTime: syncedWhite, blackTime: syncedBlack } =
+      lastSyncedState;
+
+    try {
+      if (syncedFen) {
+        game.load(syncedFen);
+      } else if (moves.length > 0) {
+        game.reset();
+        for (const move of moves) {
+          try {
+            game.move({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+          } catch {
+            break;
+          }
+        }
+      }
+      setPosition(game.fen());
+      setMoveHistory(game.history());
+      checkGameStatus();
+    } catch {
+      // Malformed FEN from the server — keep the local board rather than crash.
+      return;
+    }
+
+    if (typeof syncedWhite === "number") setWhiteTime(syncedWhite);
+    if (typeof syncedBlack === "number") setBlackTime(syncedBlack);
+  }, [lastSyncedState, game, checkGameStatus]);
 
   const isMyTurn =
     socketStatus === "connected" &&
@@ -186,7 +281,12 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
 
         requestAnimationFrame(() => setPosition(game.fen()));
         setMoveHistory((prev: string[]) => [...prev, move.san]);
-        sendMove({ from: sourceSquare, to: targetSquare, promotion: "q" });
+        sendMove({
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+          ply: game.history().length,
+        });
         recordCheatMove(
           move.san,
           move,
@@ -236,6 +336,7 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           from: move.from,
           to: move.to,
           promotion: move.promotion ?? "q",
+          ply: game.history().length,
         });
         recordCheatMove(
           move.san,
@@ -293,44 +394,19 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
   }, [blackTime, playerColor, announceTimeAlert]);
 
   const handleResign = useCallback(() => {
+    // FE-117 (#1358): tell the server (and therefore the opponent) before
+    // dropping the socket, so the game completes and the opponent wins.
+    sendResign();
+    setResignation("self");
     setGameStatus("resigned");
     resetCheatDetection();
     disconnect();
-  }, [disconnect, resetCheatDetection]);
+  }, [sendResign, disconnect, resetCheatDetection]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const socketStatusLabel = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "Live";
-      case "connecting":
-        return "Connecting...";
-      case "reconnecting":
-        return "Reconnecting...";
-      case "disconnected":
-        return "Disconnected";
-      case "error":
-        return "Error";
-      default:
-        return "Idle";
-    }
-  };
-
-  const socketStatusColor = () => {
-    switch (socketStatus) {
-      case "connected":
-        return "text-emerald-400";
-      case "connecting":
-      case "reconnecting":
-        return "text-yellow-400";
-      default:
-        return "text-red-400";
-    }
   };
 
   const movePairs = moveHistory.reduce(
@@ -342,6 +418,17 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     [],
   );
 
+  // FE-120 (#1361): persist the finished game's PGN and open the review view.
+  const handleReview = useCallback(() => {
+    try {
+      sessionStorage.setItem(`knightverse:review:${gameId}`, game.pgn());
+    } catch {
+      // Storage can be unavailable (private mode) — the review page falls back
+      // to a sample game.
+    }
+    router.push(`/game/${gameId}/review`);
+  }, [game, gameId, router]);
+
   let overlayResult: GameResult | null = null;
   if (gameStatus === "checkmate") {
     overlayResult = game.turn() === "b" ? "white_wins" : "black_wins";
@@ -349,6 +436,11 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
     overlayResult = "stalemate";
   } else if (gameStatus === "draw") {
     overlayResult = "draw";
+  } else if (gameStatus === "timeout") {
+    overlayResult = flaggedColor === playerColor ? "loss_on_time" : "win_on_time";
+  } else if (gameStatus === "resigned") {
+    overlayResult =
+      resignation === "self" ? "loss_by_resignation" : "win_by_resignation";
   }
 
   return (
@@ -382,6 +474,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           </button>
           <Web3StatusBar />
         </div>
+
+        <ReconnectionBanner
+          isDisconnected={socketStatus === "reconnecting" || socketStatus === "disconnected"}
+        />
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           <div
@@ -428,12 +524,30 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                 className="mb-3"
               />
               <ErrorBoundary componentName="Chessboard">
-                <ChessboardComponent
-                  position={position}
-                  onDrop={handleMove}
-                  orientation={boardOrientation}
-                />
+                {preferences.boardRenderer === "3d" ? (
+                  <ChessboardWebGL3D
+                    fen={position === "start" ? game.fen() : position}
+                    interactive
+                    onMove={(from, to) =>
+                      handleMove({ sourceSquare: from, targetSquare: to })
+                    }
+                  />
+                ) : (
+                  <ChessboardComponent
+                    position={position}
+                    onDrop={handleMove}
+                    orientation={boardOrientation}
+                    blindfoldMode={preferences.blindfoldMode}
+                  />
+                )}
               </ErrorBoundary>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <BlindfoldToggle
+                blindfoldMode={preferences.blindfoldMode}
+                onToggle={(v) => setPreference("blindfoldMode", v)}
+              />
             </div>
 
             <div
@@ -463,11 +577,18 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               </div>
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
+              <VoiceMoveInput
+                onSubmitMove={handleSanMove}
+                isGameActive={gameStatus === "playing"}
+                isMyTurn={isMyTurn}
+                enabled={preferences.voiceMoveEnabled}
+              />
               <KeyboardMoveInput
                 onSubmitMove={handleSanMove}
                 isGameActive={gameStatus === "playing"}
                 isMyTurn={isMyTurn}
+                suggestions={game.moves()}
               />
             </div>
 
@@ -487,12 +608,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               >
                 Resign
               </button>
-              <div className="flex items-center gap-1.5 px-2 shrink-0">
-                <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                <span className={`text-xs ${socketStatusColor()}`}>
-                  {socketStatusLabel()}
-                </span>
-              </div>
+              <ConnectionStatusIndicator
+                status={socketStatus}
+                className="shrink-0"
+              />
             </div>
           </div>
 
@@ -506,12 +625,10 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                 <h3 className="text-sm font-semibold text-gray-300">
                   Game Status
                 </h3>
-                <div className="hidden lg:flex items-center gap-1.5">
-                  <FaSignal className={`text-xs ${socketStatusColor()}`} />
-                  <span className={`text-xs ${socketStatusColor()}`}>
-                    {socketStatusLabel()}
-                  </span>
-                </div>
+                <ConnectionStatusIndicator
+                  status={socketStatus}
+                  className="hidden lg:flex"
+                />
               </div>
 
               {gameStatus !== "playing" && (
@@ -524,7 +641,14 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
                     {gameStatus === "checkmate" && "Checkmate!"}
                     {gameStatus === "stalemate" && "Stalemate!"}
                     {gameStatus === "draw" && "Draw!"}
-                    {gameStatus === "resigned" && "Resigned!"}
+                    {gameStatus === "timeout" &&
+                      (flaggedColor === playerColor
+                        ? "Time's up — you lost on time."
+                        : "Opponent flagged — you win on time!")}
+                    {gameStatus === "resigned" &&
+                      (resignation === "self"
+                        ? "Resigned!"
+                        : "Opponent resigned — you win!")}
                   </p>
                 </div>
               )}
@@ -618,14 +742,6 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
               </button>
             </div>
 
-            {socketStatus === "disconnected" && gameStatus === "playing" && (
-              <button
-                onClick={reconnect}
-                className="w-full py-2.5 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-sm font-medium transition-all duration-300 animate-fade-in"
-              >
-                Reconnect to Game
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -645,6 +761,7 @@ export default function PlayGameEngine({ fen }: { fen?: string }) {
           result={overlayResult}
           onPlayAgain={() => router.push("/")}
           onPlayOnline={() => router.push("/")}
+          onReview={handleReview}
         />
       )}
     </div>

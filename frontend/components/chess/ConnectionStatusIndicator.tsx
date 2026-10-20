@@ -1,18 +1,36 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { EnhancedSocketStatus } from "@/hook/useEnhancedChessSocket";
 
 interface ConnectionStatusIndicatorProps {
   status: EnhancedSocketStatus;
-  reconnectAttempts: number;
-  latency: number | null;
+  reconnectAttempts?: number;
+  latency?: number | null;
+  className?: string;
 }
 
 export function ConnectionStatusIndicator({
   status,
-  reconnectAttempts,
-  latency,
+  reconnectAttempts = 0,
+  latency = null,
+  className = "",
 }: ConnectionStatusIndicatorProps) {
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    if (status === "connected" && latency === null && reconnectAttempts === 0) {
+      setIsVisible(false);
+    } else {
+      setIsVisible(true);
+    }
+  }, [status, latency, reconnectAttempts]);
+
+  if (!isVisible) {
+    return null;
+  }
+
   const getStatusColor = () => {
     switch (status) {
       case "connected":
@@ -63,7 +81,7 @@ export function ConnectionStatusIndicator({
   };
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-gray-800/50 border border-gray-700/50 rounded-lg">
+    <div className={`flex items-center gap-3 p-3 bg-gray-800/50 border border-gray-700/50 rounded-lg ${className}`}>
       {/* Status Indicator */}
       <div className="flex items-center gap-2">
         <div className={`w-2.5 h-2.5 rounded-full ${getStatusColor()}`} />

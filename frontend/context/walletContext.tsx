@@ -1,126 +1,6 @@
-// "use client";
-// import { createContext, useContext } from "react";
-// import { Toast } from "primereact/toast";
-// import { useRef } from "react";
-// import { useRouter } from "next/navigation";
-// // import {
-// //   useConnect,
-// //   useDisconnect,
-// //   useAccount,
-// //   useBalance,
-// } from blockchain provider;
-// // import type { Connector } from blockchain provider;
-// import DotPulseLoader from "../components/ui/DotPulseLoader";
-// import { STRK_TOKEN_ADDRESS } from "@/constants/tokens";
-
-// interface AppContextType {
-//   showToast: (
-//     severity: "success" | "error" | "info",
-//     summary: string,
-//     detail: string
-//   ) => void;
-//   connectWallet: (connector: Connector) => Promise<void>;
-//   disconnectWallet: () => Promise<void>;
-//   address?: string;
-//   status: string;
-//   balance?: string | React.ReactNode;
-//   contactAddress?: string;
-// }
-
-// const AppContext = createContext<AppContextType | undefined>(undefined);
-
-// export function AppProvider({ children }: { children: React.ReactNode }) {
-//   const router = useRouter();
-//   const toast = useRef<Toast>(null);
-//   const { connectAsync } = useConnect();
-//   const { disconnectAsync } = useDisconnect();
-//   const { address, status } = useAccount();
-//   const { data, isLoading } = useBalance({
-//     token: STRK_TOKEN_ADDRESS,
-//     address: address as "0x",
-//   });
-
-//   const balance =
-//     isLoading || !data ? (
-//       <DotPulseLoader />
-//     ) : (
-//       `${parseFloat(data.formatted).toFixed(2)} STRK`
-//     );
-
-//   const showToast = (
-//     severity: "success" | "error" | "info",
-//     summary: string,
-//     detail: string
-//   ) => {
-//     toast.current?.show({ severity, summary, detail });
-//   };
-
-//   const connectWallet = async (connector: Connector) => {
-//     try {
-//       await connectAsync({ connector });
-//       localStorage.setItem("connector", connector.id);
-//       showToast("success", "Success", "Wallet connected successfully");
-//     } catch (error: unknown) {
-//       localStorage.removeItem("connector");
-//       let errorMessage = "Failed to connect wallet.";
-//       if (error instanceof Error) {
-//         if (error.message.includes("rejected")) {
-//           errorMessage =
-//             "Connection rejected. Please approve the connection request.";
-//         } else if (error.message.includes("Connector not found")) {
-//           errorMessage = `${connector.name} is not installed.`;
-//         } else {
-//           errorMessage = "Connection Failed";
-//         }
-//       }
-//       showToast("error", "Connection Failed", errorMessage);
-//     }
-//   };
-
-//   const disconnectWallet = async () => {
-//     try {
-//       await disconnectAsync();
-//       localStorage.removeItem("connector");
-//       showToast("success", "Success", "Wallet disconnected successfully");
-//       setTimeout(() => {
-//         router.push("/");
-//       }, 1000);
-//     } catch (error) {
-//       console.log(error);
-//       showToast("error", "Error", "Failed to disconnect wallet");
-//     }
-//   };
-
-//   return (
-//     <AppContext.Provider
-//       value={{
-//         showToast,
-//         connectWallet,
-//         disconnectWallet,
-
-//         address,
-//         status,
-//         balance,
-//       }}
-//     >
-//       <Toast ref={toast} />
-//       {children}
-//     </AppContext.Provider>
-//   );
-// }
-
-// export const useAppContext = () => {
-//   const context = useContext(AppContext);
-//   if (!context) {
-//     throw new Error("useAppContext must be used within an AppProvider");
-//   }
-//   return context;
-// };
-
 "use client";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Server, TransactionBuilder, Operation, Asset } from "stellar-sdk";
-import { Transaction } from "stellar-sdk";
 
 import { HORIZON_URL, SOROBAN_RPC, NETWORK_PASSPHRASE } from "@/lib/api";
 
@@ -130,6 +10,16 @@ type AppContextType = {
   balance?: string | React.ReactNode;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
+  /**
+   * Send a classic payment. Omit `asset` for native XLM; pass `{ code, issuer }`
+   * for an issued asset such as Circle's USDC/EURC (FE-133).
+   */
+  sendPayment: (
+    destination: string,
+    amount: string | number,
+    asset?: { code: string; issuer: string },
+  ) => Promise<any>;
+  /** Convenience wrapper over {@link sendPayment} for native XLM. */
   sendXLM: (destination: string, amount: string | number) => Promise<any>;
   invokeSorobanContract: (
     contractId: string,
@@ -230,8 +120,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const sendXLM = async (destination: string, amount: string | number) => {
+  const sendPayment = async (
+    destination: string,
+    amount: string | number,
+    asset?: { code: string; issuer: string },
+  ) => {
     if (!address) throw new Error("No wallet connected");
+    // Issued assets must be addressed by code *and* issuer — the code alone is
+    // not unique on Stellar (FE-133).
+    const paymentAsset = asset
+      ? new Asset(asset.code, asset.issuer)
+      : Asset.native();
     const acct = await server.loadAccount(address);
     const fee = await server.fetchBaseFee();
     const tx = new TransactionBuilder(acct, {
@@ -241,7 +140,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .addOperation(
         Operation.payment({
           destination,
-          asset: Asset.native(),
+          asset: paymentAsset,
           amount: String(amount),
         }),
       )
@@ -257,22 +156,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         signedEnvelopeXDR,
         NETWORK_PASSPHRASE,
       );
-      const res = await server.submitTransaction(txObj);
-      return res;
-    } catch (err) {
-      // some horizon clients expect a TransactionEnvelope object; try submitting as-is
-      try {
-        // fallback: try submitting as-is (deprecated)
-        const res = await server.submitTransaction(
-          signedEnvelopeXDR as unknown as Transaction,
-        );
-        return res;
-      } catch (e) {
-        console.error("submitTransaction failed", e);
-        throw e;
-      }
+      return await server.submitTransaction(txObj);
+    } catch (e) {
+      // Report the real failure: submitting the raw XDR string as a fallback
+      // always threw "Cannot read properties of undefined (reading 'type')"
+      // and hid the original error.
+      console.error("submitTransaction failed", e);
+      throw e;
     }
   };
+
+  const sendXLM = (destination: string, amount: string | number) =>
+    sendPayment(destination, amount);
 
   const invokeSorobanContract = async (
     contractId: string,
@@ -306,6 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         balance: undefined,
         connectWallet,
         disconnectWallet,
+        sendPayment,
         sendXLM,
         invokeSorobanContract,
       }}

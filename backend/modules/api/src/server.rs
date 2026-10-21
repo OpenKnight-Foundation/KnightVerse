@@ -1,30 +1,25 @@
 // src/server.rs
 
-// --- Admin audit-log handlers ---
 use crate::admin::{list_actions, record_action};
-
-// --- AI handlers: move suggestions and position analysis ---
-use crate::ai::{analyze_position, get_ai_suggestion};
-// --- Auth handlers: login, registration, token refresh, logout ---
+use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
-// --- Game lifecycle handlers ---
 use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,
 };
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
-// --- Lc0 (Leela Chess Zero) engine endpoints ---
 use crate::lc0::{lc0_analyze, lc0_health};
-use crate::players::{add_player, delete_player, export_player_data, find_player_by_id, update_player};
+use crate::players::{
+    add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
+    put_preferences, update_player,
+};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
-// --- WebSocket pieces: route handler, connection tracking actor, lobby actor ---
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
 use actix::Actor;
 use actix_cors::Cors;
-// Governor provides in-memory (per-worker) rate limiting
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use challenge::api::configure_puzzle_routes;
@@ -41,24 +36,93 @@ use std::env;
 use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_actix_web::TracingLogger;
-// OpenAPI / API documentation tooling
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::openapi::ApiDoc;
 
-/// Health check endpoint
-/// Lightweight liveness probe; does not touch any dependencies.
+/// Liveness endpoint — reports only that the process is up and serving HTTP.
+/// Dependency checks live in [`readiness`] so a flaky DB/Redis doesn't get the
+/// pod restarted, only taken out of rotation.
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "ok"}))
 }
 
+/// Upper bound for each dependency probe in `/health/ready` (BE-138).
+const READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ping the primary database, failing if it errors or exceeds `timeout`.
+async fn check_db(
+    conn: &sea_orm::DatabaseConnection,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    match tokio::time::timeout(timeout, conn.ping()).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!("timed out after {}ms", timeout.as_millis())),
+    }
+}
+
+/// Acquire a Redis connection and `PING` it, failing if either step errors or
+/// the whole probe exceeds `timeout`.
+async fn check_redis(
+    pool: &deadpool_redis::Pool,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let probe = async {
+        let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+        redis::cmd("PING")
+            .query_async::<_, String>(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    match tokio::time::timeout(timeout, probe).await {
+        Ok(result) => result,
+        Err(_) => Err(format!("timed out after {}ms", timeout.as_millis())),
+    }
+}
+
+async fn readiness_response(
+    db_pool: &DbPool,
+    redis_pool: &deadpool_redis::Pool,
+    timeout: std::time::Duration,
+) -> HttpResponse {
+    let (db, redis) = tokio::join!(
+        check_db(db_pool.primary(), timeout),
+        check_redis(redis_pool, timeout)
+    );
+    let ready = db.is_ok() && redis.is_ok();
+    let check_json = |r: &Result<(), String>| match r {
+        Ok(()) => serde_json::json!({"status": "ok"}),
+        Err(e) => serde_json::json!({"status": "error", "error": e}),
+    };
+    let body = serde_json::json!({
+        "status": if ready { "ok" } else { "error" },
+        "checks": {
+            "database": check_json(&db),
+            "redis": check_json(&redis),
+        }
+    });
+    if ready {
+        HttpResponse::Ok().json(body)
+    } else {
+        HttpResponse::ServiceUnavailable().json(body)
+    }
+}
+
+/// Readiness endpoint — pings the primary DB and Redis with a short timeout and
+/// returns 503 if either is unavailable, so orchestrators stop routing traffic.
+async fn readiness(
+    db_pool: web::Data<DbPool>,
+    redis_pool: web::Data<deadpool_redis::Pool>,
+) -> impl Responder {
+    readiness_response(&db_pool, &redis_pool, READINESS_TIMEOUT).await
+}
+
 /// Redis health check endpoint
-/// Readiness-style probe: checks out a pooled connection and sends PING,
-/// reporting round-trip latency. Returns 503 if either step fails.
 async fn health_redis(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
-    // Time the whole operation (pool checkout + PING)
     let start = std::time::Instant::now();
     match redis_pool.get().await {
         Ok(mut conn) => {
@@ -70,7 +134,6 @@ async fn health_redis(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Respo
                     "redis": "connected",
                     "latency_ms": latency_ms
                 })),
-                // Connected, but the PING command itself failed
                 Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
                     "status": "error",
                     "redis": "ping_failed",
@@ -78,7 +141,6 @@ async fn health_redis(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Respo
                 })),
             }
         }
-        // Could not obtain a connection from the pool at all
         Err(e) => HttpResponse::ServiceUnavailable().json(serde_json::json!({
             "status": "error",
             "redis": "connection_failed",
@@ -88,7 +150,6 @@ async fn health_redis(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Respo
 }
 
 /// Welcome endpoint
-/// Simple root route, handy for confirming the server is reachable.
 async fn greet() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"message": "Welcome to KnightVerse API"}))
 }
@@ -102,32 +163,24 @@ async fn metrics_endpoint(pool: web::Data<DbPool>) -> impl Responder {
 }
 
 /// Main server initialization function
-/// Wires up config, logging, DB, Redis, actors and services, builds the
-/// Actix app factory with all routes/middleware, and runs the HTTP server
-/// with graceful shutdown.
 pub async fn main() -> std::io::Result<()> {
-    // Build the OpenAPI spec once; cloned into each worker's Swagger/ReDoc services
     let openapi = ApiDoc::openapi();
 
     // Load environment variables from .env file
-    // (.ok() ignores a missing file, e.g. in production where env is injected)
     dotenv().ok();
 
     // Initialize structured logger with JSON output in release builds
     {
         use tracing_subscriber::EnvFilter;
 
-        // Respect RUST_LOG if set, otherwise default to "info"
         let env_filter =
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter);
 
-        // Human-friendly output while developing
         #[cfg(debug_assertions)]
         let subscriber = subscriber.pretty();
 
-        // Machine-parseable JSON output for release/production builds
         #[cfg(not(debug_assertions))]
         let subscriber = subscriber.json();
 
@@ -136,12 +189,10 @@ pub async fn main() -> std::io::Result<()> {
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    // Only validated here; the DB pool reads DATABASE_URL itself in from_env()
     let _database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     // JWT: strict env — crash on missing/insecure secret
     let jwt_service = JwtService::from_env();
-    // Keep copies of the secret and expiry for building per-scope JWT middleware
     let jwt_secret = jwt_service.secret_key.clone();
     let jwt_expiration = jwt_service.expiration_time();
 
@@ -163,13 +214,11 @@ pub async fn main() -> std::io::Result<()> {
     eprintln!("Running database migrations...");
     match Migrator::up(db_pool.primary(), None).await {
         Ok(_) => eprintln!("Database migrations completed successfully"),
-        // Non-fatal: the server still starts even if migrations fail
         Err(e) => {
             eprintln!("Warning: Failed to run database migrations: {}", e);
         }
     }
 
-    // Wrap in Arc so all workers and actors can share one pool
     let db_pool = Arc::new(db_pool);
 
     // Create a shared LobbyState actor
@@ -186,7 +235,6 @@ pub async fn main() -> std::io::Result<()> {
     crate::metrics::init_metrics();
 
     // Load AppConfig
-    // (rate-limit settings and other tunables)
     let config = AppConfig::from_env();
 
     // Initialize Matchmaking
@@ -194,24 +242,19 @@ pub async fn main() -> std::io::Result<()> {
     let redis_pool = create_redis_pool(&redis_url).expect("Failed to create Redis pool");
 
     // Optional: test connection
-    // A failure only logs a warning; startup continues
     if let Err(e) = test_redis_connection(&redis_pool).await {
         warn!("Warning: Redis connection test failed: {}", e);
     }
 
-    // Separate clone of the pool for the Redis-backed rate limiters / idempotency
     let rate_limiter_pool = redis_pool.clone();
     let matchmaking_service = MatchmakingService::new(redis_pool.clone());
 
     // Initialize Puzzle Validation Service
-    // Uses the JWT secret (e.g. to sign/verify puzzle tokens)
     let puzzle_service = Arc::new(PuzzleValidationService::new(jwt_secret.clone()));
 
     info!("Starting HTTP server on {}", server_addr);
 
     // Define the app factory closure
-    // Actix calls this once per worker thread, so every shared resource is
-    // cloned inside it (cheap: Arc / handle clones).
     let app_factory = move || {
         let db_pool = db_pool.clone();
         let jwt_service = jwt_service.clone();
@@ -227,7 +270,7 @@ pub async fn main() -> std::io::Result<()> {
             let mut cors = Cors::default()
                 .allow_any_method()
                 .allow_any_header()
-                .max_age(3600); // browsers may cache preflight results for 1 hour
+                .max_age(3600);
 
             // Get allowed origins from environment variable, fallback to all origins in development
             if let Ok(allowed_origins) = env::var("ALLOWED_ORIGINS") {
@@ -239,7 +282,6 @@ pub async fn main() -> std::io::Result<()> {
                 // We don't print here to avoid spamming logs on every worker start
             } else {
                 // In development, allow all origins by default
-                // NOTE: if ALLOWED_ORIGINS is unset in production, this is wide open
                 cors = cors.allow_any_origin();
             }
 
@@ -247,7 +289,6 @@ pub async fn main() -> std::io::Result<()> {
         };
 
         // Configure Governor for Auth (Strict per-second burst protection)
-        // Per-IP, in-memory limiter; emits rate-limit headers on responses
         let auth_governor_conf = GovernorConfigBuilder::default()
             .per_second(config.auth_rate_limit_per_sec)
             .burst_size(config.auth_rate_limit_burst)
@@ -263,8 +304,16 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
+        // BE-137: engine calls are CPU-bound, so `/v1/ai` gets a tighter
+        // per-second budget than games.
+        let ai_governor_conf = GovernorConfigBuilder::default()
+            .per_second(config.ai_rate_limit_per_sec)
+            .burst_size(config.ai_rate_limit_burst)
+            .use_headers()
+            .finish()
+            .unwrap();
+
         // Create Redis-backed rate limiters (shared across workers via Redis)
-        // Unlike Governor, these limit across all workers/instances using a time window
         let auth_redis_limiter = RedisRateLimiter::new(
             rate_limiter_pool.clone(),
             config.redis_auth_rate_limit,
@@ -277,26 +326,25 @@ pub async fn main() -> std::io::Result<()> {
             config.redis_game_rate_limit_window,
         );
 
+        let ai_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_ai_rate_limit,
+            config.redis_ai_rate_limit_window,
+        );
+
         // BE-46: Redis-backed IdempotencyMiddleware for mutating financial, staking & tournament requests
-        // NOTE: currently constructed but not `.wrap()`ed on any scope below
-        // (underscore prefix silences the unused warning).
         let _idempotency_middleware = IdempotencyMiddleware::new(rate_limiter_pool.clone());
 
         App::new()
-            // Tags each request with an ID for log correlation
             .wrap(RequestIdMiddleware)
-            // Structured per-request tracing/logging
             .wrap(TracingLogger::default())
-            // Tell browsers to use HTTPS only for one year (incl. subdomains)
             .wrap(actix_web::middleware::DefaultHeaders::new().add((
                 "Strict-Transport-Security",
                 "max-age=31536000; includeSubDomains",
             )))
             // Global middleware
-            // (wrapped last, so CORS runs outermost and handles preflights first)
             .wrap(cors)
             // App data
-            // Shared state injected into handlers via web::Data<T>
             .app_data(web::Data::from(db_pool.clone()))
             .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
@@ -305,13 +353,14 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(redis_broadcaster.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            // BE-137: bounded admission control in front of the engine.
+            .app_data(web::Data::new(EnginePool::from_env()))
             // Lc0 orchestrator is process-wide and internally bounded (BE-132).
-            // NOTE: built inside the factory, so each worker gets its own instance.
             .app_data(web::Data::new(Arc::new(Lc0Orchestrator::from_env())))
             // Register your routes
-            // Unauthenticated utility endpoints
             .route("/health", web::get().to(health))
             .route("/health/redis", web::get().to(health_redis))
+            .route("/health/ready", web::get().to(readiness))
             .route("/", web::get().to(greet))
             .route("/metrics", web::get().to(metrics_endpoint))
             // Puzzle routes
@@ -320,15 +369,16 @@ pub async fn main() -> std::io::Result<()> {
             // because it lived in the `knightverse-core` shell crate.
             .configure(configure_chess960_routes)
             // Player routes
-            // JWT-protected; also hosts wallet-linking endpoints
             .service(
                 web::scope("/v1/players")
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
-                        Some(redis_pool.clone()), // Redis used e.g. for token revocation checks
+                        Some(redis_pool.clone()),
                     ))
                     .service(export_player_data)
+                    .service(get_preferences)
+                    .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
                     .service(crate::wallet_link::wallet_unlink)
@@ -338,7 +388,6 @@ pub async fn main() -> std::io::Result<()> {
                     .service(delete_player),
             )
             // Admin audit-log routes (admin-gated inside the handlers)
-            // JWT only proves identity here; the admin role check is in each handler
             .service(
                 web::scope("/v1/admin")
                     .wrap(JwtAuthMiddleware::new_with_redis(
@@ -350,8 +399,6 @@ pub async fn main() -> std::io::Result<()> {
                     .service(record_action),
             )
             // Game routes
-            // Middleware layers: Governor (per-IP burst) -> Redis limiter (global window) -> JWT auth
-            // (Actix applies the last-added `.wrap` first, so JWT runs before the limiters)
             .service(
                 web::scope("/v1/games")
                     .wrap(Governor::new(&game_governor_conf))
@@ -371,7 +418,6 @@ pub async fn main() -> std::io::Result<()> {
                     .service(complete_game),
             )
             // Auth routes
-            // Public (no JWT) but strictly rate limited to deter brute-force attempts
             .service(
                 web::scope("/v1/auth")
                     .wrap(Governor::new(&auth_governor_conf))
@@ -382,7 +428,6 @@ pub async fn main() -> std::io::Result<()> {
                     .service(logout)
                     .service(logout_all),
             )
-            // Same auth handlers mounted under the /api/v1 prefix (alias for API versioning consistency)
             .service(
                 web::scope("/api/v1/auth")
                     .wrap(Governor::new(&auth_governor_conf))
@@ -394,8 +439,6 @@ pub async fn main() -> std::io::Result<()> {
                     .service(logout_all),
             )
             // Tournament routes (with Idempotency protection)
-            // NOTE: placeholder handler returning a canned success; idempotency
-            // middleware is not actually attached yet.
             .service(
                 web::scope("/api/v1/tournaments")
                     .wrap(JwtAuthMiddleware::new_with_redis(
@@ -403,6 +446,9 @@ pub async fn main() -> std::io::Result<()> {
                         jwt_expiration,
                         Some(redis_pool.clone()),
                     ))
+                    // BE-135: Swiss round generation, previously unreachable
+                    // because nothing depended on the `pairing` crate.
+                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
                     .route(
                         "/{id}/register",
                         web::post().to(|path: web::Path<String>| async move {
@@ -415,7 +461,6 @@ pub async fn main() -> std::io::Result<()> {
                     ),
             )
             // Escrow routes (with Idempotency protection)
-            // NOTE: stub — echoes the action name and always reports success
             .service(
                 web::scope("/api/v1/escrow")
                     .wrap(JwtAuthMiddleware::new_with_redis(
@@ -435,7 +480,6 @@ pub async fn main() -> std::io::Result<()> {
                     ),
             )
             // Staking routes (with Idempotency protection)
-            // NOTE: stub — same canned-success behavior as escrow
             .service(
                 web::scope("/api/v1/staking")
                     .wrap(JwtAuthMiddleware::new_with_redis(
@@ -455,16 +499,14 @@ pub async fn main() -> std::io::Result<()> {
                     ),
             )
             // WebSocket routes
-            // Live game connection; no JWT middleware on the scope, so any
-            // authentication must happen inside `ws_route`
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
             // Matchmaking routes
-            // Routes are defined in the matchmaking crate and mounted under /v1
             .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
-            // JWT-protected: move suggestions, position analysis, Lc0 engine access
             .service(
                 web::scope("/v1/ai")
+                    .wrap(Governor::new(&ai_governor_conf))
+                    .wrap(ai_redis_limiter)
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -475,10 +517,13 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Engine-pool saturation is exactly what an operator needs to see
+            // during an incident, so this one route stays outside the auth
+            // gate and the limiters.
+            .route("/health/engine", web::get().to(ai_health))
             // NFT routes (placeholder — not yet implemented)
             // .service(web::scope("/api/v1").configure(configure_nft_routes))
             // Swagger UI integration
-            // Interactive docs at /api/docs/, spec served at /api/docs/openapi.json
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")
                     .url("/api/docs/openapi.json", openapi.clone())
@@ -487,7 +532,6 @@ pub async fn main() -> std::io::Result<()> {
             // ReDoc integration (alternative documentation UI)
             .service(Redoc::with_url("/api/redoc", openapi.clone()))
             // WebSocket documentation as static HTML
-            // (actually served as text/markdown, despite the comment above)
             .route(
                 "/api/docs/websocket",
                 web::get().to(|| async {
@@ -498,10 +542,8 @@ pub async fn main() -> std::io::Result<()> {
             )
     };
 
-    // Bind the listener; `?` propagates any bind error (e.g. port in use)
     let mut http_server = HttpServer::new(app_factory).bind(&server_addr)?;
 
-    // Optional override of the worker thread count (defaults to number of CPU cores)
     if let Ok(workers_str) = env::var("WORKERS") {
         if let Ok(workers) = workers_str.parse::<usize>() {
             info!("Setting worker count to {}", workers);
@@ -513,10 +555,8 @@ pub async fn main() -> std::io::Result<()> {
     // stop(true) waits for in-flight requests and drains the worker thread pool
     // so active WebSocket connections and DB transactions can complete cleanly.
     let server = http_server.run();
-    // Handle lets the signal task stop the server while `server` is awaited below
     let server_handle = server.handle();
 
-    // Background task that waits for a shutdown signal, then stops the server
     actix_web::rt::spawn(async move {
         #[cfg(unix)]
         {
@@ -525,7 +565,6 @@ pub async fn main() -> std::io::Result<()> {
                 signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
             let mut sigint =
                 signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
-            // Whichever signal arrives first triggers shutdown
             tokio::select! {
                 _ = sigterm.recv() => {
                     eprintln!("Received SIGTERM — initiating graceful shutdown...");
@@ -535,7 +574,6 @@ pub async fn main() -> std::io::Result<()> {
                 }
             }
         }
-        // Windows / non-Unix: only Ctrl+C is available
         #[cfg(not(unix))]
         {
             let _ = tokio::signal::ctrl_c().await;
@@ -546,6 +584,124 @@ pub async fn main() -> std::io::Result<()> {
         eprintln!("Server stopped gracefully");
     });
 
-    // Block until the server has fully stopped
     server.await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{http::StatusCode, test};
+    use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
+    use std::time::Duration;
+
+    const TEST_TIMEOUT: Duration = Duration::from_millis(300);
+
+    fn mock_db() -> Arc<DatabaseConnection> {
+        Arc::new(MockDatabase::new(DbBackend::Postgres).into_connection())
+    }
+
+    fn pool_of(conn: Arc<DatabaseConnection>) -> DbPool {
+        DbPool::from_connections(conn.clone(), conn, false)
+    }
+
+    /// Redis pool pointed at a port nothing listens on (connection refused).
+    fn refused_redis_pool() -> deadpool_redis::Pool {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        create_redis_pool(&format!("redis://127.0.0.1:{port}")).unwrap()
+    }
+
+    #[actix_web::test]
+    async fn health_is_liveness_only_and_needs_no_dependencies() {
+        let app = test::init_service(App::new().route("/health", web::get().to(health))).await;
+        let res = test::call_service(&app, test::TestRequest::get().uri("/health").to_request())
+            .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(res).await;
+        assert_eq!(body, serde_json::json!({"status": "ok"}));
+    }
+
+    #[actix_web::test]
+    async fn check_db_ok_when_primary_responds() {
+        assert!(check_db(&mock_db(), TEST_TIMEOUT).await.is_ok());
+    }
+
+    #[actix_web::test]
+    async fn check_db_fails_when_primary_disconnected() {
+        assert!(check_db(&DatabaseConnection::Disconnected, TEST_TIMEOUT)
+            .await
+            .is_err());
+    }
+
+    #[actix_web::test]
+    async fn check_redis_fails_when_connection_refused() {
+        assert!(check_redis(&refused_redis_pool(), TEST_TIMEOUT)
+            .await
+            .is_err());
+    }
+
+    #[actix_web::test]
+    async fn check_redis_times_out_when_server_never_replies() {
+        // Accept connections but never write a byte back, so PING hangs.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _accept = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        let pool = create_redis_pool(&format!("redis://127.0.0.1:{port}")).unwrap();
+
+        let start = std::time::Instant::now();
+        let err = check_redis(&pool, TEST_TIMEOUT).await.unwrap_err();
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[actix_web::test]
+    async fn readiness_returns_503_when_redis_down() {
+        let res = readiness_response(&pool_of(mock_db()), &refused_redis_pool(), TEST_TIMEOUT)
+            .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["checks"]["database"]["status"], "ok");
+        assert_eq!(body["checks"]["redis"]["status"], "error");
+    }
+
+    #[actix_web::test]
+    async fn readiness_returns_503_when_db_down() {
+        let res = readiness_response(
+            &pool_of(Arc::new(DatabaseConnection::Disconnected)),
+            &refused_redis_pool(),
+            TEST_TIMEOUT,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["checks"]["database"]["status"], "error");
+    }
+
+    #[actix_web::test]
+    async fn readiness_route_is_registered_and_reports_unready() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool_of(mock_db())))
+                .app_data(web::Data::new(refused_redis_pool()))
+                .route("/health/ready", web::get().to(readiness)),
+        )
+        .await;
+        let res = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/health/ready").to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

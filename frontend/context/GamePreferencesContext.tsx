@@ -1,6 +1,10 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import {
+  fetchPlayerPreferences,
+  savePlayerPreferences,
+} from "@/services/playerPreferencesService";
 
 export type PieceInputMethod = "drag" | "click" | "both";
 export type AutoQueenMode = "always" | "prompt" | "premoves";
@@ -68,6 +72,7 @@ export const GamePreferencesProvider: React.FC<{
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    let active = true;
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -78,6 +83,28 @@ export const GamePreferencesProvider: React.FC<{
       // ignore malformed storage
     }
     setMounted(true);
+
+    void fetchPlayerPreferences()
+      .then((saved) => {
+        const game = saved?.game;
+        if (!active || !game || typeof game !== "object" || Array.isArray(game)) {
+          return;
+        }
+        const next = { ...DEFAULT_PREFERENCES, ...game };
+        setPreferences(next);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // storage unavailable
+        }
+      })
+      .catch((error) => {
+        console.warn("Could not load game preferences from the backend:", error);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const setPreference = <K extends keyof GamePreferences>(
@@ -92,6 +119,9 @@ export const GamePreferencesProvider: React.FC<{
         } catch {
           // storage unavailable
         }
+        void savePlayerPreferences({ game: next }).catch((error) => {
+          console.warn("Could not sync game preferences:", error);
+        });
       }
       return next;
     });
@@ -105,6 +135,9 @@ export const GamePreferencesProvider: React.FC<{
       } catch {
         // storage unavailable
       }
+      void savePlayerPreferences({ game: DEFAULT_PREFERENCES }).catch((error) => {
+        console.warn("Could not sync reset game preferences:", error);
+      });
     }
   };
 

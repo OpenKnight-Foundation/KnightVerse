@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod archive;
 pub mod ai;
 pub mod auth;
 pub mod chess960;
@@ -9,8 +10,10 @@ pub mod games;
 pub mod idempotency;
 pub mod lc0;
 pub mod metrics;
+pub mod move_order;
 pub mod moderation;
 pub mod openapi;
+pub mod pairings;
 pub mod players;
 pub mod rate_limiter;
 pub mod redis_broadcast;

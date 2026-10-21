@@ -50,12 +50,10 @@ pub const SPECTATOR_QUEUE_CAPACITY: usize = 256;
 /// connection is considered unrecoverable and disconnected.
 const MAX_CONSECUTIVE_OVERFLOWS: usize = 64;
 
-// Redis pub/sub channel that carries all spectator-bound messages for a game
 fn channel_for(game_id: &str) -> String {
     format!("game:{}:spectators", game_id)
 }
 
-// Redis key holding the running spectator count for a game
 fn spectator_count_key(game_id: &str) -> String {
     format!("game:{}:spectator_count", game_id)
 }
@@ -66,7 +64,6 @@ fn spectator_count_key(game_id: &str) -> String {
 pub struct SpectatorQueue {
     game_id: String,
     capacity: usize,
-    // Std (sync) mutex is fine: it's only held briefly and never across an `.await`
     frames: Mutex<VecDeque<WsMessage>>,
     /// Wakes the pump task whenever a frame is buffered or the queue closes.
     notify: Notify,
@@ -81,16 +78,11 @@ pub struct SpectatorQueue {
 }
 
 impl SpectatorQueue {
-    /// Create a queue with the default capacity.
     pub fn new(game_id: impl Into<String>) -> Arc<Self> {
         Self::with_capacity(game_id, SPECTATOR_QUEUE_CAPACITY)
     }
 
-    /// Create a queue with a custom capacity (used by tests).
-    /// Shared between the subscriber task (producer) and the pump task (consumer),
-    /// hence the `Arc`.
     pub fn with_capacity(game_id: impl Into<String>, capacity: usize) -> Arc<Self> {
-        // A zero capacity would make `push` loop forever; enforce at least 1
         let capacity = capacity.max(1);
         Arc::new(Self {
             game_id: game_id.into(),
@@ -134,17 +126,14 @@ impl SpectatorQueue {
     /// connection must be disconnected because it stayed saturated for
     /// [`MAX_CONSECUTIVE_OVERFLOWS`] consecutive fan-out events.
     pub fn push(&self, frame: WsMessage) -> bool {
-        // Already condemned: just count the drop and keep signalling "disconnect"
         if self.overflowed.load(Ordering::Relaxed) {
             self.record_drop(1);
             return true;
         }
 
         let mut dropped_now = 0usize;
-        // Scope the lock so it is released before touching metrics/notify
         let depth = {
             let mut frames = self.frames.lock().expect("spectator queue poisoned");
-            // Evict oldest frames until there is room for the new one
             while frames.len() >= self.capacity {
                 frames.pop_front();
                 dropped_now += 1;
@@ -154,23 +143,19 @@ impl SpectatorQueue {
         };
 
         if dropped_now > 0 {
-            // This fan-out event overflowed the queue: count it toward the streak
             self.record_drop(dropped_now);
             let overflows = self.consecutive_overflows.fetch_add(1, Ordering::Relaxed) + 1;
             if overflows >= MAX_CONSECUTIVE_OVERFLOWS {
-                // Streak too long: mark for teardown and wake the pump so it can exit
                 self.overflowed.store(true, Ordering::Relaxed);
                 metrics::increment_spectator_backpressure_disconnects(&self.game_id);
                 self.notify.notify_one();
                 return true;
             }
         } else {
-            // The queue had room, so the client is keeping up: reset the streak
             self.consecutive_overflows.store(0, Ordering::Relaxed);
         }
 
         metrics::set_spectator_queue_depth(&self.game_id, depth);
-        // Wake the pump task (a permit is stored if it isn't waiting yet)
         self.notify.notify_one();
         false
     }
@@ -181,24 +166,19 @@ impl SpectatorQueue {
     /// which tells the pump task to stop.
     pub async fn pop(&self) -> Option<WsMessage> {
         loop {
-            // Register interest *before* checking the queue so a push that lands
-            // between the check and the await can't be missed
             let notified = self.notify.notified();
             {
                 let mut frames = self.frames.lock().expect("spectator queue poisoned");
                 if let Some(frame) = frames.pop_front() {
                     let depth = frames.len();
-                    // Release the lock before calling into metrics
                     drop(frames);
                     metrics::set_spectator_queue_depth(&self.game_id, depth);
                     return Some(frame);
                 }
             }
-            // Queue is empty: stop if the subscription is finished
             if self.overflowed.load(Ordering::Relaxed) || self.closed.load(Ordering::Relaxed) {
                 return None;
             }
-            // Otherwise sleep until `push` or `close` wakes us
             notified.await;
         }
     }
@@ -215,7 +195,6 @@ impl SpectatorQueue {
         metrics::set_spectator_queue_depth(&self.game_id, 0);
     }
 
-    // Bump both the local counter and the Prometheus counter
     fn record_drop(&self, dropped: usize) {
         self.dropped_frames.fetch_add(dropped, Ordering::Relaxed);
         metrics::increment_spectator_frames_dropped(&self.game_id, dropped as u64);
@@ -232,10 +211,7 @@ pub fn spawn_outbox_pump(
     recipient: Recipient<WsMessage>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        // Loop until the queue signals shutdown (None)
         while let Some(frame) = queue.pop().await {
-            // `send(..).await` waits for the actor to accept the message; an error
-            // means the actor is gone (connection closed), so stop pumping
             if recipient.send(frame).await.is_err() {
                 break;
             }
@@ -246,9 +222,7 @@ pub fn spawn_outbox_pump(
 /// Handles belonging to one spectator's Redis subscription. Both must be
 /// aborted together to fully tear the connection's fan-out down.
 pub struct SpectatorSubscription {
-    // Task reading from Redis and pushing into the queue
     subscriber: JoinHandle<()>,
-    // Task draining the queue into the connection actor
     pump: JoinHandle<()>,
 }
 
@@ -259,15 +233,12 @@ impl SpectatorSubscription {
     }
 }
 
-/// Thin wrapper around a Redis client for publishing spectator messages and
-/// maintaining spectator counts. Cheap to clone.
 #[derive(Clone)]
 pub struct RedisBroadcaster {
     client: redis::Client,
 }
 
 impl RedisBroadcaster {
-    /// Parse the URL and build a client (no connection is opened yet).
     pub fn new(redis_url: &str) -> Result<Self, redis::RedisError> {
         Ok(Self {
             client: redis::Client::open(redis_url)?,
@@ -277,7 +248,6 @@ impl RedisBroadcaster {
     /// Publish a message to a game's spectator channel, fire-and-forget. The
     /// publish never blocks the caller — it just spawns a task.
     pub fn publish_fire_and_forget(&self, game_id: &str, message: &WsMessage) {
-        // Serialization failures are silently ignored
         let Ok(payload) = serde_json::to_string(message) else {
             return;
         };
@@ -286,7 +256,6 @@ impl RedisBroadcaster {
         actix::spawn(async move {
             match client.get_multiplexed_async_connection().await {
                 Ok(mut conn) => {
-                    // Result (number of receivers) is intentionally ignored
                     let _: Result<i64, _> = conn.publish(&channel, payload).await;
                 }
                 Err(e) => error!("Redis broadcast connection failed: {}", e),
@@ -309,8 +278,6 @@ impl RedisBroadcaster {
         self.bump_spectator_count(game_id, -1).await;
     }
 
-    // Atomically adjust the shared counter in Redis (so it's correct across
-    // nodes), then broadcast the new value to all spectators of the game
     async fn bump_spectator_count(&self, game_id: &str, delta: i64) {
         let key = spectator_count_key(game_id);
         let mut conn = match self.client.get_multiplexed_async_connection().await {
@@ -320,7 +287,6 @@ impl RedisBroadcaster {
                 return;
             }
         };
-        // INCRBY returns the new value
         let count: i64 = match conn.incr(&key, delta).await {
             Ok(c) => c,
             Err(e) => {
@@ -331,7 +297,6 @@ impl RedisBroadcaster {
         self.publish_fire_and_forget(
             game_id,
             &WsMessage::SpectatorCount {
-                // Clamp so a drifted counter can never go negative on the wire
                 count: count.max(0) as u32,
             },
         );
@@ -349,7 +314,6 @@ pub fn spawn_subscriber_task(
     recipient: Recipient<WsMessage>,
     disconnect: Recipient<SpectatorDisconnect>,
 ) -> SpectatorSubscription {
-    // One queue per spectator connection, plus a pump to drain it
     let queue = SpectatorQueue::new(game_id.clone());
     let pump = spawn_outbox_pump(queue.clone(), recipient);
 
@@ -357,7 +321,6 @@ pub fn spawn_subscriber_task(
     let subscriber_game_id = game_id.clone();
     let subscriber = tokio::spawn(async move {
         let channel = channel_for(&subscriber_game_id);
-        // Pub/sub needs a dedicated (non-multiplexed) connection
         let conn = match redis.client.get_async_connection().await {
             Ok(c) => c,
             Err(e) => {
@@ -365,7 +328,6 @@ pub fn spawn_subscriber_task(
                     "Failed to open Redis pubsub connection for game {}: {}",
                     subscriber_game_id, e
                 );
-                // Close the queue so the pump task exits too
                 subscriber_queue.close();
                 return;
             }
@@ -379,17 +341,13 @@ pub fn spawn_subscriber_task(
 
         let mut stream = pubsub.on_message();
         while let Some(msg) = stream.next().await {
-            // Skip anything that isn't a UTF-8 string payload
             let payload = match msg.get_payload::<String>() {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            // Skip payloads that don't deserialize into a known WsMessage
             let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&payload) else {
                 continue;
             };
-            // `push` never awaits, so this loop can't be stalled by a slow client.
-            // `true` means sustained overflow: ask the connection actor to disconnect
             if subscriber_queue.push(ws_msg) {
                 error!(
                     "Spectator outbound queue for game {} stayed saturated; disconnecting",
@@ -402,7 +360,6 @@ pub fn spawn_subscriber_task(
             }
         }
 
-        // Stream ended (Redis dropped, or we broke out above): stop the pump
         subscriber_queue.close();
     });
 
@@ -424,7 +381,6 @@ mod tests {
         type Context = actix::Context<Self>;
     }
 
-    // Forward each received message into the channel for the test to read
     impl actix::Handler<WsMessage> for ChannelSink {
         type Result = ();
 
@@ -433,10 +389,8 @@ mod tests {
         }
     }
 
-    // A slow consumer must stay within its capacity and must not affect others
     #[actix_web::test]
     async fn stalled_consumer_backlog_is_bounded_and_does_not_stall_others() {
-        // `stalled` never pops (simulating a stuck client); `peer` is roomy enough to hold all frames
         let stalled = SpectatorQueue::with_capacity("room-1", 8);
         let peer = SpectatorQueue::with_capacity("room-1", 256);
 
@@ -449,7 +403,6 @@ mod tests {
         // Bounded backlog: the stalled connection never buffers more than its
         // configured capacity, no matter how many frames are fanned out.
         assert!(stalled.depth() <= 8, "stalled depth = {}", stalled.depth());
-        // 200 pushed - 8 retained = 192 dropped
         assert_eq!(stalled.dropped_frames(), 192);
 
         // Independent: the healthy peer loses nothing and holds every frame.
@@ -465,14 +418,11 @@ mod tests {
         }
     }
 
-    // Pushing past capacity for long enough must eventually signal a disconnect
     #[actix_web::test]
     async fn sustained_overflow_flags_connection_for_disconnect() {
-        // Tiny capacity so nearly every push after the first two overflows
         let queue = SpectatorQueue::with_capacity("room-2", 2);
 
         let mut disconnect = false;
-        // Allow a few extra pushes beyond the threshold as headroom
         for i in 0..(MAX_CONSECUTIVE_OVERFLOWS + 16) as u32 {
             if queue.push(WsMessage::Clock { white: i, black: i }) {
                 disconnect = true;
@@ -485,7 +435,6 @@ mod tests {
         assert!(queue.depth() <= 2, "depth = {}", queue.depth());
     }
 
-    // The pump should deliver buffered frames in order, then exit once closed
     #[actix_web::test]
     async fn outbox_pump_forwards_frames_and_stops_on_close() {
         let queue = SpectatorQueue::with_capacity("room-3", 4);
@@ -495,7 +444,6 @@ mod tests {
 
         queue.push(WsMessage::Clock { white: 1, black: 2 });
         queue.push(WsMessage::Clock { white: 3, black: 4 });
-        // Closing after pushing: pop() still drains remaining frames before returning None
         queue.close();
 
         assert_eq!(
@@ -507,7 +455,6 @@ mod tests {
             Some(WsMessage::Clock { white: 3, black: 4 })
         );
 
-        // The pump task must terminate within the timeout and not have panicked
         tokio::time::timeout(Duration::from_secs(2), pump)
             .await
             .expect("pump should stop after the queue closes")

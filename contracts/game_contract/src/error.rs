@@ -98,4 +98,6 @@ pub enum ContractError {
     CircuitBreakerVoteNotFound = 51,
     /// Admin key rotation already has a pending proposal (#890)
     AdminKeyAlreadyPending = 52,
+    /// Stored admin public key is not a 32-byte ED25519 key.
+    InvalidAdminKey = 53,
 }

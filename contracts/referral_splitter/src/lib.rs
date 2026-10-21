@@ -4,16 +4,6 @@
 //! Records permanent on-chain referee→referrer bindings and automatically
 //! splits a configurable fee percentage to the referrer on every wager.
 //! Self-referral loops are rejected at registration time.
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
-
-use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, panic_with_error,
-    Address, Env, Vec,
-<<<<<<< HEAD
-=======
 //!
 //! Commissions are accrued by [`ReferralSplitter::settle_wager`] and paid out
 //! on-chain by [`ReferralSplitter::withdraw_earnings`], which performs a real
@@ -22,9 +12,6 @@ use soroban_sdk::{
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
     Address, Env,
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
 };
 
 /// Fee denominator: commission_bps / 10_000 = commission fraction.
@@ -36,15 +23,7 @@ pub enum DataKey {
     Admin,
     /// referrer for a given referee address
     Referrer(Address),
-<<<<<<< HEAD
-<<<<<<< HEAD
-    /// cumulative earnings for a referrer
-=======
     /// withdrawable commission balance for a referrer
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
-    /// cumulative earnings for a referrer
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
     Earnings(Address),
     /// configurable commission in basis points (e.g. 1000 = 10%)
     CommissionBps,
@@ -97,19 +76,11 @@ impl ReferralSplitter {
     }
 
     /// Settle a wager of `amount` stroops. Splits commission to the referrer
-<<<<<<< HEAD
-<<<<<<< HEAD
-    /// (if one exists) and returns the referrer's cut. Emits a referral_earnings event.
-=======
     /// (if one exists) and returns the referrer's cut, which is credited to
     /// their withdrawable balance. Emits a referral_earnings event.
     ///
     /// This is accounting only: the accrued balance is moved on-chain by
     /// [`ReferralSplitter::withdraw_earnings`].
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
-    /// (if one exists) and returns the referrer's cut. Emits a referral_earnings event.
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
     pub fn settle_wager(env: Env, referee: Address, amount: i128) -> i128 {
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
@@ -131,33 +102,14 @@ impl ReferralSplitter {
                 env.storage()
                     .persistent()
                     .set(&DataKey::Earnings(r.clone()), &(prev + cut));
-<<<<<<< HEAD
-                env.events().publish(
-<<<<<<< HEAD
-<<<<<<< HEAD
-                    (soroban_sdk::symbol_short!("ref_earn"),),
-=======
-                    (symbol_short!("ref_earn"),),
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
-                    (soroban_sdk::symbol_short!("ref_earn"),),
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
-                    (r.clone(), cut),
-                );
-=======
                 env.events()
                     .publish((symbol_short!("ref_earn"),), (r.clone(), cut));
->>>>>>> de91cf5ef56310eb6db63898b4497ba8d25ff178
                 return cut;
             }
         }
         0
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-    /// Returns cumulative earnings for a referrer.
-=======
     /// Withdraw a referrer's entire accrued commission balance in `token`.
     ///
     /// Requires the referrer's authorisation and transfers the full
@@ -194,10 +146,6 @@ impl ReferralSplitter {
     }
 
     /// Returns the withdrawable commission balance for a referrer.
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
-    /// Returns cumulative earnings for a referrer.
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e
     pub fn get_earnings(env: Env, referrer: Address) -> i128 {
         env.storage()
             .persistent()
@@ -209,10 +157,6 @@ impl ReferralSplitter {
     pub fn get_referrer(env: Env, referee: Address) -> Option<Address> {
         env.storage().persistent().get(&DataKey::Referrer(referee))
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-}
-=======
 
     /// Returns the configured commission in basis points.
     pub fn get_commission_bps(env: Env) -> u32 {
@@ -225,7 +169,3 @@ impl ReferralSplitter {
 
 #[cfg(test)]
 mod test;
->>>>>>> 5a02c90040abc29fc279b25bc44388a542015a5f
-=======
-}
->>>>>>> 9df5c231b175040dc761dfddb915e1599cf2161e

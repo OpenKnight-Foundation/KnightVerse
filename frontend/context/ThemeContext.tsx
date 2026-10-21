@@ -8,7 +8,10 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { syncThemeWithBackend } from "@/services/themeService";
+import {
+  fetchThemePreferencesFromBackend,
+  syncThemeWithBackend,
+} from "@/services/themeService";
 
 export type PresetTheme =
   | "emerald"
@@ -273,6 +276,7 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Load from localStorage on mount
   useEffect(() => {
+    let active = true;
     try {
       const savedTheme = localStorage.getItem("knightverse_board_theme") as BoardTheme | null;
       const savedPalette = localStorage.getItem("knightverse_custom_board_palette");
@@ -317,6 +321,47 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       // localStorage not accessible
     }
     setMounted(true);
+
+    void fetchThemePreferencesFromBackend().then((preferences) => {
+      if (!active || !preferences) return;
+      const palette = preferences.customPalette;
+      if (
+        palette &&
+        typeof palette.light === "string" &&
+        typeof palette.dark === "string" &&
+        typeof palette.selected === "string" &&
+        typeof palette.lastMove === "string"
+      ) {
+        setCustomPaletteState(palette);
+        try {
+          localStorage.setItem(
+            "knightverse_custom_board_palette",
+            JSON.stringify(palette),
+          );
+        } catch {
+          // localStorage unavailable
+        }
+      }
+      if (preferences.boardTheme) {
+        const theme = preferences.boardTheme;
+        const normalized =
+          theme in LEGACY_THEME_MAP
+            ? LEGACY_THEME_MAP[theme as LegacyTheme]
+            : theme;
+        if (normalized === "custom" || normalized in PRESET_THEMES) {
+          setBoardThemeState(normalized);
+          try {
+            localStorage.setItem("knightverse_board_theme", normalized);
+          } catch {
+            // localStorage unavailable
+          }
+        }
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [applyCssVariables]);
 
   // Update CSS variables when active colors change

@@ -17,7 +17,7 @@ use dto::auth::{
     AuthResponse, ErrorResponse, LoginRequest, LogoutResponse, RefreshResponse,
     RefreshTokenRequest, RegisterRequest,
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use security::{JwtService, TokenService, TokenServiceError};
 use service::helper::password;
 
@@ -64,14 +64,16 @@ async fn is_jti_blacklisted(redis_pool: &Pool, jti: &str) -> bool {
     request_body = RegisterRequest,
     responses(
         (status = 201, description = "User registered successfully", body = AuthResponse),
-        (status = 400, description = "Validation error", body = ErrorResponse)
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 409, description = "Username or email already taken", body = ErrorResponse)
     ),
     tag = "Authentication"
 )]
 #[post("/register")]
 pub async fn register(
-    _pool: web::Data<DbPool>,
+    pool: web::Data<DbPool>,
     payload: web::Json<RegisterRequest>,
+    jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
     if let Err(errors) = payload.validate() {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -80,19 +82,123 @@ pub async fn register(
         });
     }
 
-    // For now, return a mock response
-    increment_auth_events("register", true);
+    let username = payload.username.clone();
+    let email = payload.email.clone();
 
-    HttpResponse::Created().json(AuthResponse {
-        access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
-        refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
+    // Reject taken username or email up front (unique keys exist on both).
+    let existing = player::Entity::find()
+        .filter(
+            player::Column::Username
+                .eq(&username)
+                .or(player::Column::Email.eq(&email)),
+        )
+        .one(pool.replica())
+        .await;
+    if let Ok(Some(_)) = existing {
+        return HttpResponse::Conflict().json(ErrorResponse {
+            message: "Username or email is already taken".to_string(),
+            code: "USER_EXISTS".to_string(),
+        });
+    }
+
+    let password_hash = match password::hash_password(&payload.password) {
+        Ok(h) => h.into_bytes(),
+        Err(e) => {
+            error!("Failed to hash password during registration: {}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                message: "Failed to create account".to_string(),
+                code: "INTERNAL_ERROR".to_string(),
+            });
+        }
+    };
+
+    let player_id = Uuid::new_v4();
+    let new_player = player::ActiveModel {
+        id: Set(player_id),
+        username: Set(username.clone()),
+        email: Set(email.clone()),
+        password_hash: Set(password_hash),
+        biography: Set(String::new()),
+        country: Set(String::new()),
+        flair: Set(String::new()),
+        real_name: Set(username.clone()),
+        is_enabled: Set(true),
+        ..Default::default()
+    };
+
+    if let Err(e) = player::Entity::insert(new_player).exec(pool.primary()).await {
+        // Unique index violations (racing registrations) map to 409; anything else is a server fault.
+        let detail = e.to_string();
+        if detail.contains("duplicate") || detail.contains("unique") {
+            return HttpResponse::Conflict().json(ErrorResponse {
+                message: "Username or email is already taken".to_string(),
+                code: "USER_EXISTS".to_string(),
+            });
+        }
+        error!("Registration insert failed: {}", e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            message: "Failed to create account".to_string(),
+            code: "INTERNAL_ERROR".to_string(),
+        });
+    }
+
+    // Same identity and token flow as login from here on.
+    let user_id = (player_id.as_u128() & 0x7F_FF_FF_FF) as i32;
+
+    let access_token = match jwt_service.generate_token(user_id, &username, player_id) {
+        Ok(t) => t,
+        Err(_) => {
+            increment_auth_events("register", false);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                message: "Failed to generate access token".to_string(),
+                code: "TOKEN_ERROR".to_string(),
+            });
+        }
+    };
+
+    let family_id = Uuid::new_v4();
+    let refresh_ttl = env::var("REFRESH_TOKEN_TTL_DAYS")
+        .unwrap_or_else(|_| "7".to_string())
+        .parse::<i64>()
+        .unwrap_or(7);
+
+    let refresh_token =
+        match TokenService::generate_refresh_token(pool.primary(), user_id, family_id, refresh_ttl)
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Failed to generate refresh token: {}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    message: "Failed to generate refresh token".to_string(),
+                    code: "TOKEN_ERROR".to_string(),
+                });
+            }
+        };
+
+    let mut response = HttpResponse::Created().json(AuthResponse {
+        access_token,
+        refresh_token: refresh_token.clone(),
         token_type: "Bearer".to_string(),
         expires_in: 3600,
-        refresh_token_expires_in: 604800,
-        user_id: 1,
-        username: payload.username.clone(),
+        refresh_token_expires_in: (refresh_ttl * 86400) as usize,
+        user_id,
+        username,
         wallet_address: None,
-    })
+    });
+
+    let cookie = Cookie::build("refresh_token", refresh_token)
+        .http_only(true)
+        .secure(false)
+        .same_site(actix_web::cookie::SameSite::Strict)
+        .max_age(Duration::seconds(refresh_ttl as i64 * 86400))
+        .finish();
+
+    response.add_cookie(&cookie).ok();
+
+    increment_auth_events("register", true);
+
+    response
 }
 
 /// Login with credentials — player lookup goes to replica; token write goes to primary.

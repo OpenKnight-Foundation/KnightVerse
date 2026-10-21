@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
-    Address, Env, Symbol, Vec,
+    Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
 
 /// Structured error codes for SponsorshipEscrowContract.
@@ -136,6 +136,8 @@ pub enum DataKey {
 }
 
 pub const TOTAL_BASIS_POINTS: u32 = 10000;
+const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
+const PERSISTENT_TTL_EXTEND_TO: u32 = 500_000;
 
 #[contract]
 pub struct SponsorshipEscrowContract;
@@ -216,9 +218,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.oracle = new_oracle.clone();
-        env.storage()
-            .instance()
-            .set(&DataKey::Tournament(tournament_id), &tournament);
+        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events().publish(
             (symbol_short!("set_orc"), tournament_id),
@@ -248,7 +248,7 @@ impl SponsorshipEscrowContract {
         Self::check_not_paused(&env);
 
         let tourn_key = DataKey::Tournament(tournament_id);
-        if env.storage().instance().has(&tourn_key) {
+        if Self::has_persistent(&env, &tourn_key) {
             panic_with_error!(&env, EscrowError::TournamentAlreadyExists);
         }
 
@@ -268,9 +268,7 @@ impl SponsorshipEscrowContract {
                 .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidBasisPointsSum));
 
             // Store milestone config & initial state
-            env.storage()
-                .instance()
-                .set(&DataKey::MilestoneInput(tournament_id, i), &m);
+            Self::set_persistent(&env, &DataKey::MilestoneInput(tournament_id, i), &m);
 
             let initial_state = MilestoneState {
                 stage_id: m.stage_id,
@@ -280,9 +278,11 @@ impl SponsorshipEscrowContract {
                 completed: false,
                 disbursed_ledger: 0,
             };
-            env.storage()
-                .instance()
-                .set(&DataKey::MilestoneState(tournament_id, i), &initial_state);
+            Self::set_persistent(
+                &env,
+                &DataKey::MilestoneState(tournament_id, i),
+                &initial_state,
+            );
         }
 
         if sum_bps != TOTAL_BASIS_POINTS {
@@ -300,17 +300,21 @@ impl SponsorshipEscrowContract {
             kickoff_deadline,
         };
 
-        env.storage().instance().set(&tourn_key, &tournament);
+        Self::set_persistent(&env, &tourn_key, &tournament);
 
         let empty_tokens: Vec<Address> = Vec::new(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::TournamentTokens(tournament_id), &empty_tokens);
+        Self::set_persistent(
+            &env,
+            &DataKey::TournamentTokens(tournament_id),
+            &empty_tokens,
+        );
 
         let empty_sponsors: Vec<Address> = Vec::new(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::TournamentSponsors(tournament_id), &empty_sponsors);
+        Self::set_persistent(
+            &env,
+            &DataKey::TournamentSponsors(tournament_id),
+            &empty_sponsors,
+        );
 
         env.events().publish(
             (symbol_short!("created"), tournament_id),
@@ -399,35 +403,32 @@ impl SponsorshipEscrowContract {
 
         // Update total deposited for this token
         let total_key = DataKey::TotalDeposited(tournament_id, token.clone());
-        let current_total: i128 = env.storage().instance().get(&total_key).unwrap_or(0);
+        let current_total: i128 = Self::get_persistent(&env, &total_key).unwrap_or(0);
         let new_total = current_total
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        env.storage().instance().set(&total_key, &new_total);
+        Self::set_persistent(&env, &total_key, &new_total);
 
         // Update remaining balance for this token
         let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-        let current_rem: i128 = env.storage().instance().get(&rem_key).unwrap_or(0);
+        let current_rem: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
         let new_rem = current_rem
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        env.storage().instance().set(&rem_key, &new_rem);
+        Self::set_persistent(&env, &rem_key, &new_rem);
 
         // Update sponsor's individual deposit for this token
         let sponsor_key = DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-        let current_sponsor_dep: i128 = env.storage().instance().get(&sponsor_key).unwrap_or(0);
+        let current_sponsor_dep: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
         let new_sponsor_dep = current_sponsor_dep
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        env.storage().instance().set(&sponsor_key, &new_sponsor_dep);
+        Self::set_persistent(&env, &sponsor_key, &new_sponsor_dep);
 
         // Record token in tournament's token list if not present
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let mut tokens: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&tokens_key)
-            .unwrap_or(Vec::new(&env));
+        let mut tokens: Vec<Address> =
+            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let mut token_found = false;
         for i in 0..tokens.len() {
@@ -438,16 +439,13 @@ impl SponsorshipEscrowContract {
         }
         if !token_found {
             tokens.push_back(token.clone());
-            env.storage().instance().set(&tokens_key, &tokens);
+            Self::set_persistent(&env, &tokens_key, &tokens);
         }
 
         // Record sponsor in tournament's sponsors list if not present
         let sponsors_key = DataKey::TournamentSponsors(tournament_id);
-        let mut sponsors: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&sponsors_key)
-            .unwrap_or(Vec::new(&env));
+        let mut sponsors: Vec<Address> =
+            Self::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
 
         let mut sponsor_found = false;
         for i in 0..sponsors.len() {
@@ -458,7 +456,7 @@ impl SponsorshipEscrowContract {
         }
         if !sponsor_found {
             sponsors.push_back(sponsor.clone());
-            env.storage().instance().set(&sponsors_key, &sponsors);
+            Self::set_persistent(&env, &sponsors_key, &sponsors);
         }
 
         // Emit deposit event
@@ -508,10 +506,7 @@ impl SponsorshipEscrowContract {
         }
 
         let milestone_state_key = DataKey::MilestoneState(tournament_id, stage_index);
-        let mut milestone_state: MilestoneState = env
-            .storage()
-            .instance()
-            .get(&milestone_state_key)
+        let mut milestone_state: MilestoneState = Self::get_persistent(&env, &milestone_state_key)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::MilestoneNotFound));
 
         if milestone_state.completed {
@@ -538,21 +533,18 @@ impl SponsorshipEscrowContract {
 
         // Execute disbursements across all deposited tokens
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&tokens_key)
-            .unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> =
+            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let is_last_stage = (stage_index + 1) == tournament.total_milestones;
 
         for i in 0..tokens.len() {
             let token = tokens.get(i).unwrap();
             let total_dep_key = DataKey::TotalDeposited(tournament_id, token.clone());
-            let total_dep: i128 = env.storage().instance().get(&total_dep_key).unwrap_or(0);
+            let total_dep: i128 = Self::get_persistent(&env, &total_dep_key).unwrap_or(0);
 
             let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-            let rem_balance: i128 = env.storage().instance().get(&rem_key).unwrap_or(0);
+            let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
 
             let payout_amount = if is_last_stage {
                 // Disburse full remaining balance on final stage (guarantees zero leftover dust)
@@ -572,13 +564,11 @@ impl SponsorshipEscrowContract {
 
                 // Update remaining balance & total disbursed
                 let new_rem = rem_balance - payout_amount;
-                env.storage().instance().set(&rem_key, &new_rem);
+                Self::set_persistent(&env, &rem_key, &new_rem);
 
                 let disb_key = DataKey::TotalDisbursed(tournament_id, token.clone());
-                let total_disb: i128 = env.storage().instance().get(&disb_key).unwrap_or(0);
-                env.storage()
-                    .instance()
-                    .set(&disb_key, &(total_disb + payout_amount));
+                let total_disb: i128 = Self::get_persistent(&env, &disb_key).unwrap_or(0);
+                Self::set_persistent(&env, &disb_key, &(total_disb + payout_amount));
 
                 // Transfer tokens to the verified recipient
                 let token_client = token::Client::new(&env, &token);
@@ -595,9 +585,7 @@ impl SponsorshipEscrowContract {
         milestone_state.completed = true;
         milestone_state.recipient = Some(recipient.clone());
         milestone_state.disbursed_ledger = env.ledger().sequence() as u64;
-        env.storage()
-            .instance()
-            .set(&milestone_state_key, &milestone_state);
+        Self::set_persistent(&env, &milestone_state_key, &milestone_state);
 
         // Advance tournament stage
         tournament.current_stage_index = stage_index + 1;
@@ -608,9 +596,11 @@ impl SponsorshipEscrowContract {
         }
 
         // Save updated tournament
-        env.storage()
-            .instance()
-            .set(&DataKey::Tournament(tournament_id), &tournament);
+        Self::set_persistent(
+            &env,
+            &DataKey::Tournament(tournament_id),
+            &tournament,
+        );
 
         env.events().publish(
             (symbol_short!("stg_done"), tournament_id, stage_index),
@@ -643,9 +633,11 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        env.storage()
-            .instance()
-            .set(&DataKey::Tournament(tournament_id), &tournament);
+        Self::set_persistent(
+            &env,
+            &DataKey::Tournament(tournament_id),
+            &tournament,
+        );
 
         env.events()
             .publish((symbol_short!("cancel"), tournament_id), caller);
@@ -669,9 +661,11 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        env.storage()
-            .instance()
-            .set(&DataKey::Tournament(tournament_id), &tournament);
+        Self::set_persistent(
+            &env,
+            &DataKey::Tournament(tournament_id),
+            &tournament,
+        );
 
         env.events()
             .publish((symbol_short!("timeout"), tournament_id), caller);
@@ -687,11 +681,8 @@ impl SponsorshipEscrowContract {
         }
 
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&tokens_key)
-            .unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> =
+            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let mut total_refunded_any = false;
 
@@ -699,19 +690,19 @@ impl SponsorshipEscrowContract {
             let token = tokens.get(i).unwrap();
             let sponsor_key =
                 DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-            let deposit_amount: i128 = env.storage().instance().get(&sponsor_key).unwrap_or(0);
+            let deposit_amount: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
 
             if deposit_amount > 0 {
                 total_refunded_any = true;
 
                 // Reset sponsor's recorded deposit to prevent double refunds
-                env.storage().instance().set(&sponsor_key, &0i128);
+                Self::set_persistent(&env, &sponsor_key, &0i128);
 
                 // Decrement remaining balance
                 let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-                let rem_balance: i128 = env.storage().instance().get(&rem_key).unwrap_or(0);
+                let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
                 let new_rem = rem_balance.saturating_sub(deposit_amount);
-                env.storage().instance().set(&rem_key, &new_rem);
+                Self::set_persistent(&env, &rem_key, &new_rem);
 
                 // Transfer tokens back to sponsor
                 let token_client = token::Client::new(&env, &token);
@@ -740,18 +731,12 @@ impl SponsorshipEscrowContract {
         }
 
         let sponsors_key = DataKey::TournamentSponsors(tournament_id);
-        let sponsors: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&sponsors_key)
-            .unwrap_or(Vec::new(&env));
+        let sponsors: Vec<Address> =
+            Self::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
 
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&tokens_key)
-            .unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> =
+            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         for s_idx in 0..sponsors.len() {
             let sponsor = sponsors.get(s_idx).unwrap();
@@ -760,15 +745,15 @@ impl SponsorshipEscrowContract {
                 let token = tokens.get(t_idx).unwrap();
                 let sponsor_key =
                     DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-                let deposit_amount: i128 = env.storage().instance().get(&sponsor_key).unwrap_or(0);
+                let deposit_amount: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
 
                 if deposit_amount > 0 {
-                    env.storage().instance().set(&sponsor_key, &0i128);
+                    Self::set_persistent(&env, &sponsor_key, &0i128);
 
                     let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-                    let rem_balance: i128 = env.storage().instance().get(&rem_key).unwrap_or(0);
+                    let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
                     let new_rem = rem_balance.saturating_sub(deposit_amount);
-                    env.storage().instance().set(&rem_key, &new_rem);
+                    Self::set_persistent(&env, &rem_key, &new_rem);
 
                     let token_client = token::Client::new(&env, &token);
                     token_client.transfer(
@@ -792,9 +777,7 @@ impl SponsorshipEscrowContract {
 
     /// Get tournament details.
     pub fn get_tournament(env: Env, tournament_id: u64) -> Option<Tournament> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Tournament(tournament_id))
+        Self::get_persistent(&env, &DataKey::Tournament(tournament_id))
     }
 
     /// Get milestone configuration for a stage index.
@@ -803,9 +786,7 @@ impl SponsorshipEscrowContract {
         tournament_id: u64,
         stage_index: u32,
     ) -> Option<MilestoneInput> {
-        env.storage()
-            .instance()
-            .get(&DataKey::MilestoneInput(tournament_id, stage_index))
+        Self::get_persistent(&env, &DataKey::MilestoneInput(tournament_id, stage_index))
     }
 
     /// Get milestone runtime state for a stage index.
@@ -814,9 +795,7 @@ impl SponsorshipEscrowContract {
         tournament_id: u64,
         stage_index: u32,
     ) -> Option<MilestoneState> {
-        env.storage()
-            .instance()
-            .get(&DataKey::MilestoneState(tournament_id, stage_index))
+        Self::get_persistent(&env, &DataKey::MilestoneState(tournament_id, stage_index))
     }
 
     /// Get all milestone states for a tournament.
@@ -835,26 +814,17 @@ impl SponsorshipEscrowContract {
 
     /// Get total deposited amount for a tournament in a specific token.
     pub fn get_total_deposited(env: Env, tournament_id: u64, token: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::TotalDeposited(tournament_id, token))
-            .unwrap_or(0)
+        Self::get_persistent(&env, &DataKey::TotalDeposited(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get remaining undistributed balance for a tournament in a specific token.
     pub fn get_remaining_balance(env: Env, tournament_id: u64, token: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::RemainingBalance(tournament_id, token))
-            .unwrap_or(0)
+        Self::get_persistent(&env, &DataKey::RemainingBalance(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get total disbursed amount for a tournament in a specific token.
     pub fn get_total_disbursed(env: Env, tournament_id: u64, token: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::TotalDisbursed(tournament_id, token))
-            .unwrap_or(0)
+        Self::get_persistent(&env, &DataKey::TotalDisbursed(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get a sponsor's recorded deposit for a tournament in a specific token.
@@ -864,25 +834,19 @@ impl SponsorshipEscrowContract {
         sponsor: Address,
         token: Address,
     ) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::SponsorDeposit(tournament_id, sponsor, token))
+        Self::get_persistent(&env, &DataKey::SponsorDeposit(tournament_id, sponsor, token))
             .unwrap_or(0)
     }
 
     /// Get all distinct token addresses deposited into a tournament.
     pub fn get_tournament_tokens(env: Env, tournament_id: u64) -> Vec<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::TournamentTokens(tournament_id))
+        Self::get_persistent(&env, &DataKey::TournamentTokens(tournament_id))
             .unwrap_or(Vec::new(&env))
     }
 
     /// Get all distinct sponsors who deposited into a tournament.
     pub fn get_tournament_sponsors(env: Env, tournament_id: u64) -> Vec<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::TournamentSponsors(tournament_id))
+        Self::get_persistent(&env, &DataKey::TournamentSponsors(tournament_id))
             .unwrap_or(Vec::new(&env))
     }
 
@@ -928,10 +892,47 @@ impl SponsorshipEscrowContract {
     }
 
     fn get_tournament_internal(env: &Env, tournament_id: u64) -> Tournament {
-        env.storage()
-            .instance()
-            .get(&DataKey::Tournament(tournament_id))
+        Self::get_persistent(env, &DataKey::Tournament(tournament_id))
             .unwrap_or_else(|| panic_with_error!(env, EscrowError::TournamentNotFound))
+    }
+
+    fn get_persistent<T>(env: &Env, key: &DataKey) -> Option<T>
+    where
+        T: TryFromVal<Env, Val>,
+    {
+        let value = env.storage().persistent().get(key);
+        if value.is_some() {
+            env.storage().persistent().extend_ttl(
+                key,
+                PERSISTENT_TTL_THRESHOLD,
+                PERSISTENT_TTL_EXTEND_TO,
+            );
+        }
+        value
+    }
+
+    fn has_persistent(env: &Env, key: &DataKey) -> bool {
+        let exists = env.storage().persistent().has(key);
+        if exists {
+            env.storage().persistent().extend_ttl(
+                key,
+                PERSISTENT_TTL_THRESHOLD,
+                PERSISTENT_TTL_EXTEND_TO,
+            );
+        }
+        exists
+    }
+
+    fn set_persistent<T>(env: &Env, key: &DataKey, value: &T)
+    where
+        T: IntoVal<Env, Val>,
+    {
+        env.storage().persistent().set(key, value);
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
     }
 }
 

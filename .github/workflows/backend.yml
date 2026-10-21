@@ -17,6 +17,34 @@ jobs:
     name: Test Backend
     runs-on: ubuntu-latest
 
+    # BE-134: the integration tests drive the real handlers against a real
+    # database. Redis backs matchmaking/refresh-token revocation; the tests
+    # themselves degrade gracefully when it is absent, but having it here
+    # keeps the whole stack honest.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: knightverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,6 +88,9 @@ jobs:
         env:
           STELLAR_NETWORK: testnet
           HORIZON_URL: https://horizon-testnet.stellar.org
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/knightverse_test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/knightverse_test
+          REDIS_URL: redis://localhost:6379
 
       - name: Build backend (debug)
         working-directory: backend

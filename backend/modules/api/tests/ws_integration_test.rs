@@ -75,6 +75,7 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
             to: "e4".into(),
             san: "e4".into(),
             fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".into(),
+            seq: None,
         },
         WsMessage::Clock { white: 598, black: 600 },
         WsMessage::Move {
@@ -82,6 +83,7 @@ async fn connects_with_a_valid_token_and_receives_a_simulated_chess_game() {
             to: "e5".into(),
             san: "e5".into(),
             fen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2".into(),
+            seq: None,
         },
         WsMessage::Clock { white: 598, black: 597 },
         WsMessage::End {
@@ -271,6 +273,7 @@ async fn client_sent_move_is_parsed_and_broadcast_back() {
             to: "e4".into(),
             san: "e4".into(),
             fen: fen.into(),
+            seq: None,
         }
     );
 

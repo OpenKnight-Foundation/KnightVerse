@@ -1,3 +1,4 @@
+use crate::archive::{spawn_archive, ArchiveJob, ArchiveSettings};
 use crate::metrics::{decrement_active_games, increment_active_games, increment_game_events};
 use actix_web::{
     delete, get, post, put,
@@ -10,6 +11,7 @@ use dto::games::{
     ImportGameRequest, ImportGameResponse, JoinGameRequest, ListGamesQuery, MakeMoveRequest,
 };
 use error::error::ApiError;
+use sea_orm::EntityTrait;
 use security::jwt::Claims;
 use serde_json::json;
 use service::games::GameService;
@@ -559,12 +561,39 @@ pub async fn complete_game(
         return ApiError::ValidationError(errors).error_response();
     }
 
-    let _player_id = match authenticated_player(&req) {
+    let player_id = match authenticated_player(&req) {
         Ok(id) => id,
         Err(resp) => return resp,
     };
 
     let game_id = id.into_inner();
+
+    // Only a participant may settle a game: completing one writes to both
+    // players' ratings, so without this check any authenticated account could
+    // award itself rating by settling somebody else's game.
+    match db_entity::game::Entity::find_by_id(game_id)
+        .one(pool.replica())
+        .await
+    {
+        Ok(Some(game))
+            if game.white_player == player_id || game.black_player == player_id => {}
+        Ok(Some(_)) => {
+            return HttpResponse::Forbidden().json(json!({
+                "message": "You are not a participant in this game"
+            }));
+        }
+        Ok(None) => {
+            return HttpResponse::NotFound().json(json!({
+                "message": "Game not found"
+            }));
+        }
+        Err(e) => {
+            eprintln!("complete_game lookup failed: {e}");
+            return HttpResponse::InternalServerError().json(json!({
+                "message": "Failed to load game"
+            }));
+        }
+    }
 
     let result_enum = match payload.result.as_str() {
         "white_wins" => db_entity::game::ResultSide::WhiteWins,
@@ -616,6 +645,46 @@ pub async fn complete_game(
             // Track game completion metric
             decrement_active_games();
             increment_game_events("completed");
+
+            // BE-135: hand the finished game to the archiver. This is a no-op
+            // unless IPFS_GATEWAY / ARWEAVE_GATEWAY are configured, and it
+            // never blocks the response — the player is waiting on their
+            // rating, not on an upload.
+            if let Ok(Some(game)) = db_entity::game::Entity::find_by_id(game_id)
+                .one(pool.replica())
+                .await
+            {
+                let moves = game
+                    .pgn
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                spawn_archive(
+                    ArchiveSettings::from_env(),
+                    ArchiveJob {
+                        game_id,
+                        white: game.white_player.to_string(),
+                        black: game.black_player.to_string(),
+                        result: payload.result.clone(),
+                        // `CompleteGameRequest` does not carry the time
+                        // control and the `game` row does not store it, so the
+                        // archive records it as unknown rather than guessing.
+                        time_control: "-".to_string(),
+                        moves,
+                        rated: true,
+                        // `started_at` is stored with a fixed offset; the
+                        // archive timestamps are UTC.
+                        started_at: game.started_at.with_timezone(&chrono::Utc),
+                        completed_at: chrono::Utc::now(),
+                    },
+                );
+            }
 
             let white_change = white_new_rating - white_old_rating;
             let black_change = black_new_rating - black_old_rating;

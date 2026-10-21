@@ -465,7 +465,10 @@ impl GameService {
             ),
         };
 
-        if game_model.result.is_some() {
+        // Joining sets the result to Ongoing, which is still an open game.
+        if game_model.result.is_some()
+            && game_model.result.as_ref() != Some(&db_entity::game::ResultSide::Ongoing)
+        {
             let _ = txn.rollback().await;
             return Err(ApiError::BadRequest(
                 "Game is already completed".to_string(),

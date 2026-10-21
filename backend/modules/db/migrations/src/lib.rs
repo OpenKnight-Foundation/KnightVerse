@@ -14,6 +14,7 @@ mod m20260925_000001_create_admin_actions_table;
 mod m20261017_000001_add_player_wallet_address;
 mod m20261021_000001_add_player_preferences;
 mod m20261022_000001_align_game_enums;
+mod m20261022_000002_drop_game_player_fks;
 
 pub struct Migrator;
 
@@ -35,6 +36,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000001_add_player_wallet_address::Migration),
             Box::new(m20261021_000001_add_player_preferences::Migration),
             Box::new(m20261022_000001_align_game_enums::Migration),
+            Box::new(m20261022_000002_drop_game_player_fks::Migration),
         ]
     }
 }

@@ -199,7 +199,7 @@ async fn full_lifecycle_create_join_move_complete() {
     assert_eq!(
         scalar_i64(
             &pool,
-            &format!("SELECT COUNT(*) FROM games WHERE id = '{game_id}' AND result IS NOT NULL")
+            &format!("SELECT COUNT(*) FROM smdb.game WHERE id = '{game_id}' AND result IS NOT NULL AND result::text <> 'ongoing'")
         )
         .await,
         1,
@@ -270,7 +270,7 @@ async fn playing_twice_in_a_row_is_rejected() {
     assert_eq!(
         scalar_i64(
             &pool,
-            &format!("SELECT jsonb_array_length(pgn) FROM games WHERE id = '{game_id}'")
+            &format!("SELECT jsonb_array_length(pgn)::bigint FROM smdb.game WHERE id = '{game_id}'")
         )
         .await,
         1,
@@ -328,7 +328,7 @@ async fn a_non_participant_cannot_settle_someone_elses_game() {
     assert_eq!(
         scalar_i64(
             &pool,
-            &format!("SELECT COUNT(*) FROM games WHERE id = '{game_id}' AND result IS NOT NULL")
+            &format!("SELECT COUNT(*) FROM smdb.game WHERE id = '{game_id}' AND result IS NOT NULL AND result::text <> 'ongoing'")
         )
         .await,
         0,

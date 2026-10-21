@@ -185,7 +185,8 @@ mod tests {
     fn chess960_back_rank_has_the_right_piece_counts() {
         for _ in 0..200 {
             let fen = generate_starting_fen(GameVariant::Chess960);
-            let rank = fen.rsplit('/').next().unwrap();
+            // Board field only; the castling field (e.g. "BHbh") also contains piece letters.
+            let rank = fen.split(' ').next().unwrap().rsplit('/').next().unwrap();
 
             let mut counts = std::collections::HashMap::new();
             for c in rank.chars() {
@@ -203,7 +204,8 @@ mod tests {
     fn chess960_bishops_are_on_opposite_colours() {
         for _ in 0..200 {
             let fen = generate_starting_fen(GameVariant::Chess960);
-            let rank = fen.rsplit('/').next().unwrap();
+            // Board field only; the castling field (e.g. "BHbh") also contains piece letters.
+            let rank = fen.split(' ').next().unwrap().rsplit('/').next().unwrap();
             let bishops: Vec<usize> = rank
                 .char_indices()
                 .filter(|(_, c)| *c == 'B')

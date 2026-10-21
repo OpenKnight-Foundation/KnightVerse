@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1374-fe-134-add-a-spectator-chat-panel-to-the-watch",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1374-fe-134-add-a-spectator-chat-panel-to-the-watch": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1374-fe-134-add-a-spectator-chat-panel-to-the-watch",
+    "origin"
+  ]
+}

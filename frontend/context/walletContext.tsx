@@ -2,7 +2,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Server, TransactionBuilder, Operation, Asset } from "stellar-sdk";
 
-import { HORIZON_URL, SOROBAN_RPC, NETWORK_PASSPHRASE } from "@/lib/api";
+import { invokeBoundContract } from "@/contracts/client";
+import { HORIZON_URL, NETWORK_PASSPHRASE } from "@/lib/api";
 
 type AppContextType = {
   address?: string;
@@ -21,11 +22,24 @@ type AppContextType = {
   ) => Promise<any>;
   /** Convenience wrapper over {@link sendPayment} for native XLM. */
   sendXLM: (destination: string, amount: string | number) => Promise<any>;
+  /**
+   * Sign an XDR envelope with the connected Freighter wallet. Returns the
+   * signed envelope XDR — the shape the generated contract clients in
+   * `@/contracts` expect from their signer.
+   */
+  signTransaction: (txXdr: string) => Promise<string>;
+  /**
+   * Invoke a Soroban contract method through the generated TypeScript
+   * bindings (`@/contracts`, SC-91). `params` is keyed by the contract's
+   * parameter names. The contract id must have bindings registered via a
+   * `NEXT_PUBLIC_*_CONTRACT_ID` variable; otherwise this throws instead of
+   * guessing an ABI.
+   */
   invokeSorobanContract: (
     contractId: string,
     functionName: string,
-    args?: any[],
-  ) => Promise<any>;
+    params?: Record<string, unknown>,
+  ) => Promise<unknown>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -172,21 +186,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const invokeSorobanContract = async (
     contractId: string,
     functionName: string,
-    args: any[] = [],
+    params: Record<string, unknown> = {},
   ) => {
     if (!address) throw new Error("No wallet connected");
     try {
-      // dynamic import to avoid build-time hard dependency when not used
-      const sc = await import("soroban-client");
-      const SorobanClient = sc.default;
-      // Modern Soroban SDK usage
-      const rpc = new SorobanClient(SOROBAN_RPC);
-      // TODO: Implement full hostfunction builder for specific contract/ABI
-      // Example: await rpc.getContractData(contractId);
-      // TODO: Implement full hostfunction builder for specific contract/ABI
-      throw new Error(
-        "invokeSorobanContract: implement contract-specific invocation (ABI required)",
-      );
+      // Dispatch through the generated bindings (SC-91). Read calls are
+      // simulated and resolved without a signature; write calls are signed
+      // with Freighter and submitted.
+      return await invokeBoundContract({
+        contractId,
+        method: functionName,
+        args: params,
+        signer: { address, sign: signWithFreighter },
+      });
     } catch (err) {
       console.error("invokeSorobanContract", err);
       throw err;
@@ -203,6 +215,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         disconnectWallet,
         sendPayment,
         sendXLM,
+        signTransaction: signWithFreighter,
         invokeSorobanContract,
       }}
     >

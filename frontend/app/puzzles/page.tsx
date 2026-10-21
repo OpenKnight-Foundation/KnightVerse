@@ -10,6 +10,12 @@ import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useTrackedTransaction } from "@/hook/useTrackedTransaction";
 import PuzzleRushView from "@/components/PuzzleRushView";
 import { fetchWithRetry, endpoints } from "@/lib/api";
+import {
+  claimPuzzleReward,
+  getGameContractId,
+  parsePuzzleRewardProof,
+} from "@/contracts/client";
+import type { PuzzleRewardProof } from "@/contracts";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -86,6 +92,9 @@ export default function PuzzlesPage() {
   const [showHint, setShowHint] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [showRush, setShowRush] = useState(false);
+  // Backend-signed proof for the pending reward; enables the on-chain claim
+  // through the generated game-contract bindings (SC-91).
+  const [claimProof, setClaimProof] = useState<PuzzleRewardProof | null>(null);
 
   // Real data state (#FE-68)
   const useMockPuzzles =
@@ -95,7 +104,7 @@ export default function PuzzlesPage() {
   const [puzzlesLoading, setPuzzlesLoading] = useState(!useMockPuzzles);
   const [puzzlesError, setPuzzlesError] = useState<string | null>(null);
 
-  const { address, status: walletStatus } = useAppContext();
+  const { address, status: walletStatus, signTransaction } = useAppContext();
   const { addToast } = useToast();
 
   // Fetch puzzles from the backend (#FE-68)
@@ -197,6 +206,8 @@ export default function PuzzlesPage() {
         verified?: boolean;
         reward?: number;
         reward_amount?: number;
+        /** ED25519 proof for `claim_puzzle_reward` (SC-91); optional. */
+        proof?: unknown;
       };
 
       if (data.verified === false) {
@@ -215,6 +226,9 @@ export default function PuzzlesPage() {
       setRewardAmount(reward);
       setEarnedXlm((prev) => prev + reward);
       setShowReward(true);
+      // Keep the backend-signed proof so the reward can be claimed on-chain
+      // via the generated bindings; without it the claim stays local.
+      setClaimProof(parsePuzzleRewardProof(data.proof));
 
       addToast({
         severity: "success",
@@ -271,18 +285,29 @@ export default function PuzzlesPage() {
     }
     setIsClaiming(true);
 
-    const result = await executeClaim(async (txId: string) => {
-      // Simulate on-chain reward claim — in production this would invoke a Soroban contract
-      void txId;
+    const result = await executeClaim(async () => {
+      // SC-91: claim on-chain through the generated game-contract bindings
+      // when the contract is deployed and the backend signed a proof for
+      // this reward (`claim_puzzle_reward` rejects unsigned claims).
+      if (getGameContractId() && claimProof && address) {
+        const { hash } = await claimPuzzleReward({
+          proof: claimProof,
+          signer: { address, sign: signTransaction },
+        });
+        return { hash };
+      }
+
+      // No on-chain claim configured — keep the local reward simulation.
       await new Promise((resolve) => setTimeout(resolve, 1500));
       return { hash: undefined };
     });
 
     setIsClaiming(false);
     if (result !== undefined) {
+      setClaimProof(null);
       setShowReward(false);
     }
-  }, [walletStatus, address, addToast, executeClaim]);
+  }, [walletStatus, address, addToast, executeClaim, claimProof, signTransaction]);
 
   const completionRate = puzzles.length > 0
     ? Math.round((completedPuzzles.size / puzzles.length) * 100)

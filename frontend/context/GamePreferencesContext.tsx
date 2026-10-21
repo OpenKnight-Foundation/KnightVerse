@@ -1,10 +1,11 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
 import {
   fetchPlayerPreferences,
   savePlayerPreferences,
 } from "@/services/playerPreferencesService";
+import { useAuthOptional } from "@/context/authContext";
 
 export type PieceInputMethod = "drag" | "click" | "both";
 export type AutoQueenMode = "always" | "prompt" | "premoves";
@@ -71,6 +72,16 @@ export const GamePreferencesProvider: React.FC<{
   );
   const [mounted, setMounted] = useState(false);
 
+  const auth = useAuthOptional();
+  const authDeps = useMemo(
+    () => ({
+      getToken: () => auth?.accessToken ?? null,
+      refresh: auth?.refreshToken ?? (async () => {}),
+      logout: auth?.logout ?? (async () => {}),
+    }),
+    [auth],
+  );
+
   useEffect(() => {
     let active = true;
     try {
@@ -84,7 +95,7 @@ export const GamePreferencesProvider: React.FC<{
     }
     setMounted(true);
 
-    void fetchPlayerPreferences()
+    void fetchPlayerPreferences(authDeps)
       .then((saved) => {
         const game = saved?.game;
         if (!active || !game || typeof game !== "object" || Array.isArray(game)) {
@@ -105,7 +116,7 @@ export const GamePreferencesProvider: React.FC<{
     return () => {
       active = false;
     };
-  }, []);
+  }, [authDeps]);
 
   const setPreference = <K extends keyof GamePreferences>(
     key: K,
@@ -119,7 +130,7 @@ export const GamePreferencesProvider: React.FC<{
         } catch {
           // storage unavailable
         }
-        void savePlayerPreferences({ game: next }).catch((error) => {
+        void savePlayerPreferences({ game: next }, authDeps).catch((error) => {
           console.warn("Could not sync game preferences:", error);
         });
       }
@@ -135,7 +146,7 @@ export const GamePreferencesProvider: React.FC<{
       } catch {
         // storage unavailable
       }
-      void savePlayerPreferences({ game: DEFAULT_PREFERENCES }).catch((error) => {
+      void savePlayerPreferences({ game: DEFAULT_PREFERENCES }, authDeps).catch((error) => {
         console.warn("Could not sync reset game preferences:", error);
       });
     }

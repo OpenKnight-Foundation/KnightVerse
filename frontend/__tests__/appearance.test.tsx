@@ -21,6 +21,17 @@ import {
   syncThemeWithBackend,
   fetchThemePreferencesFromBackend,
 } from "@/services/themeService";
+import type { AuthFetchDeps } from "@/lib/api";
+
+/** Minimal AuthFetchDeps stub — no token, no-op refresh/logout. */
+function noAuthDeps(): AuthFetchDeps {
+  return { getToken: () => null, refresh: async () => {}, logout: async () => {} };
+}
+
+/** AuthFetchDeps stub that carries a static token string. */
+function tokenDeps(token: string): AuthFetchDeps {
+  return { getToken: () => token, refresh: async () => {}, logout: async () => {} };
+}
 
 describe("Theme Studio & Appearance Unit Tests", () => {
   beforeEach(() => {
@@ -359,7 +370,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
 
       const result = await syncThemeWithBackend(
         { boardTheme: "emerald" },
-        undefined,
+        noAuthDeps(),
         onWarning
       );
 
@@ -380,7 +391,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
 
       const result = await syncThemeWithBackend(
         { boardTheme: "wood" },
-        "mock_token_123"
+        tokenDeps("mock_token_123")
       );
 
       expect(result).toBe(true);
@@ -394,7 +405,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
         body: JSON.stringify({ appearance: { boardTheme: "wood" } }),
       });
 
-      const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
+      const prefs = await fetchThemePreferencesFromBackend(tokenDeps("mock_token_123"));
       expect(prefs?.boardTheme).toBe("wood");
       expect(fetchMock.mock.calls[1][1]).toMatchObject({
         headers: { Authorization: "Bearer mock_token_123" },
@@ -409,9 +420,9 @@ describe("Theme Studio & Appearance Unit Tests", () => {
         lastMove: "#39ff14",
       };
 
-      await syncThemeWithBackend({ boardTheme: "custom", customPalette });
+      await syncThemeWithBackend({ boardTheme: "custom", customPalette }, noAuthDeps());
 
-      const prefs = await fetchThemePreferencesFromBackend();
+      const prefs = await fetchThemePreferencesFromBackend(noAuthDeps());
       expect(prefs).not.toBeNull();
       expect(prefs?.boardTheme).toBe("custom");
       expect(prefs?.customPalette?.light).toBe("#00f0ff");
@@ -425,7 +436,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           json: async () => ({ data: { preferences: {} } }),
         } as Response),
       );
-      const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
+      const prefs = await fetchThemePreferencesFromBackend(tokenDeps("mock_token_123"));
       expect(prefs).toBeNull();
     });
   });

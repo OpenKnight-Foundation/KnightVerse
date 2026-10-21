@@ -12,6 +12,7 @@ import {
   fetchThemePreferencesFromBackend,
   syncThemeWithBackend,
 } from "@/services/themeService";
+import { useAuthOptional } from "@/context/authContext";
 
 export type PresetTheme =
   | "emerald"
@@ -237,6 +238,16 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   const [mounted, setMounted] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
 
+  const auth = useAuthOptional();
+  const authDeps = useMemo(
+    () => ({
+      getToken: () => auth?.accessToken ?? null,
+      refresh: auth?.refreshToken ?? (async () => {}),
+      logout: auth?.logout ?? (async () => {}),
+    }),
+    [auth],
+  );
+
   // Apply CSS custom properties dynamically to prevent layout reflows
   const applyCssVariables = useCallback((themeColors: ThemeColors) => {
     if (typeof document !== "undefined") {
@@ -322,7 +333,7 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     setMounted(true);
 
-    void fetchThemePreferencesFromBackend().then((preferences) => {
+    void fetchThemePreferencesFromBackend(authDeps).then((preferences) => {
       if (!active || !preferences) return;
       const palette = preferences.customPalette;
       if (
@@ -393,11 +404,11 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       syncThemeWithBackend({
         boardTheme: resolvedTheme,
         customPalette: resolvedTheme === "custom" ? customPalette : undefined,
-      }).then((synced) => {
+      }, authDeps).then((synced) => {
         setIsSynced(synced);
       });
     },
-    [customPalette]
+    [customPalette, authDeps]
   );
 
   const setCustomPalette = useCallback(
@@ -426,14 +437,14 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         syncThemeWithBackend({
           boardTheme: "custom",
           customPalette: updated,
-        }).then((synced) => {
+        }, authDeps).then((synced) => {
           setIsSynced(synced);
         });
 
         return updated;
       });
     },
-    []
+    [authDeps]
   );
 
   const resetTheme = useCallback(() => {
@@ -449,10 +460,10 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     syncThemeWithBackend({
       boardTheme: "emerald",
-    }).then((synced) => {
+    }, authDeps).then((synced) => {
       setIsSynced(synced);
     });
-  }, []);
+  }, [authDeps]);
 
   const value: ThemeContextProps = {
     boardTheme: mounted ? boardTheme : "emerald",

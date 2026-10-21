@@ -5,6 +5,11 @@ import StakingDepositModal from "@/components/StakingDepositModal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAppContext } from "@/context/walletContext";
 import { useWalletLink } from "@/hook/useWalletLink";
+import {
+  getYieldStakingConfig,
+  stakeInPool,
+  toTokenAmount,
+} from "@/contracts/client";
 import { NETWORK_PASSPHRASE } from "@/lib/api";
 import {
   TOKEN_ISSUERS,
@@ -29,15 +34,33 @@ function assetForToken(token: SupportedToken): { code: string; issuer: string } 
 }
 
 export default function StakePage() {
-  const { address, connectWallet, sendPayment } = useAppContext();
+  const { address, connectWallet, sendPayment, signTransaction } = useAppContext();
   const { linkedWallet, isMismatched } = useWalletLink();
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
   const handleConfirm = async ({ token, total }: { token: SupportedToken; amount: number; total: number }) => {
-    if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
     // Stakes must come from the wallet linked to the account (#FE-97).
     if (isMismatched) throw new Error(`Switch Freighter to your linked wallet (${linkedWallet}) to stake.`);
+
+    // SC-91: when the yield-staking contract is deployed, the stake is placed
+    // through the typed bindings (`yield_staking.stake`) instead of a plain
+    // payment to the escrow account. The pool must be whitelisted on-chain and
+    // the amount is denominated in the staking contract's token (7 decimals).
+    const staking = getYieldStakingConfig();
+    if (staking) {
+      if (!address) throw new Error("Connect your wallet to stake.");
+      const { hash } = await stakeInPool({
+        caller: address,
+        pool: staking.poolAddress,
+        amount: toTokenAmount(total),
+        signer: { address, sign: signTransaction },
+      });
+      setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${hash ? ` (tx ${hash})` : ""}`);
+      return;
+    }
+
+    if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
     const result = await sendPayment(STAKING_ESCROW_ADDRESS, total.toFixed(7), assetForToken(token));
     setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${result?.hash ? ` (tx ${result.hash})` : ""}`);
   };

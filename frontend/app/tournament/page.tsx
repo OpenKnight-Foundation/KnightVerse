@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
@@ -43,7 +43,7 @@ export default function TournamentPage() {
 
   // The backend tournament scope is JWT-protected (#FE-100).
   const { accessToken, refreshToken, logout } = useAuth();
-  const authDeps = useMemo(
+  const authDeps = React.useMemo(
     () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
     [accessToken, refreshToken, logout],
   );

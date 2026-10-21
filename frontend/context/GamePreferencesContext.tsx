@@ -5,7 +5,7 @@ import {
   fetchPlayerPreferences,
   savePlayerPreferences,
 } from "@/services/playerPreferencesService";
-import { useAuthOptional } from "@/context/authContext";
+import { useAuth } from "@/context/authContext";
 
 export type PieceInputMethod = "drag" | "click" | "both";
 export type AutoQueenMode = "always" | "prompt" | "premoves";
@@ -72,14 +72,10 @@ export const GamePreferencesProvider: React.FC<{
   );
   const [mounted, setMounted] = useState(false);
 
-  const auth = useAuthOptional();
+  const { accessToken, refreshToken, logout } = useAuth();
   const authDeps = useMemo(
-    () => ({
-      getToken: () => auth?.accessToken ?? null,
-      refresh: auth?.refreshToken ?? (async () => {}),
-      logout: auth?.logout ?? (async () => {}),
-    }),
-    [auth],
+    () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
+    [accessToken, refreshToken, logout],
   );
 
   useEffect(() => {

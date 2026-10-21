@@ -12,7 +12,7 @@ import {
   fetchThemePreferencesFromBackend,
   syncThemeWithBackend,
 } from "@/services/themeService";
-import { useAuthOptional } from "@/context/authContext";
+import { useAuth } from "@/context/authContext";
 
 export type PresetTheme =
   | "emerald"
@@ -238,14 +238,10 @@ export const BoardThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   const [mounted, setMounted] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
 
-  const auth = useAuthOptional();
+  const { accessToken, refreshToken, logout } = useAuth();
   const authDeps = useMemo(
-    () => ({
-      getToken: () => auth?.accessToken ?? null,
-      refresh: auth?.refreshToken ?? (async () => {}),
-      logout: auth?.logout ?? (async () => {}),
-    }),
-    [auth],
+    () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
+    [accessToken, refreshToken, logout],
   );
 
   // Apply CSS custom properties dynamically to prevent layout reflows

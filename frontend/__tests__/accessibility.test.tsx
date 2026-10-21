@@ -3,14 +3,20 @@ import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderHook, act } from "@testing-library/react";
 import React from "react";
-
-import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
-
-// Board components read useGamePreferences(), which requires its provider.
-const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
-  rtlRender(ui, { wrapper: GamePreferencesProvider, ...options });
 import { useBoardAnnouncer } from "@/hook/useBoardAnnouncer";
 import { KeyboardMoveInput } from "@/components/chess/KeyboardMoveInput";
+import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
+import { AuthProvider } from "@/context/authContext";
+
+// GamePreferencesProvider now calls useAuth() internally, so it must sit
+// inside AuthProvider.
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <AuthProvider>
+    <GamePreferencesProvider>{children}</GamePreferencesProvider>
+  </AuthProvider>
+);
+const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
+  rtlRender(ui, { wrapper: Wrapper, ...options });
 
 // ─── useBoardAnnouncer tests ───────────────────────────────────────────────
 

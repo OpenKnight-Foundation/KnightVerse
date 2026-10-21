@@ -7,11 +7,14 @@ import BlindfoldToggle from "@/components/chess/BlindfoldToggle";
 import { VoiceMoveInput } from "@/components/chess/VoiceMoveInput";
 import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 import { BoardThemeProvider } from "@/context/ThemeContext";
+import { AuthProvider } from "@/context/authContext";
 
 const Providers = ({ children }: { children: React.ReactNode }) => (
-  <BoardThemeProvider>
-    <GamePreferencesProvider>{children}</GamePreferencesProvider>
-  </BoardThemeProvider>
+  <AuthProvider>
+    <BoardThemeProvider>
+      <GamePreferencesProvider>{children}</GamePreferencesProvider>
+    </BoardThemeProvider>
+  </AuthProvider>
 );
 
 describe("FE-52 blindfold mode", () => {

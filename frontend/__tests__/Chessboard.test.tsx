@@ -4,11 +4,14 @@ import { describe, it, expect, vi } from "vitest";
 import Chessboard from "../components/chess/Chessboard";
 import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 import { BoardThemeProvider } from "@/context/ThemeContext";
+import { AuthProvider } from "@/context/authContext";
 
 const Providers = ({ children }: { children: React.ReactNode }) => (
-  <BoardThemeProvider>
-    <GamePreferencesProvider>{children}</GamePreferencesProvider>
-  </BoardThemeProvider>
+  <AuthProvider>
+    <BoardThemeProvider>
+      <GamePreferencesProvider>{children}</GamePreferencesProvider>
+    </BoardThemeProvider>
+  </AuthProvider>
 );
 
 const renderBoard = (onMove = vi.fn()) =>

@@ -53,7 +53,7 @@ function fenAfterMoves(moves: string[]): string {
 export default function OpeningsPage() {
   const { addToast } = useToast();
   const { accessToken, refreshToken, logout } = useAuth();
-  const authDeps = useMemo(
+  const authDeps = React.useMemo(
     () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
     [accessToken, refreshToken, logout],
   );
@@ -170,7 +170,7 @@ export default function OpeningsPage() {
     setLineName("");
     resetBoard();
     addToast({ severity: "success", title: "Line saved", detail: `${line.name} added to ${color} repertoire.` });
-  }, [boardMoves, lineName, color, lines.length, rep, resetBoard, addToast, authDeps]);
+  }, [boardMoves, lineName, color, lines.length, rep, resetBoard, addToast]);
 
   const handleDeleteLine = useCallback(
     (id: string) => {

@@ -361,13 +361,6 @@ export const useAuth = () => {
   return context;
 };
 
-/**
- * Like `useAuth` but returns `null` instead of throwing when called outside
- * an AuthProvider. Use this for components that optionally sync with the
- * backend when authenticated but work fine without it (e.g. ThemeContext).
- */
-export const useAuthOptional = () => useContext(AuthContext) ?? null;
-
 // Helper to decode JWT token (without verification)
 function decodeJWT(token: string) {
   try {

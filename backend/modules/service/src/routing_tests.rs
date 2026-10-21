@@ -214,6 +214,7 @@ mod player_service_routing {
             social_links: None,
             is_enabled: true,
             wallet_address: None,
+            preferences: serde_json::json!({}),
         }
     }
 

@@ -19,6 +19,7 @@ use db_entity::player::{self, Model};
 use dto::players::{NewPlayer, UpdatePlayer};
 use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use serde_json::Value;
 use uuid::Uuid;
 
 // =============================================================================
@@ -76,6 +77,37 @@ pub async fn delete_player(pool: &DbPool, id: Uuid) -> Result<(), ApiError> {
     // Read current record from replica, write soft-delete to primary
     let existing = find_player_by_id_on(pool.replica(), id).await?;
     delete_player_on(pool.primary(), existing).await
+}
+
+pub async fn get_player_preferences(pool: &DbPool, id: Uuid) -> Result<Value, ApiError> {
+    let player = player::Entity::find_by_id(id)
+        .filter(player::Column::IsEnabled.eq(true))
+        .one(pool.primary())
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Player {}", id)))?;
+
+    Ok(player.preferences)
+}
+
+pub async fn update_player_preferences(
+    pool: &DbPool,
+    id: Uuid,
+    updates: Value,
+) -> Result<Value, ApiError> {
+    let player = player::Entity::find_by_id(id)
+        .filter(player::Column::IsEnabled.eq(true))
+        .one(pool.primary())
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Player {}", id)))?;
+
+    let mut preferences = player.preferences.as_object().cloned().unwrap_or_default();
+    preferences.extend(updates.as_object().cloned().unwrap_or_default());
+
+    let mut active_player: player::ActiveModel = player.into();
+    active_player.preferences = Set(Value::Object(preferences));
+    let updated = active_player.update(pool.primary()).await?;
+
+    Ok(updated.preferences)
 }
 
 // =============================================================================
@@ -260,6 +292,7 @@ fn build_test_player(payload: NewPlayer) -> player::Model {
         social_links: None,
         is_enabled: true,
         wallet_address: None,
+        preferences: serde_json::json!({}),
     }
 }
 
@@ -289,6 +322,7 @@ mod tests {
             social_links: None,
             is_enabled: true,
             wallet_address: None,
+            preferences: serde_json::json!({}),
         }
     }
 

@@ -30,6 +30,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
 
   afterEach(() => {
     localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   describe("1. Preset Themes & Configuration", () => {
@@ -352,8 +353,8 @@ describe("Theme Studio & Appearance Unit Tests", () => {
     });
   });
 
-  describe("5. Local Preference Persistence Service (#FE-104)", () => {
-    it("returns false and surfaces a non-blocking warning when no backend endpoint exists", async () => {
+  describe("5. Player Preference Sync", () => {
+    it("keeps preferences local when no authentication token is available", async () => {
       const onWarning = vi.fn();
 
       const result = await syncThemeWithBackend(
@@ -363,23 +364,41 @@ describe("Theme Studio & Appearance Unit Tests", () => {
       );
 
       expect(result).toBe(false);
-      expect(onWarning).toHaveBeenCalledTimes(1);
-      expect(onWarning.mock.calls[0][0]).toMatch(/device only/i);
+      expect(onWarning).not.toHaveBeenCalled();
     });
 
-    it("persists preferences locally instead of calling a nonexistent API", async () => {
-      global.fetch = vi.fn() as unknown as typeof fetch;
+    it("sends authenticated preferences to the backend and loads them back", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: { preferences: { appearance: { boardTheme: "wood" } } },
+          }),
+        } as Response);
+      vi.stubGlobal("fetch", fetchMock);
 
       const result = await syncThemeWithBackend(
         { boardTheme: "wood" },
         "mock_token_123"
       );
 
-      expect(result).toBe(false);
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer mock_token_123",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ appearance: { boardTheme: "wood" } }),
+      });
 
       const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
       expect(prefs?.boardTheme).toBe("wood");
+      expect(fetchMock.mock.calls[1][1]).toMatchObject({
+        headers: { Authorization: "Bearer mock_token_123" },
+      });
     });
 
     it("round-trips a custom palette through local storage", async () => {
@@ -399,6 +418,13 @@ describe("Theme Studio & Appearance Unit Tests", () => {
     });
 
     it("returns null when no preferences have been saved", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ data: { preferences: {} } }),
+        } as Response),
+      );
       const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
       expect(prefs).toBeNull();
     });

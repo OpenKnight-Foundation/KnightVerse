@@ -11,7 +11,10 @@ use crate::games::{
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
 use crate::lc0::{lc0_analyze, lc0_health};
-use crate::players::{add_player, delete_player, export_player_data, find_player_by_id, update_player};
+use crate::players::{
+    add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
+    put_preferences, update_player,
+};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -282,6 +285,8 @@ pub async fn main() -> std::io::Result<()> {
                         Some(redis_pool.clone()),
                     ))
                     .service(export_player_data)
+                    .service(get_preferences)
+                    .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
                     .service(crate::wallet_link::wallet_unlink)

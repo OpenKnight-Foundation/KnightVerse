@@ -31,6 +31,8 @@ impl Modify for SecurityAddon {
         players::find_player_by_id,
         players::update_player,
         players::delete_player,
+        players::get_preferences,
+        players::put_preferences,
 
         // Game endpoints
         games::create_game,

@@ -44,7 +44,6 @@ import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
 import GameResultOverlay, { type GameResult } from "@/components/GameResultOverlay";
-import HeroChessGame from "@/components/chess/HeroChessGame";
 
 export default function Home() {
   const [game] = useState(new Chess());
@@ -382,7 +381,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen p-4 md:p-8" role="region" aria-label="Home">
-      <HeroChessGame />
       {/* ═══════════════════════════════════════════════════════════ */}
       {/*  HERO SECTION — Instant Play + Stellar Branding           */}
       {/* ═══════════════════════════════════════════════════════════ */}

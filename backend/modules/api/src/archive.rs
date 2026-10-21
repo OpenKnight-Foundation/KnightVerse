@@ -25,7 +25,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Where completed-game PGNs get mirrored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArchiveSettings {
     pub ipfs_gateway: Option<String>,
     pub arweave_gateway: Option<String>,
@@ -147,7 +147,7 @@ pub fn spawn_archive(settings: ArchiveSettings, job: ArchiveJob) {
         // `PGNArchiver::new` takes both gateways; fall back to a placeholder so
         // the constructor signature stays meaningful for a single-network setup.
         let archiver = PGNArchiver::new(
-            db::get_db().await,
+            db::db::db::get_db().await,
             ipfs_gateway.unwrap_or_default(),
             arweave_gateway.unwrap_or_default(),
         );

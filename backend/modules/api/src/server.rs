@@ -4,6 +4,7 @@ use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
+use service::engine_pool::EnginePool;
 use crate::games::{
     abandon_game, complete_game, create_game, get_game, import_game, join_game, list_games,
     make_move,

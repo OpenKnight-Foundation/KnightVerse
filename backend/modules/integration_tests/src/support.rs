@@ -57,7 +57,7 @@ pub async fn migrated_pool() -> DbPool {
 
     // Migrations are idempotent, so several test binaries may share one
     // database without racing each other into a broken schema.
-    migration::Migrator::up(&connection, None)
+    <migration::Migrator as migration::MigratorTrait>::up(&connection, None)
         .await
         .unwrap_or_else(|e| panic!("failed to run migrations: {e}"));
 
@@ -98,6 +98,7 @@ pub async fn create_player(pool: &DbPool, username: &str, password: &str) -> Tes
         social_links: Set(None),
         is_enabled: Set(true),
         wallet_address: Set(None),
+        preferences: Set(serde_json::json!({})),
     }
     .insert(pool.primary())
     .await

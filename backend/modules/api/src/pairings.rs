@@ -9,7 +9,7 @@
 //! pairing — which is what a tournament director needs when a round is
 //! disputed.
 
-use actix_web::{post, web, HttpResponse};
+use actix_web::{web, HttpResponse};
 use pairing::{build_round, PairingConfig, TournamentPlayer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -141,7 +141,6 @@ pub fn validate_round(
     security(("jwt_auth" = [])),
     tag = "Tournaments"
 )]
-#[post("/pairings")]
 pub async fn build_pairing_round(payload: web::Json<BuildRoundRequest>) -> HttpResponse {
     let config: PairingConfig = payload
         .0

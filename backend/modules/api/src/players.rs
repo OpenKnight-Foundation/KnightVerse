@@ -110,36 +110,14 @@ pub async fn put_preferences(
 // ---------------------------------------------------------------------------
 // POST /v1/players  — WRITE → primary pool
 // ---------------------------------------------------------------------------
-
 #[utoipa::path(
-    get,
-    path = "/v1/players/{id}",
-    params(
-        ("id" = Uuid, Path, description = "Player ID in UUID format", format = "uuid")
-    ),
+    post,
+    path = "/v1/players",
     responses(
-        (status = 200, description = "Player found", body = PlayerFound),
-        (status = 404, description = "Not found", body = NotFoundResponse)
+        (status = 200, description = "New player added", body=PlayerAdded),
+        (status = 400, description = "Bad request", body=InvalidCredentialsResponse)
     )
 )]
-#[get("/{id}")]
-pub async fn find_player_by_id(
-    pool: web::Data<DbPool>,
-    id: Path<Uuid>,
-) -> HttpResponse {
-    let player_id = id.into_inner();
-
-    match get_single_player_by_id(pool.get_ref(), player_id).await {
-        Ok(player) => HttpResponse::Ok().json(json!({
-            "message": "Player found",
-            "data": {
-                "player": DisplayPlayer::from(player)
-            }
-        })),
-        Err(err) => err.error_response(),
-    }
-}
-
 #[post("")]
 pub async fn add_player(pool: web::Data<DbPool>, payload: Json<NewPlayer>) -> HttpResponse {
     match payload.0.validate() {

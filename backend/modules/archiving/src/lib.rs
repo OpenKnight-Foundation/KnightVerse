@@ -116,7 +116,7 @@ pub struct ArchiveMetadata {
     pub compression: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchiveNetwork {
     IPFS,
     Arweave,

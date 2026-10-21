@@ -91,11 +91,13 @@ macro_rules! game_app {
                 .wrap(JwtAuthMiddleware::new(TEST_JWT_SECRET.to_string(), TOKEN_TTL))
                 .service(
                     web::scope("/v1/games")
-                        .route("", web::post().to(api::games::create_game))
-                        .route("/{id}", web::get().to(api::games::get_game))
-                        .route("/{id}/join", web::post().to(api::games::join_game))
-                        .route("/{id}/move", web::post().to(api::games::make_move))
-                        .route("/{id}/complete", web::put().to(api::games::complete_game)),
+                        // These handlers carry their own route attributes, so they
+                        // are registered as services, not with `.route(..).to(..)`.
+                        .service(api::games::create_game)
+                        .service(api::games::get_game)
+                        .service(api::games::join_game)
+                        .service(api::games::make_move)
+                        .service(api::games::complete_game),
                 ),
         )
         .await
@@ -157,7 +159,7 @@ async fn full_lifecycle_create_join_move_complete() {
 
     // --- move ---------------------------------------------------------------
     let mover_app = game_app!(pool);
-    let mv = test::TestRequest::post()
+    let mv = test::TestRequest::put()
         .uri(&format!("/v1/games/{game_id}/move"))
         .insert_header(bearer(&alice_token))
         .set_json(MakeMoveRequest {
@@ -239,7 +241,7 @@ async fn playing_twice_in_a_row_is_rejected() {
 
     // White plays.
     let mover_app = game_app!(pool);
-    let first = test::TestRequest::post()
+    let first = test::TestRequest::put()
         .uri(&format!("/v1/games/{game_id}/move"))
         .insert_header(bearer(&alice_token))
         .set_json(MakeMoveRequest {
@@ -251,7 +253,7 @@ async fn playing_twice_in_a_row_is_rejected() {
 
     // White cannot play again before black has moved.
     let twice_app = game_app!(pool);
-    let second = test::TestRequest::post()
+    let second = test::TestRequest::put()
         .uri(&format!("/v1/games/{game_id}/move"))
         .insert_header(bearer(&alice_token))
         .set_json(MakeMoveRequest {

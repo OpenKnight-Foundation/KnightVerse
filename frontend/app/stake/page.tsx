@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -12,76 +13,162 @@ import {
   type SupportedToken,
 } from "@/services/stellarMarketService";
 
-const STAKING_ESCROW_ADDRESS = process.env.NEXT_PUBLIC_STAKING_ESCROW_ADDRESS ?? "";
-const network: StellarNetwork = NETWORK_PASSPHRASE.startsWith("Public Global") ? "mainnet" : "testnet";
+/**
+ * Staking Configuration
+ *
+ * The escrow address receives staking deposits, while the network configuration
+ * determines which token issuers are used for non-native Stellar assets.
+ */
+const STAKING_ESCROW_ADDRESS =
+  process.env.NEXT_PUBLIC_STAKING_ESCROW_ADDRESS ?? "";
+
+// Determine the Stellar network from the configured network passphrase.
+const network: StellarNetwork = NETWORK_PASSPHRASE.startsWith("Public Global")
+  ? "mainnet"
+  : "testnet";
 
 /**
- * Resolve the Stellar asset a stake is denominated in (FE-133).
+ * Resolves the Stellar asset associated with a staking token (FE-133).
  *
- * XLM is native. USDC/EURC are issued by Circle, and an asset code alone is
- * not unique on Stellar — the issuer must be pinned to the one for the network
- * the app is pointed at, otherwise the payment would either fail or (worse)
- * target a look-alike token.
+ * XLM is the native Stellar asset and does not require an issuer.
+ * USDC and EURC are issued assets, so their issuer addresses must match
+ * the configured network to avoid targeting an incorrect or look-alike token.
+ *
+ * @param token - The token selected for the staking deposit.
+ * @returns The asset code and issuer, or undefined for native XLM.
  */
-function assetForToken(token: SupportedToken): { code: string; issuer: string } | undefined {
+function assetForToken(
+  token: SupportedToken,
+): { code: string; issuer: string } | undefined {
   if (token === "XLM") return undefined;
-  return { code: token, issuer: TOKEN_ISSUERS[network][token] };
+
+  return {
+    code: token,
+    issuer: TOKEN_ISSUERS[network][token],
+  };
 }
 
+/**
+ * Stake Page
+ *
+ * Allows users to deposit XLM, USDC, or EURC into the configured staking
+ * escrow before participating in a rated match.
+ *
+ * The page handles wallet connection, linked-wallet validation, deposit
+ * confirmation, and transaction feedback.
+ */
 export default function StakePage() {
   const { address, connectWallet, sendPayment } = useAppContext();
   const { linkedWallet, isMismatched } = useWalletLink();
+
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
-  const handleConfirm = async ({ token, total }: { token: SupportedToken; amount: number; total: number }) => {
-    if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
-    // Stakes must come from the wallet linked to the account (#FE-97).
-    if (isMismatched) throw new Error(`Switch Freighter to your linked wallet (${linkedWallet}) to stake.`);
-    const result = await sendPayment(STAKING_ESCROW_ADDRESS, total.toFixed(7), assetForToken(token));
-    setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${result?.hash ? ` (tx ${result.hash})` : ""}`);
+  /**
+   * Processes a staking deposit after the user confirms the amount and token.
+   *
+   * Validates the escrow configuration and ensures the connected wallet
+   * matches the wallet linked to the user's account before submitting
+   * the payment to the Stellar network.
+   *
+   * @param deposit - The selected token, entered amount, and total deposit.
+   * @throws Error if the escrow is not configured or the wallet is mismatched.
+   */
+  const handleConfirm = async ({
+    token,
+    total,
+  }: {
+    token: SupportedToken;
+    amount: number;
+    total: number;
+  }) => {
+    // Prevent deposits when the staking destination is not configured.
+    if (!STAKING_ESCROW_ADDRESS) {
+      throw new Error("Staking escrow is not configured.");
+    }
+
+    // FE-97: Require the connected wallet to match the account's linked wallet.
+    if (isMismatched) {
+      throw new Error(
+        `Switch Freighter to your linked wallet (${linkedWallet}) to stake.`,
+      );
+    }
+
+    // Submit the staking payment using the correct Stellar asset configuration.
+    const result = await sendPayment(
+      STAKING_ESCROW_ADDRESS,
+      total.toFixed(7),
+      assetForToken(token),
+    );
+
+    // Display confirmation after the payment request succeeds.
+    setConfirmation(
+      `Stake confirmed: ${total.toFixed(4)} ${token}${
+        result?.hash ? ` (tx ${result.hash})` : ""
+      }`,
+    );
   };
 
   return (
-    <div className="min-h-screen p-4 md:p-8 text-white" role="main" aria-label="Staked match">
-      <div className="max-w-xl mx-auto">
-        <h1 className="text-3xl font-extrabold bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">
+    <main
+      className="min-h-screen p-4 text-white md:p-8"
+      aria-label="Staked match"
+    >
+      <div className="mx-auto max-w-xl">
+        {/* Page heading and supported staking assets. */}
+        <h1 className="bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-3xl font-extrabold text-transparent">
           Staked Match
         </h1>
-        <p className="text-gray-400 text-sm mt-1 mb-8">Deposit a stake to play a rated match in XLM, USDC or EURC.</p>
 
+        <p className="mb-8 mt-1 text-sm text-gray-400">
+          Deposit a stake to play a rated match in XLM, USDC, or EURC.
+        </p>
+
+        {/* Warn users when their connected wallet differs from the linked wallet. */}
         {isMismatched && (
           <Alert variant="warning" className="mb-6 text-sm text-amber-200">
             <AlertDescription>
-              Your connected wallet isn&apos;t the one linked to your account ({linkedWallet}). Switch Freighter
-              to the linked wallet before staking.
+              Your connected wallet isn&apos;t the one linked to your account (
+              {linkedWallet}). Switch Freighter to the linked wallet before
+              staking.
             </AlertDescription>
           </Alert>
         )}
 
+        {/* Show transaction feedback after a successful payment request. */}
         {confirmation && (
-          <div role="status" className="mb-6 p-4 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-sm">
+          <div
+            role="status"
+            className="mb-6 rounded-xl border border-teal-500/30 bg-teal-500/10 p-4 text-sm text-teal-300"
+          >
             {confirmation}
           </div>
         )}
 
+        {/* Allow connected users to initiate staking or prompt others to connect. */}
         {address ? (
           <button
-            onClick={() => { setConfirmation(null); setOpen(true); }}
-            className="px-6 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-black font-bold text-sm transition-all"
+            type="button"
+            onClick={() => {
+              setConfirmation(null);
+              setOpen(true);
+            }}
+            className="rounded-xl bg-teal-500 px-6 py-3 text-sm font-bold text-black transition-all hover:bg-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
           >
             Stake &amp; Play
           </button>
         ) : (
           <button
+            type="button"
             onClick={() => void connectWallet()}
-            className="px-6 py-3 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 font-semibold text-sm transition-all"
+            className="rounded-xl border border-teal-500/30 bg-teal-500/10 px-6 py-3 text-sm font-semibold text-teal-300 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
           >
             Connect wallet to stake
           </button>
         )}
       </div>
 
+      {/* Collect the deposit details and handle the confirmed staking payment. */}
       <StakingDepositModal
         open={open}
         address={address}
@@ -89,6 +176,6 @@ export default function StakePage() {
         onClose={() => setOpen(false)}
         onConfirm={handleConfirm}
       />
-    </div>
+    </main>
   );
 }

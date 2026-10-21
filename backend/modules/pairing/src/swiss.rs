@@ -111,7 +111,7 @@ impl PairingStrategy for SwissPairer {
         let mut paired_ids = Vec::new();
         let mut unpaired = Vec::new();
 
-        while !ranked.is_empty() && paired.len() as u32 < self.config.max_pairings_per_round {
+        while !ranked.is_empty() && (paired.len() as u32) < self.config.max_pairings_per_round {
             if Self::try_pair_head(&mut ranked, &mut paired, &mut paired_ids, &self.config) {
                 continue;
             }

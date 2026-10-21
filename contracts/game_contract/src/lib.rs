@@ -525,6 +525,20 @@ impl GameContract {
         Ok(())
     }
 
+    /// Internal helper — the backend's ED25519 public key stored by `initialize`.
+    /// Returns Err(ContractError::NotInitialized) when it is missing or isn't
+    /// 32 bytes (`initialize` rejects any other length).
+    fn admin_public_key(env: &Env) -> Result<BytesN<32>, ContractError> {
+        let admin_key_bytes: Bytes = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .ok_or(ContractError::NotInitialized)?;
+        admin_key_bytes
+            .try_into()
+            .map_err(|_| ContractError::NotInitialized)
+    }
+
     /// Reentrancy guard (#860): reject a call if another guarded call is
     /// already in progress, then mark the guard entered.
     ///

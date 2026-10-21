@@ -64,8 +64,9 @@ pub struct PoolStats {
     pub total_timed_out: u64,
 }
 
+#[derive(Debug)]
 struct PoolInner {
-    permits: Semaphore,
+    permits: Arc<Semaphore>,
     capacity: usize,
     acquire_timeout: Duration,
     in_flight: AtomicUsize,
@@ -124,7 +125,7 @@ impl EnginePool {
         let capacity = capacity.clamp(1, MAX_ENGINES_CEILING);
         Self {
             inner: Arc::new(PoolInner {
-                permits: Semaphore::new(capacity),
+                permits: Arc::new(Semaphore::new(capacity)),
                 capacity,
                 acquire_timeout: Duration::from_millis(acquire_timeout_ms),
                 in_flight: AtomicUsize::new(0),

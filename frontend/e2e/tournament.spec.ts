@@ -92,7 +92,7 @@ test.describe("Tournament registration", () => {
     await expect(page.getByText(/server error/i)).toBeHidden();
   });
 
-  test("calls the backend's /api/v1/tournaments scope", async ({ page }) => {
+  test("calls the backend's /v1/tournaments scope", async ({ page }) => {
     const seen: string[] = [];
     page.on("request", (req) => {
       if (/\/tournaments/.test(req.url())) seen.push(new URL(req.url()).pathname);
@@ -102,7 +102,7 @@ test.describe("Tournament registration", () => {
     await page.getByRole("button", { name: /^register$/i }).click();
     await expect(page.getByText("You're registered for E2E Open.")).toBeVisible();
 
-    expect(seen).toContain("/api/v1/tournaments");
-    expect(seen).toContain(`/api/v1/tournaments/${TOURNAMENT.id}/register`);
+    expect(seen).toContain("/v1/tournaments");
+    expect(seen).toContain(`/v1/tournaments/${TOURNAMENT.id}/register`);
   });
 });

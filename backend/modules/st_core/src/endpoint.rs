@@ -21,7 +21,7 @@ pub struct MintNFTResponse {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/nft/mint",
+    path = "/v1/nft/mint",
     tag = "NFT",
     request_body = MintNFTRequest,
     responses(
@@ -71,7 +71,7 @@ pub async fn mint_nft(request: web::Json<MintNFTRequest>) -> Result<HttpResponse
 
 #[utoipa::path(
     post,
-    path = "/api/v1/nft/metadata/format",
+    path = "/v1/nft/metadata/format",
     tag = "NFT",
     request_body = AIMetadata,
     responses(
@@ -97,7 +97,7 @@ pub async fn format_ai_metadata(request: web::Json<AIMetadata>) -> Result<HttpRe
 
 #[utoipa::path(
     get,
-    path = "/api/v1/nft/stellar-toml",
+    path = "/v1/nft/stellar-toml",
     tag = "NFT",
     params(
         ("code" = String, Query, description = "Asset code"),

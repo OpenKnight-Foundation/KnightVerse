@@ -72,7 +72,7 @@ let stellar_toml = NFTService::generate_stellar_toml(&metadata)?;
 
 When the `api` feature is enabled, the following endpoints are available:
 
-### POST /api/v1/nft/mint
+### POST /v1/nft/mint
 Creates a signable XDR transaction for NFT minting.
 
 **Request Body:**
@@ -102,10 +102,10 @@ Creates a signable XDR transaction for NFT minting.
 }
 ```
 
-### POST /api/v1/nft/metadata/format
+### POST /v1/nft/metadata/format
 Formats AI metadata according to SEP-0039 standards.
 
-### GET /api/v1/nft/stellar-toml
+### GET /v1/nft/stellar-toml
 Generates stellar.toml content for the NFT.
 
 ## Stellar SEP-0039 Compliance

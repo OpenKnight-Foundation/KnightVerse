@@ -21,7 +21,7 @@ function withDefault(value: string | undefined, fallback: string): string {
 }
 
 /** Backend / game-server base URL (REST + WebSocket) */
-export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8000");
+export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8080");
 
 /** Derive the WebSocket base from the HTTP base automatically */
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
@@ -238,14 +238,14 @@ export const endpoints = {
   /** Tournaments */
   /**
    * Tournaments — the backend mounts these under its JWT-protected
-   * `/api/v1/tournaments` scope. Only `register` exists server-side today;
+  * `/v1/tournaments` scope. Only `register` exists server-side today;
    * list/create follow the same scope (see BE-114).
    */
   tournaments: {
-    list: () => `${API_BASE}/api/v1/tournaments`,
-    create: () => `${API_BASE}/api/v1/tournaments`,
+    list: () => `${API_BASE}/v1/tournaments`,
+    create: () => `${API_BASE}/v1/tournaments`,
     register: (id: string) =>
-      `${API_BASE}/api/v1/tournaments/${encodeURIComponent(id)}/register`,
+      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Horizon */

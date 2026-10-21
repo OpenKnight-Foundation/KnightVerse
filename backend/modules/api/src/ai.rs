@@ -302,7 +302,7 @@ mod tests {
         )
         .await;
 
-        let req = test::TestRequest::get().uri("/v1/ai/health").to_request();
+        let req = test::TestRequest::get().uri("/health/engine").to_request();
         let res = test::call_service(&app, req).await;
         let body: serde_json::Value = test::read_body_json(res).await;
         assert_eq!(body["status"], "saturated");

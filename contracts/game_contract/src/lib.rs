@@ -377,8 +377,8 @@ impl GameContract {
     /// The caller must provide an ED25519 signature (from the backend signing
     /// service) over `SHA256(wasm_hash)`.
     pub fn upgrade(env: Env, wasm_hash: BytesN<32>, signature: BytesN<64>) {
-        let admin_pubkey = Self::admin_public_key(&env)
-            .unwrap_or_else(|error| panic_with_error!(&env, error));
+        let admin_pubkey =
+            Self::admin_public_key(&env).unwrap_or_else(|error| panic_with_error!(&env, error));
 
         let payload: Bytes = wasm_hash.clone().into();
         let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload).into();

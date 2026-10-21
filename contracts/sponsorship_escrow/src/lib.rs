@@ -596,11 +596,7 @@ impl SponsorshipEscrowContract {
         }
 
         // Save updated tournament
-        Self::set_persistent(
-            &env,
-            &DataKey::Tournament(tournament_id),
-            &tournament,
-        );
+        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events().publish(
             (symbol_short!("stg_done"), tournament_id, stage_index),
@@ -633,11 +629,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        Self::set_persistent(
-            &env,
-            &DataKey::Tournament(tournament_id),
-            &tournament,
-        );
+        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events()
             .publish((symbol_short!("cancel"), tournament_id), caller);
@@ -661,11 +653,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        Self::set_persistent(
-            &env,
-            &DataKey::Tournament(tournament_id),
-            &tournament,
-        );
+        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events()
             .publish((symbol_short!("timeout"), tournament_id), caller);
@@ -834,8 +822,11 @@ impl SponsorshipEscrowContract {
         sponsor: Address,
         token: Address,
     ) -> i128 {
-        Self::get_persistent(&env, &DataKey::SponsorDeposit(tournament_id, sponsor, token))
-            .unwrap_or(0)
+        Self::get_persistent(
+            &env,
+            &DataKey::SponsorDeposit(tournament_id, sponsor, token),
+        )
+        .unwrap_or(0)
     }
 
     /// Get all distinct token addresses deposited into a tournament.

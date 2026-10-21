@@ -192,12 +192,14 @@ export const endpoints = {
 
   /** Games */
   games: {
-    live: () => `${API_BASE}/v1/games/live`,
+    // TODO(FE-101): uncomment once the backend implements GET /v1/games/live
+    // live: () => `${API_BASE}/v1/games/live`,
     /** Game socket — served by the backend at `/v1/ws/game/{game_id}`. */
     ws: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}`,
-    spectate: (gameId: string) =>
-      `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/spectate`,
+    // TODO(FE-101): uncomment once the backend implements the spectate WS route
+    // spectate: (gameId: string) =>
+    //   `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}/spectate`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
   },
 

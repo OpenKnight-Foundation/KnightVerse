@@ -32,7 +32,13 @@ async fn test_insert_and_verify_game() -> Result<(), Box<dyn std::error::Error>>
         username: Set(format!("test_user_{}", test_uuid)),
         email: Set(format!("test_email_{}@test.com", test_uuid)),
         password_hash: Set(b"test_password_hash".to_vec()),
-        // Other fields are nullable based on the migration
+        // Profile text columns are NOT NULL in the player table.
+        biography: Set(String::new()),
+        country: Set(String::new()),
+        flair: Set(String::new()),
+        real_name: Set(String::new()),
+        is_enabled: Set(true),
+        // The remaining columns are nullable or have database defaults.
         ..Default::default()
     };
     let player_insert_result = player_model.insert(&db).await?;

@@ -377,15 +377,8 @@ impl GameContract {
     /// The caller must provide an ED25519 signature (from the backend signing
     /// service) over `SHA256(wasm_hash)`.
     pub fn upgrade(env: Env, wasm_hash: BytesN<32>, signature: BytesN<64>) {
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)
+            .unwrap_or_else(|error| panic_with_error!(&env, error));
 
         let payload: Bytes = wasm_hash.clone().into();
         let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload).into();
@@ -1033,15 +1026,7 @@ impl GameContract {
         Self::require_not_paused(&env)?;
 
         // Verify backend admin signature for a draw to prevent unilateral draws
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)?;
 
         let mut payload_bytes = Bytes::new(&env);
         let game_id_le: [u8; 8] = game_id.to_le_bytes();
@@ -1136,15 +1121,7 @@ impl GameContract {
         Self::require_not_paused(&env)?;
 
         // Verify admin signature to confirm the win
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)?;
 
         let mut payload_bytes = Bytes::new(&env);
         let game_id_le: [u8; 8] = game_id.to_le_bytes();
@@ -1978,15 +1955,7 @@ impl GameContract {
         Self::require_not_paused(&env)?;
 
         // 1. Load admin ED25519 public key
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)?;
 
         // 2. Replay protection – check nonce before any state mutation
         let mut nonces: Map<u64, bool> = env
@@ -2133,15 +2102,7 @@ impl GameContract {
         }
 
         // 1. Load admin ED25519 public key (shared across all proofs)
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)?;
 
         let mut nonces: Map<u64, bool> = env
             .storage()
@@ -3173,14 +3134,7 @@ impl GameContract {
         }
 
         // 2. Load admin ED25519 public key (same key used for puzzle rewards)
-        let admin_key_bytes: Bytes = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .expect("Not initialized");
-        let admin_pubkey: BytesN<32> = admin_key_bytes
-            .try_into()
-            .expect("Admin public key must be 32 bytes");
+        let admin_pubkey = Self::admin_public_key(&env)?;
 
         // 3. Build canonical payload: address_bytes || nonce_bytes || expiry_le8
         let mut payload = Bytes::new(&env);

@@ -16,7 +16,8 @@ use validator::Validate;
 
 use service::players::{
     add_player as add_new_player, delete_player as delete_player_by_id,
-    find_player_by_id as get_single_player_by_id, update_player as update_player_by_id,
+    find_player_by_id as get_single_player_by_id, get_player_preferences,
+    update_player as update_player_by_id, update_player_preferences,
 };
 use uuid::Uuid;
 
@@ -28,6 +29,82 @@ static EXPORT_RATE_LIMIT: std::sync::OnceLock<Mutex<HashMap<Uuid, Instant>>> =
 
 fn export_rate_limit_store() -> &'static Mutex<HashMap<Uuid, Instant>> {
     EXPORT_RATE_LIMIT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn authenticated_player_id(req: &HttpRequest) -> Result<Uuid, HttpResponse> {
+    req.extensions()
+        .get::<Claims>()
+        .map(|claims| claims.player_id)
+        .ok_or_else(|| {
+            HttpResponse::Unauthorized().json(json!({
+                "message": "Authentication required"
+            }))
+        })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/players/me/preferences",
+    responses(
+        (status = 200, description = "Player preferences"),
+        (status = 401, description = "Authentication required"),
+        (status = 404, description = "Player not found")
+    ),
+    security(("jwt_auth" = [])),
+    tag = "Players"
+)]
+#[get("/me/preferences")]
+pub async fn get_preferences(req: HttpRequest, pool: web::Data<DbPool>) -> HttpResponse {
+    let player_id = match authenticated_player_id(&req) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    match get_player_preferences(pool.get_ref(), player_id).await {
+        Ok(preferences) => HttpResponse::Ok().json(json!({
+            "message": "Player preferences",
+            "data": { "preferences": preferences }
+        })),
+        Err(err) => err.error_response(),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/players/me/preferences",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Player preferences updated"),
+        (status = 400, description = "Preferences must be a JSON object"),
+        (status = 401, description = "Authentication required"),
+        (status = 404, description = "Player not found")
+    ),
+    security(("jwt_auth" = [])),
+    tag = "Players"
+)]
+#[put("/me/preferences")]
+pub async fn put_preferences(
+    req: HttpRequest,
+    pool: web::Data<DbPool>,
+    preferences: Json<serde_json::Value>,
+) -> HttpResponse {
+    let player_id = match authenticated_player_id(&req) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if !preferences.is_object() {
+        return HttpResponse::BadRequest().json(json!({
+            "message": "Preferences must be a JSON object"
+        }));
+    }
+
+    match update_player_preferences(pool.get_ref(), player_id, preferences.into_inner()).await {
+        Ok(preferences) => HttpResponse::Ok().json(json!({
+            "message": "Player preferences updated",
+            "data": { "preferences": preferences }
+        })),
+        Err(err) => err.error_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

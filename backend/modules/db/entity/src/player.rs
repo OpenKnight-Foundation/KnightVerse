@@ -26,6 +26,8 @@ pub struct Model {
     /// Stellar account (G…) linked via the wallet-link challenge (FE-97).
     #[sea_orm(unique)]
     pub wallet_address: Option<String>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub preferences: Json,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,7 +1,7 @@
 // src/server.rs
 
 use crate::admin::{list_actions, record_action};
-use crate::ai::{analyze_position, get_ai_suggestion};
+use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
 use crate::auth::{login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
 use crate::games::{
@@ -11,7 +11,10 @@ use crate::games::{
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
 use crate::lc0::{lc0_analyze, lc0_health};
-use crate::players::{add_player, delete_player, export_player_data, find_player_by_id, update_player};
+use crate::players::{
+    add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
+    put_preferences, update_player,
+};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -39,9 +42,83 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::openapi::ApiDoc;
 
-/// Health check endpoint
+/// Liveness endpoint — reports only that the process is up and serving HTTP.
+/// Dependency checks live in [`readiness`] so a flaky DB/Redis doesn't get the
+/// pod restarted, only taken out of rotation.
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "ok"}))
+}
+
+/// Upper bound for each dependency probe in `/health/ready` (BE-138).
+const READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ping the primary database, failing if it errors or exceeds `timeout`.
+async fn check_db(
+    conn: &sea_orm::DatabaseConnection,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    match tokio::time::timeout(timeout, conn.ping()).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!("timed out after {}ms", timeout.as_millis())),
+    }
+}
+
+/// Acquire a Redis connection and `PING` it, failing if either step errors or
+/// the whole probe exceeds `timeout`.
+async fn check_redis(
+    pool: &deadpool_redis::Pool,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let probe = async {
+        let mut conn = pool.get().await.map_err(|e| e.to_string())?;
+        redis::cmd("PING")
+            .query_async::<_, String>(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    match tokio::time::timeout(timeout, probe).await {
+        Ok(result) => result,
+        Err(_) => Err(format!("timed out after {}ms", timeout.as_millis())),
+    }
+}
+
+async fn readiness_response(
+    db_pool: &DbPool,
+    redis_pool: &deadpool_redis::Pool,
+    timeout: std::time::Duration,
+) -> HttpResponse {
+    let (db, redis) = tokio::join!(
+        check_db(db_pool.primary(), timeout),
+        check_redis(redis_pool, timeout)
+    );
+    let ready = db.is_ok() && redis.is_ok();
+    let check_json = |r: &Result<(), String>| match r {
+        Ok(()) => serde_json::json!({"status": "ok"}),
+        Err(e) => serde_json::json!({"status": "error", "error": e}),
+    };
+    let body = serde_json::json!({
+        "status": if ready { "ok" } else { "error" },
+        "checks": {
+            "database": check_json(&db),
+            "redis": check_json(&redis),
+        }
+    });
+    if ready {
+        HttpResponse::Ok().json(body)
+    } else {
+        HttpResponse::ServiceUnavailable().json(body)
+    }
+}
+
+/// Readiness endpoint — pings the primary DB and Redis with a short timeout and
+/// returns 503 if either is unavailable, so orchestrators stop routing traffic.
+async fn readiness(
+    db_pool: web::Data<DbPool>,
+    redis_pool: web::Data<deadpool_redis::Pool>,
+) -> impl Responder {
+    readiness_response(&db_pool, &redis_pool, READINESS_TIMEOUT).await
 }
 
 /// Redis health check endpoint
@@ -227,6 +304,15 @@ pub async fn main() -> std::io::Result<()> {
             .finish()
             .unwrap();
 
+        // BE-137: engine calls are CPU-bound, so `/v1/ai` gets a tighter
+        // per-second budget than games.
+        let ai_governor_conf = GovernorConfigBuilder::default()
+            .per_second(config.ai_rate_limit_per_sec)
+            .burst_size(config.ai_rate_limit_burst)
+            .use_headers()
+            .finish()
+            .unwrap();
+
         // Create Redis-backed rate limiters (shared across workers via Redis)
         let auth_redis_limiter = RedisRateLimiter::new(
             rate_limiter_pool.clone(),
@@ -238,6 +324,12 @@ pub async fn main() -> std::io::Result<()> {
             rate_limiter_pool.clone(),
             config.redis_game_rate_limit,
             config.redis_game_rate_limit_window,
+        );
+
+        let ai_redis_limiter = RedisRateLimiter::new(
+            rate_limiter_pool.clone(),
+            config.redis_ai_rate_limit,
+            config.redis_ai_rate_limit_window,
         );
 
         // BE-46: Redis-backed IdempotencyMiddleware for mutating financial, staking & tournament requests
@@ -261,11 +353,14 @@ pub async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(redis_broadcaster.clone()))
             .app_data(web::Data::new(matchmaking_service.clone()))
             .app_data(web::Data::new(puzzle_service.clone()))
+            // BE-137: bounded admission control in front of the engine.
+            .app_data(web::Data::new(EnginePool::from_env()))
             // Lc0 orchestrator is process-wide and internally bounded (BE-132).
             .app_data(web::Data::new(Arc::new(Lc0Orchestrator::from_env())))
             // Register your routes
             .route("/health", web::get().to(health))
             .route("/health/redis", web::get().to(health_redis))
+            .route("/health/ready", web::get().to(readiness))
             .route("/", web::get().to(greet))
             .route("/metrics", web::get().to(metrics_endpoint))
             // Puzzle routes
@@ -282,6 +377,8 @@ pub async fn main() -> std::io::Result<()> {
                         Some(redis_pool.clone()),
                     ))
                     .service(export_player_data)
+                    .service(get_preferences)
+                    .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
                     .service(crate::wallet_link::wallet_unlink)
@@ -349,6 +446,9 @@ pub async fn main() -> std::io::Result<()> {
                         jwt_expiration,
                         Some(redis_pool.clone()),
                     ))
+                    // BE-135: Swiss round generation, previously unreachable
+                    // because nothing depended on the `pairing` crate.
+                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
                     .route(
                         "/{id}/register",
                         web::post().to(|path: web::Path<String>| async move {
@@ -405,6 +505,8 @@ pub async fn main() -> std::io::Result<()> {
             // AI routes
             .service(
                 web::scope("/v1/ai")
+                    .wrap(Governor::new(&ai_governor_conf))
+                    .wrap(ai_redis_limiter)
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -415,6 +517,10 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Engine-pool saturation is exactly what an operator needs to see
+            // during an incident, so this one route stays outside the auth
+            // gate and the limiters.
+            .route("/health/engine", web::get().to(ai_health))
             // NFT routes (placeholder — not yet implemented)
             // .service(web::scope("/api/v1").configure(configure_nft_routes))
             // Swagger UI integration
@@ -479,4 +585,123 @@ pub async fn main() -> std::io::Result<()> {
     });
 
     server.await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{http::StatusCode, test};
+    use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
+    use std::time::Duration;
+
+    const TEST_TIMEOUT: Duration = Duration::from_millis(300);
+
+    fn mock_db() -> Arc<DatabaseConnection> {
+        Arc::new(MockDatabase::new(DbBackend::Postgres).into_connection())
+    }
+
+    fn pool_of(conn: Arc<DatabaseConnection>) -> DbPool {
+        DbPool::from_connections(conn.clone(), conn, false)
+    }
+
+    /// Redis pool pointed at a port nothing listens on (connection refused).
+    fn refused_redis_pool() -> deadpool_redis::Pool {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        create_redis_pool(&format!("redis://127.0.0.1:{port}")).unwrap()
+    }
+
+    #[actix_web::test]
+    async fn health_is_liveness_only_and_needs_no_dependencies() {
+        let app = test::init_service(App::new().route("/health", web::get().to(health))).await;
+        let res = test::call_service(&app, test::TestRequest::get().uri("/health").to_request())
+            .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(res).await;
+        assert_eq!(body, serde_json::json!({"status": "ok"}));
+    }
+
+    #[actix_web::test]
+    async fn check_db_ok_when_primary_responds() {
+        assert!(check_db(&mock_db(), TEST_TIMEOUT).await.is_ok());
+    }
+
+    #[actix_web::test]
+    async fn check_db_fails_when_primary_disconnected() {
+        assert!(check_db(&DatabaseConnection::Disconnected, TEST_TIMEOUT)
+            .await
+            .is_err());
+    }
+
+    #[actix_web::test]
+    async fn check_redis_fails_when_connection_refused() {
+        assert!(check_redis(&refused_redis_pool(), TEST_TIMEOUT)
+            .await
+            .is_err());
+    }
+
+    #[actix_web::test]
+    async fn check_redis_times_out_when_server_never_replies() {
+        // Accept connections but never write a byte back, so PING hangs.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _accept = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        let pool = create_redis_pool(&format!("redis://127.0.0.1:{port}")).unwrap();
+
+        let start = std::time::Instant::now();
+        let err = check_redis(&pool, TEST_TIMEOUT).await.unwrap_err();
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[actix_web::test]
+    async fn readiness_returns_503_when_redis_down() {
+        let res = readiness_response(&pool_of(mock_db()), &refused_redis_pool(), TEST_TIMEOUT)
+            .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["checks"]["database"]["status"], "ok");
+        assert_eq!(body["checks"]["redis"]["status"], "error");
+    }
+
+    #[actix_web::test]
+    async fn readiness_returns_503_when_db_down() {
+        let res = readiness_response(
+            &pool_of(Arc::new(DatabaseConnection::Disconnected)),
+            &refused_redis_pool(),
+            TEST_TIMEOUT,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["checks"]["database"]["status"], "error");
+    }
+
+    #[actix_web::test]
+    async fn readiness_route_is_registered_and_reports_unready() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool_of(mock_db())))
+                .app_data(web::Data::new(refused_redis_pool()))
+                .route("/health/ready", web::get().to(readiness)),
+        )
+        .await;
+        let res = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/health/ready").to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

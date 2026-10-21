@@ -262,7 +262,10 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[inviter_request_id], match_id)
                     .await?;
-                let mut active_matches = self.active_matches.lock().unwrap();
+                let mut active_matches = self
+                    .active_matches
+                    .lock()
+                    .map_err(|_| "active_matches lock poisoned".to_string())?;
                 active_matches.insert(match_id, new_match);
 
                 return Ok(Some(MatchmakingResponse {
@@ -520,7 +523,10 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self.active_matches.lock().unwrap();
+                let mut active_matches = self
+                    .active_matches
+                    .lock()
+                    .map_err(|_| "active_matches lock poisoned".to_string())?;
                 active_matches.insert(match_id, new_match);
 
                 return Ok(Some(MatchmakingResponse {
@@ -575,7 +581,10 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self.active_matches.lock().unwrap();
+                let mut active_matches = self
+                    .active_matches
+                    .lock()
+                    .map_err(|_| "active_matches lock poisoned".to_string())?;
                 active_matches.insert(match_id, new_match);
 
                 return Ok(Some(MatchmakingResponse {
@@ -701,7 +710,10 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self.active_matches.lock().unwrap();
+                let mut active_matches = self
+                    .active_matches
+                    .lock()
+                    .map_err(|_| "active_matches lock poisoned".to_string())?;
                 active_matches.insert(match_id, new_match);
 
                 return Ok(Some(MatchmakingResponse {
@@ -789,7 +801,7 @@ impl MatchmakingService {
     }
 
     pub fn get_match(&self, match_id: Uuid) -> Option<Match> {
-        let active_matches = self.active_matches.lock().unwrap();
+        let active_matches = self.active_matches.lock().ok()?;
         active_matches.get(&match_id).cloned()
     }
 }

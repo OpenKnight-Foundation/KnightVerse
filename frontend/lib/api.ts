@@ -219,6 +219,7 @@ export const endpoints = {
      */
     online: () => `${API_BASE}/v1/players/online`,
     export: () => `${API_BASE}/v1/players/me/export`,
+    preferences: () => `${API_BASE}/v1/players/me/preferences`,
     /**
      * Rating (ELO) history for a single player.
      *

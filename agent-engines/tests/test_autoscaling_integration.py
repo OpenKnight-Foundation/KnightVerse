@@ -20,13 +20,16 @@ from gpu_worker.resource_optimizer import (
 
 class MockRedisClient:
     """Mock Redis client for integration testing."""
-    
+
     def __init__(self):
+        # key -> Python list standing in for a Redis list
         self.lists = {}
-        
+
+    # Length of the list at `key` (0 if it doesn't exist)
     def llen(self, key: str) -> int:
         return len(self.lists.get(key, []))
-        
+
+    # Element at `index`; supports negative indexes like real Redis, None if out of range
     def lindex(self, key: str, index: int) -> str | None:
         queue = self.lists.get(key, [])
         if 0 <= index < len(queue):
@@ -34,14 +37,16 @@ class MockRedisClient:
         elif -len(queue) <= index < 0:
             return queue[index]
         return None
-        
+
+    # Push to the head of the list, one value at a time (mirrors Redis LPUSH ordering)
     def lpush(self, key: str, *values) -> int:
         if key not in self.lists:
             self.lists[key] = []
         for value in values:
             self.lists[key].insert(0, value)
         return len(self.lists[key])
-        
+
+    # Pop from the tail of the list (oldest item when used with LPUSH)
     def rpop(self, key: str) -> str | None:
         if key in self.lists and self.lists[key]:
             return self.lists[key].pop()
@@ -57,6 +62,7 @@ def mock_redis():
 @pytest.fixture
 def integration_config():
     """Configuration for integration testing."""
+    # Thresholds are chosen so tests can trigger scale-up/down with small amounts of load
     return AutoscalingConfig(
         min_workers=2,
         max_workers=8,
@@ -87,6 +93,7 @@ def worker_configs():
 @pytest.fixture
 def maia_configs():
     """Maia configurations for testing."""
+    # One config per Elo level; paths are fake because no real engine is loaded
     return [
         MaiaConfig(name=f"maia_{elo}", path=f"/path/to/maia/{elo}", elo=elo)
         for elo in [1100, 1500, 1900]
@@ -96,28 +103,30 @@ def maia_configs():
 @pytest.fixture
 def mock_worker_factory():
     """Mock worker factory that creates trackable workers."""
+    # Every worker built by the factory is recorded here so tests can inspect them
     created_workers = []
-    
+
     def factory(config, opening_book):
         worker = MagicMock()
         worker.config = config
         worker.worker_id = f"worker-{config.gpu.device_id}-{len(created_workers)}"
         worker.load = 0
+        # Async lifecycle/analysis methods need AsyncMock so they can be awaited
         worker.start = AsyncMock()
         worker.shutdown = AsyncMock()
         worker.analyze = AsyncMock()
         worker.get_info = MagicMock()
-        
+
         # Track worker creation
         created_workers.append(worker)
-        
+
         # Mock analysis with realistic delay
         async def mock_analyze(request):
             await asyncio.sleep(0.05)  # Simulate analysis time
             return AnalysisResult(request_id=request.id, best_move="e4")
-        
+
         worker.analyze.side_effect = mock_analyze
-        
+
         # Mock WorkerInfo
         from gpu_worker.models import WorkerInfo, WorkerStatus
         mock_info = WorkerInfo(
@@ -126,26 +135,29 @@ def mock_worker_factory():
             gpu_device_id=config.gpu.device_id
         )
         worker.get_info.return_value = mock_info
-        
+
         return worker
-    
+
+    # Expose the tracking list on the factory function itself
     factory.created_workers = created_workers
     return factory
 
 
 class TestAutoscalingIntegration:
     """Integration tests for the complete autoscaling system."""
-    
+
     @pytest.mark.asyncio
     async def test_complete_autoscaling_workflow(
         self, mock_redis, integration_config, worker_configs, maia_configs, mock_worker_factory
     ):
         """Test complete autoscaling workflow from queue monitoring to worker scaling."""
-        
+
+        # Swap the real Redis module for the in-memory mock in the optimizer module
         with patch('gpu_worker.resource_optimizer.redis') as mock_redis_module:
             mock_redis_module.Redis.return_value = mock_redis
-            
+
             # Create resource monitor with mocked GPU stats
+            # (4 lightly loaded GPUs, so GPU capacity never blocks a scale-up)
             def mock_gpu_stats():
                 return {
                     "available": True,
@@ -161,7 +173,8 @@ class TestAutoscalingIntegration:
                         } for i in range(4)
                     ]
                 }
-            
+
+            # Fake CPU/memory readings so the test doesn't depend on the host machine
             def mock_cpu_stats():
                 return {
                     "cpu_utilization_pct": 30.0,
@@ -169,24 +182,25 @@ class TestAutoscalingIntegration:
                     "memory_total_mb": 32000,
                     "memory_utilization_pct": 25.0
                 }
-            
+
             redis_config = {
                 "host": "localhost",
                 "port": 6379,
                 "db": 0,
                 "queue_key": "integration_test_queue"
             }
-            
+
+            # The resource monitor imports redis separately, so it needs its own patch
             with patch('gpu_worker.resource_monitor.redis') as monitor_redis_module:
                 monitor_redis_module.Redis.return_value = mock_redis
-                
+
                 resource_monitor = ResourceMonitor(
                     poll_interval_seconds=0.05,
                     gpu_stats_provider=mock_gpu_stats,
                     cpu_stats_provider=mock_cpu_stats,
                     redis_config=redis_config
                 )
-                
+
                 # Create autoscaling worker pool
                 pool = AutoscalingWorkerPool(
                     base_configs=worker_configs,
@@ -196,7 +210,7 @@ class TestAutoscalingIntegration:
                     min_workers=2,
                     max_workers=6
                 )
-                
+
                 # Create custom worker factory for autoscaling daemon
                 def daemon_worker_factory(gpu_device_id):
                     # This would normally create a real worker process
@@ -206,11 +220,12 @@ class TestAutoscalingIntegration:
                         max_concurrent_analyses=3
                     )
                     return mock_worker_factory(new_config, None)
-                
+
                 # Create autoscaling daemon
                 daemon = AutoscalingDaemon(integration_config, daemon_worker_factory)
-                
+
                 # Override daemon's worker management to work with pool
+                # (so scaling actions add/remove workers on the pool rather than real processes)
                 async def mock_scale_up():
                     if pool.can_scale_up():
                         new_config = WorkerConfig(
@@ -218,87 +233,89 @@ class TestAutoscalingIntegration:
                             max_concurrent_analyses=3
                         )
                         await pool.add_worker(new_config, len(pool._workers))
-                        
+
                 async def mock_scale_down():
                     if pool.can_scale_down():
                         idle_workers = pool.get_idle_workers()
                         if idle_workers:
                             await pool.remove_worker(idle_workers[0], graceful=True)
-                
+
                 daemon._scale_up = mock_scale_up
                 daemon._scale_down = mock_scale_down
-                
+
                 try:
                     # Start all components
                     await resource_monitor.start()
                     await pool.start_all()
-                    
+
                     # Mock the daemon's scale_to_target to work with the pool
                     daemon._scale_to_target = AsyncMock()
                     # Capacity checks fail closed without NVML; act as a GPU host.
                     daemon._has_available_gpu_capacity = AsyncMock(return_value=True)
                     await daemon.start()
-                    
+
                     # Initial state: should have 2 workers
                     assert len(pool._workers) == 2
-                    
+
                     # Simulate high queue load to trigger scale-up
                     for i in range(10):  # Add 10 tasks to exceed threshold (5)
                         mock_redis.lpush("integration_test_queue", f"task-{i}")
-                    
+
                     # Wait for monitoring and scaling to occur
                     await asyncio.sleep(0.3)
-                    
+
                     # Manually trigger scaling decision (since we mocked the daemon)
                     queue_metrics = await daemon._get_queue_metrics()
                     resource_metrics = await daemon._get_resource_metrics()
-                    
+
                     assert queue_metrics["queue_length"] == 10
-                    
+
                     scaling_decision = await daemon._make_scaling_decision(queue_metrics, resource_metrics)
                     await daemon._execute_scaling_action(scaling_decision, queue_metrics, resource_metrics)
-                    
+
                     # Should have triggered scale-up
+                    # NOTE: conditional assertion; it's skipped if the pool is already at its maximum
                     if pool.can_scale_up():
                         assert len(pool._workers) > 2
-                    
+
                     # Simulate processing tasks (clear queue)
                     for _ in range(10):
                         mock_redis.rpop("integration_test_queue")
-                    
+
                     # Wait for scale-down conditions
                     await asyncio.sleep(0.3)
-                    
+
                     # Check scale-down decision
                     queue_metrics = await daemon._get_queue_metrics()
                     assert queue_metrics["queue_length"] == 0
-                    
+
                     # Simulate idle timeout by mocking worker idle time
                     if pool._workers:
                         for worker_process in daemon._workers.values():
                             worker_process.last_active = time.time() - 10  # 10 seconds ago
-                    
+
                     scaling_decision = await daemon._make_scaling_decision(queue_metrics, resource_metrics)
-                    
+
                     # Should consider scale-down if conditions are met
+                    # (no final assertion on the resulting worker count)
                     if len(pool._workers) > pool.min_workers:
                         await daemon._execute_scaling_action(scaling_decision, queue_metrics, resource_metrics)
-                    
+
                 finally:
                     # Cleanup
                     await daemon.stop(timeout=1.0)
                     await pool.shutdown_all(wait_for_pending=False, timeout=1.0)
                     await resource_monitor.stop()
-                    
+
     @pytest.mark.asyncio
     async def test_traffic_spike_simulation(
         self, mock_redis, integration_config, worker_configs, maia_configs, mock_worker_factory
     ):
         """Simulate a traffic spike and verify autoscaling response."""
-        
+
         with patch('gpu_worker.resource_optimizer.redis') as mock_redis_module:
             mock_redis_module.Redis.return_value = mock_redis
-            
+
             # Create autoscaling pool
             pool = AutoscalingWorkerPool(
                 base_configs=worker_configs,
@@ -308,12 +325,12 @@ class TestAutoscalingIntegration:
                 min_workers=2,
                 max_workers=8
             )
-            
+
             await pool.start_all()
-            
+
             try:
                 initial_worker_count = len(pool._workers)
-                
+
                 # Simulate sudden traffic spike
                 requests = []
                 for i in range(20):  # Create many concurrent requests
@@ -323,11 +340,12 @@ class TestAutoscalingIntegration:
                         depth=15
                     )
                     requests.append(request)
-                
+
                 # Submit all requests concurrently
+                # (these are coroutines; they run once awaited in gather below)
                 start_time = time.time()
                 tasks = [pool.submit(request) for request in requests]
-                
+
                 # While requests are processing, add workers if needed
                 if len(requests) > len(pool._workers) * 3:  # More requests than capacity
                     for i in range(3):  # Add some workers
@@ -337,59 +355,61 @@ class TestAutoscalingIntegration:
                                 max_concurrent_analyses=3
                             )
                             await pool.add_worker(new_config, len(pool._workers))
-                
+
                 # Wait for all requests to complete
                 results = await asyncio.gather(*tasks)
                 processing_time = time.time() - start_time
-                
+
                 # Verify all requests were processed
                 assert len(results) == 20
+                # gather preserves order, so result i must belong to request i
                 for i, result in enumerate(results):
                     assert result.request_id == f"spike-{i}"
                     assert result.best_move is not None
-                
+
                 # Should have scaled up to handle the load
                 final_worker_count = len(pool._workers)
                 assert final_worker_count >= initial_worker_count
-                
+
                 # Processing time should be reasonable (parallel processing)
                 assert processing_time < 2.0  # Should complete within 2 seconds
-                
+
                 # Test scale-down after traffic subsides
                 # Wait for workers to become idle
                 await asyncio.sleep(0.1)
-                
+
                 # Remove excess workers
                 while len(pool._workers) > pool.min_workers and pool.can_scale_down():
                     idle_workers = pool.get_idle_workers()
                     if idle_workers:
                         await pool.remove_worker(idle_workers[0], graceful=True)
                         break  # Remove one at a time
-                
+
                 # Should scale back down towards minimum
                 scaled_down_count = len(pool._workers)
                 assert scaled_down_count <= final_worker_count
-                
+
             finally:
                 await pool.shutdown_all(wait_for_pending=False, timeout=2.0)
-                
+
     @pytest.mark.asyncio
     async def test_resource_monitor_integration(
         self, mock_redis, integration_config, worker_configs, maia_configs, mock_worker_factory
     ):
         """Test integration between resource monitor and autoscaling decisions."""
-        
+
         redis_config = {
-            "host": "localhost", 
+            "host": "localhost",
             "port": 6379,
             "db": 0,
             "queue_key": "integration_test_queue"
         }
-        
+
         with patch('gpu_worker.resource_monitor.redis') as monitor_redis_module:
             monitor_redis_module.Redis.return_value = mock_redis
-            
+
             # Create resource monitor with high GPU utilization
+            # Device 0 is under the 90% memory threshold, device 1 is over it
             def mock_high_gpu_stats():
                 return {
                     "available": True,
@@ -414,54 +434,56 @@ class TestAutoscalingIntegration:
                         }
                     ]
                 }
-            
+
             resource_monitor = ResourceMonitor(
                 poll_interval_seconds=0.1,
                 gpu_stats_provider=mock_high_gpu_stats,
                 redis_config=redis_config,
                 gpu_memory_threshold_percent=90.0
             )
-            
+
             await resource_monitor.start()
-            
+
             try:
                 # Check GPU memory threshold detection
                 threshold_check = resource_monitor.check_gpu_memory_threshold()
                 assert threshold_check["threshold_exceeded"] is True
+                # Only device 1 (91.67%) is over the 90% threshold
                 assert len(threshold_check["devices_over_threshold"]) == 1
                 assert threshold_check["devices_over_threshold"][0]["device_id"] == 1
-                
+
                 # Check available GPU memory calculation
                 available_memory = resource_monitor.get_available_gpu_memory()
                 assert available_memory[0]["can_allocate_worker"] is True  # Under threshold
                 assert available_memory[1]["can_allocate_worker"] is False  # Over threshold
-                
+
                 # Add queue load
                 for i in range(8):
                     mock_redis.lpush("integration_test_queue", f"task-{i}")
-                
+
                 # Get combined metrics
                 metrics = resource_monitor.get_combined_metrics()
-                
+
                 assert metrics["gpu"]["available"] is True
                 assert metrics["queue"]["queue_length"] == 8
+                # 8 queued tasks -> 800ms, i.e. an estimate of 100ms per task
                 assert metrics["queue"]["estimated_wait_time_ms"] == 800.0
-                
+
                 # Verify timestamp is recent
                 assert time.time() - metrics["timestamp"] < 1.0
-                
+
             finally:
                 await resource_monitor.stop()
-                
-    @pytest.mark.asyncio  
+
+    @pytest.mark.asyncio
     async def test_graceful_shutdown_integration(
         self, mock_redis, integration_config, worker_configs, maia_configs, mock_worker_factory
     ):
         """Test graceful shutdown of the complete autoscaling system."""
-        
+
         with patch('gpu_worker.resource_optimizer.redis') as mock_redis_module:
             mock_redis_module.Redis.return_value = mock_redis
-            
+
             # Create system components
             pool = AutoscalingWorkerPool(
                 base_configs=worker_configs,
@@ -471,14 +493,15 @@ class TestAutoscalingIntegration:
                 min_workers=2,
                 max_workers=6
             )
-            
+
+            # NOTE: `daemon` is created but never started or used afterwards
             daemon = AutoscalingDaemon(integration_config)
             optimizer = ResourceOptimizer(autoscaling_config=integration_config)
-            
+
             # Start all components
             await pool.start_all()
             await optimizer.start_autoscaling()
-            
+
             try:
                 # Submit some long-running requests
                 long_requests = []
@@ -493,23 +516,24 @@ class TestAutoscalingIntegration:
                     # start running in the background — a bare append() of
                     # the coroutine object never executes it.
                     long_requests.append(asyncio.create_task(pool.submit(request)))
-                
+
                 # Let requests start processing. Keep this short: with
                 # min_workers=2 and 5 requests at 0.05s of mock analysis
                 # each, total work is ~0.15s, and shutdown_time below needs
                 # a healthy chunk of that still pending when shutdown begins.
                 await asyncio.sleep(0.02)
-                
+
                 # Initiate graceful shutdown
                 shutdown_start = time.time()
-                
+
+                # Shut down the pool and the autoscaler concurrently
                 await asyncio.gather(
                     pool.shutdown_all(wait_for_pending=True, timeout=2.0),
                     optimizer.stop_autoscaling(timeout=2.0)
                 )
-                
+
                 shutdown_time = time.time() - shutdown_start
-                
+
                 # Should have waited for requests to complete. Autoscaling
                 # can spin up enough workers to run all 5 requests in a
                 # single ~0.05s round rather than several serial rounds, so
@@ -517,48 +541,51 @@ class TestAutoscalingIntegration:
                 # full worst-case serial time.
                 assert shutdown_time >= 0.03
                 assert shutdown_time < 3.0   # But not too long
-                
+
                 # Pool should be properly shutdown
                 assert pool._started is False
                 assert pool._shutdown_requested is True
-                
+
                 # All workers should be stopped
+                # (each worker's shutdown() must be called exactly once, no double shutdowns)
                 for worker in pool._workers:
                     worker.shutdown.assert_called_once()
-                    
+
             except Exception:
                 # Ensure cleanup even if test fails
                 await pool.shutdown_all(wait_for_pending=False, timeout=1.0)
                 await optimizer.stop_autoscaling(timeout=1.0)
                 raise
-                
+
     @pytest.mark.asyncio
     async def test_error_handling_integration(
         self, mock_redis, integration_config, worker_configs, maia_configs, mock_worker_factory
     ):
         """Test error handling across the autoscaling system."""
-        
+
         with patch('gpu_worker.resource_optimizer.redis') as mock_redis_module:
             # Simulate Redis connection issues
             mock_redis_client = MagicMock()
             mock_redis_client.llen.side_effect = Exception("Redis connection failed")
             mock_redis_module.Redis.return_value = mock_redis_client
-            
+
             daemon = AutoscalingDaemon(integration_config)
-            
+
             # Should handle Redis errors gracefully
+            # (an "empty queue" result with the error recorded, instead of an exception)
             queue_metrics = await daemon._get_queue_metrics()
             assert queue_metrics["queue_length"] == 0
             assert queue_metrics["error"] is not None
-            
+
             # System should continue to operate despite Redis issues
             resource_metrics = await daemon._get_resource_metrics()
             assert resource_metrics is not None
-            
+
             # Scaling decisions should default to no scaling when metrics unavailable
             decision = await daemon._make_scaling_decision(queue_metrics, resource_metrics)
             # Should not scale up without reliable queue metrics
-            
+            # NOTE: `decision` is computed but never asserted on
+
         # Test worker creation failure
         def failing_worker_factory(config, opening_book):
             raise Exception("Worker creation failed")
@@ -575,8 +602,9 @@ class TestAutoscalingIntegration:
         pool._worker_factory = failing_worker_factory
 
         # Should handle worker creation failures gracefully
+        # (add_worker reports failure via its return value rather than raising)
         success = await pool.add_worker(worker_configs[0], gpu_device_id=2)
         assert success is False
-        
+
         # Pool should remain functional
         assert len(pool._workers) == 2  # Original workers still there

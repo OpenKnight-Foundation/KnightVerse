@@ -1,0 +1,28 @@
+# Keep the build context small and deterministic. Anything listed here is
+# excluded from the image build context sent to the Docker daemon.
+
+# Build artifacts and dependencies (installed inside the image)
+node_modules
+.next
+
+# VCS and editor metadata
+.git
+.gitignore
+.vscode
+
+# Local env files — Next.js auto-loads these at build time, which would
+# override the NEXT_PUBLIC_* build args. Exclude them so the build args are
+# authoritative. .env.example is intentionally NOT excluded (harmless reference).
+.env
+.env.local
+.env.*.local
+
+# Logs and OS cruft
+*.log
+npm-debug.log*
+.DS_Store
+
+# Test artifacts (not needed for a production build)
+coverage
+playwright-report
+test-results

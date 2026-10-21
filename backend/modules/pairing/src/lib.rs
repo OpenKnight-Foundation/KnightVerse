@@ -1,3 +1,10 @@
+//! Tournament pairing (BE-135).
+//!
+//! `SwissPairer` implements the `PairingStrategy` trait; it is what the
+//! `/api/v1/tournaments/{id}/pairings` route calls to build a round.
+
+pub mod swiss;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -151,3 +158,5 @@ mod tests {
         assert_eq!(config.max_pairings_per_round, 1000);
     }
 }
+
+pub use swiss::{build_round, Bye, SwissPairer, SwissRound};

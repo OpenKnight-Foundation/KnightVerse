@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::moderation::{self, ChatDecision, ChatModerator};
+use crate::move_order::{MoveDecision, MoveOrderGuard};
 use crate::redis_broadcast::{spawn_subscriber_task, RedisBroadcaster, SpectatorSubscription};
 
 use chrono::{DateTime, Utc};
@@ -115,6 +116,14 @@ pub enum ExtendedWsMessage {
     OpponentReconnected,
 }
 
+/// Server wall-clock in milliseconds, used as `now_ms` for the reorder window.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 /// Core WebSocket message types
 #[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[rtype(result = "()")]
@@ -125,6 +134,13 @@ pub enum WsMessage {
         to: String,
         san: String,
         fen: String,
+        /// Client-side monotonically increasing sequence id (BE-135).
+        ///
+        /// `#[serde(default)]` keeps this backward compatible: a client that
+        /// does not stamp its moves deserializes to `None` and its moves are
+        /// forwarded in arrival order, exactly as before.
+        #[serde(default)]
+        seq: Option<u64>,
     },
     Clock {
         white: u32,
@@ -542,6 +558,8 @@ pub struct WsSession {
     pub session_id: String,
     pub is_spectator: bool,
     pub redis_sub_task: Option<SpectatorSubscription>,
+    /// Out-of-order move resolution for this player (BE-135).
+    pub move_order: MoveOrderGuard,
 }
 
 impl WsSession {
@@ -712,13 +730,38 @@ impl WsSession {
     /// this handler — `publish_fire_and_forget` just spawns a task.
     fn handle_player_message(&mut self, ws_msg: WsMessage, _ctx: &mut ws::WebsocketContext<Self>) {
         match &ws_msg {
-            WsMessage::Move { .. } | WsMessage::Clock { .. } | WsMessage::End { .. } => {
-                self.lobby.do_send(Broadcast {
-                    game_id: self.game_id.clone(),
-                    message: ws_msg.clone(),
-                });
-                // Single publish per move/clock/end event, non-blocking.
-                self.redis.publish_fire_and_forget(&self.game_id, &ws_msg);
+            // BE-135: sequenced moves go through the reorder buffer first, so
+            // a packet that overtook the one before it is held until the gap
+            // closes instead of being broadcast out of turn.
+            WsMessage::Move { san, seq, .. } => {
+                let now_ms = now_millis();
+                let player_key = self.player_id.to_string();
+                match self.move_order.accept(&player_key, *seq, san, now_ms) {
+                    MoveDecision::Apply(_) => {
+                        self.fan_out(ws_msg);
+                    }
+                    MoveDecision::Buffered { .. } => {
+                        debug!(
+                            "Move seq {:?} from {} held in reorder buffer ({} pending)",
+                            seq,
+                            self.username,
+                            self.move_order.buffered(&player_key)
+                        );
+                    }
+                    MoveDecision::Duplicate => {
+                        debug!("Duplicate move seq {:?} from {} dropped", seq, self.username);
+                    }
+                    MoveDecision::Retransmit(missing) => {
+                        warn!(
+                            "Moves {:?} missing from {} after reorder window",
+                            missing,
+                            self.username
+                        );
+                    }
+                }
+            }
+            WsMessage::Clock { .. } | WsMessage::End { .. } => {
+                self.fan_out(ws_msg);
             }
             WsMessage::Eval { .. } => {
                 // Evaluation updates are spectator-facing only; skip the
@@ -731,6 +774,16 @@ impl WsSession {
                 // stay tolerant of client/version skew.
             }
         }
+    }
+
+    /// Publish a player event to the in-process lobby and to Redis.
+    fn fan_out(&self, ws_msg: WsMessage) {
+        self.lobby.do_send(Broadcast {
+            game_id: self.game_id.clone(),
+            message: ws_msg.clone(),
+        });
+        // Single publish per move/clock/end event, non-blocking.
+        self.redis.publish_fire_and_forget(&self.game_id, &ws_msg);
     }
 
     /// Spectator-originated message handling. Only chat is accepted, and it
@@ -927,6 +980,7 @@ pub async fn ws_route(
             session_id,
             is_spectator,
             redis_sub_task: None,
+            move_order: MoveOrderGuard::new(),
         },
         &req,
         stream,

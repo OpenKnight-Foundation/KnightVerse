@@ -1,4 +1,4 @@
-use crate::{ai, auth, chess960, games, lc0, players};
+use crate::{ai, auth, chess960, games, lc0, pairings, players};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
 use utoipa::OpenApi;
@@ -31,6 +31,8 @@ impl Modify for SecurityAddon {
         players::find_player_by_id,
         players::update_player,
         players::delete_player,
+        players::get_preferences,
+        players::put_preferences,
 
         // Game endpoints
         games::create_game,
@@ -44,9 +46,13 @@ impl Modify for SecurityAddon {
         auth::login,
         auth::register,
 
+        // Tournament pairing (BE-135)
+        pairings::build_pairing_round,
+
         // AI suggestion endpoints
         ai::get_ai_suggestion,
         ai::analyze_position,
+        ai::ai_health,
 
         // Lc0 endpoints (BE-132)
         lc0::lc0_analyze,
@@ -110,6 +116,7 @@ impl Modify for SecurityAddon {
     tags(
         (name = "Players", description = "Player management operations"),
         (name = "Games", description = "Game management operations"),
+        (name = "Tournaments", description = "Tournament and Swiss pairing operations"),
         (name = "Authentication", description = "Authentication operations"),
         (name = "AI", description = "AI suggestion operations"),
         (name = "Chess960", description = "Chess960 starting-position library"),

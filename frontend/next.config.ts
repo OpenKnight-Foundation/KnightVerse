@@ -31,6 +31,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Emit a self-contained `.next/standalone` server so the Docker image
+  // (frontend/Dockerfile) can run `node server.js` without a full node_modules.
+  output: "standalone",
   images: {
     unoptimized: true,
   },

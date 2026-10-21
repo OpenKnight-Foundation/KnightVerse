@@ -227,7 +227,10 @@ impl GameService {
         let now = Utc::now();
         let game_id = Uuid::new_v4();
 
-        let now_fixed = now.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+        let now_fixed = now
+            .with_timezone(&chrono::FixedOffset::east_opt(0).ok_or_else(|| {
+                ApiError::BadRequest("Invalid UTC offset".to_string())
+            })?);
         let active_model = game::ActiveModel {
             id: Set(game_id),
             white_player: Set(creator_id),
@@ -412,7 +415,10 @@ impl GameService {
             chess::PgnGameResult::Ongoing => None,
         };
 
-        let now_fixed = now.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+        let now_fixed = now
+            .with_timezone(&chrono::FixedOffset::east_opt(0).ok_or_else(|| {
+                ApiError::BadRequest("Invalid UTC offset".to_string())
+            })?);
         let active_model = game::ActiveModel {
             id: Set(game_id),
             white_player: Set(Uuid::nil()),
@@ -626,7 +632,7 @@ impl GameService {
         if conditions.is_empty() {
             None
         } else {
-            Some(conditions.into_iter().reduce(|acc, c| acc.add(c)).unwrap())
+            conditions.into_iter().reduce(|acc, c| acc.add(c))
         }
     }
 

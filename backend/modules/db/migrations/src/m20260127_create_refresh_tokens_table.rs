@@ -96,6 +96,7 @@ enum RefreshTokens {
 
 #[derive(Iden)]
 enum Players {
+    #[iden = "player"]
     Table,
     Id,
 }

@@ -24,30 +24,8 @@ impl MigrationTrait for Migration {
         // Wait, the previous migration added `ALTER TABLE "game" ADD CONSTRAINT "check_game_result" CHECK ("result" IN ('white', 'black', 'draw'))`.
         // If result is NULL, `NULL IN (...)` is NULL, which passes. So we don't need to drop the constraint for NULL support.
 
-        // 3. Create composite indexes
-        // idx_games_white_player_created_at_id: (white_player, created_at DESC, id DESC)
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_games_white_player_created_at_id")
-                    .table((Smdb, Game::Table))
-                    .col(Game::WhitePlayer)
-                    .col(Game::CreatedAt)
-                    .col(Game::Id)
-                    .to_owned(),
-            )
-            .await?;
-
-        // sea-orm-migration doesn't natively support DESC in Index::create() builder easily without raw SQL or specific backend features in some versions.
-        // But let's check if we can do it. Use raw SQL for safety and precision regarding DESC order which is critical for optimization.
-        // The builder above creates ASC by default.
-
-        // Let's drop the index I just created (if it was created in a real run, but here I am writing the script).
-        // Actually, I will just use raw SQL for the indexes to ensure DESC ordering.
-
-        // Drop the index I defined above in the builder pattern? No, I'll just replace the builder call with raw SQL.
-
-        // Re-doing step 3 with Raw SQL for DESC support
+        // 3. Create composite indexes with DESC ordering (raw SQL: the index
+        //    builder can't express per-column DESC).
         manager
             .get_connection()
             .execute_unprepared(

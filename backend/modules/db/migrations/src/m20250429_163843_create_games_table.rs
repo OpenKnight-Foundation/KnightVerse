@@ -117,7 +117,7 @@ impl MigrationTrait for Migration {
         // Create GIN index using raw SQL
         manager
             .get_connection()
-            .execute_unprepared(r#"CREATE INDEX "idx_games_pgn_gin" ON "game" USING GIN ("pgn")"#)
+            .execute_unprepared(r#"CREATE INDEX "idx_games_pgn_gin" ON "smdb"."game" USING GIN ("pgn")"#)
             .await?;
 
         println!("Game table created successfully.");
@@ -144,7 +144,7 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .get_connection()
-            .execute_unprepared(r#"DROP INDEX IF EXISTS "idx_games_pgn_gin""#)
+            .execute_unprepared(r#"DROP INDEX IF EXISTS "smdb"."idx_games_pgn_gin""#)
             .await?;
 
         // Drop Foreign Keys

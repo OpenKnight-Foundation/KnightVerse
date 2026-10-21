@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .modify_column(ColumnDef::new(Game::Result).string().null())
                     .to_owned(),
             )
@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("idx_games_white_player_created_at_id")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .col(Game::WhitePlayer)
                     .col(Game::CreatedAt)
                     .col(Game::Id)
@@ -51,14 +51,14 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(
-                r#"CREATE INDEX "idx_games_white_player_created_at_id" ON "game" ("white_player", "created_at" DESC, "id" DESC)"#
+                r#"CREATE INDEX "idx_games_white_player_created_at_id" ON "smdb"."game" ("white_player", "created_at" DESC, "id" DESC)"#
             )
             .await?;
 
         manager
             .get_connection()
             .execute_unprepared(
-                r#"CREATE INDEX "idx_games_black_player_created_at_id" ON "game" ("black_player", "created_at" DESC, "id" DESC)"#
+                r#"CREATE INDEX "idx_games_black_player_created_at_id" ON "smdb"."game" ("black_player", "created_at" DESC, "id" DESC)"#
             )
             .await?;
 
@@ -69,12 +69,12 @@ impl MigrationTrait for Migration {
         // 1. Drop indexes
         manager
             .get_connection()
-            .execute_unprepared(r#"DROP INDEX IF EXISTS "idx_games_white_player_created_at_id""#)
+            .execute_unprepared(r#"DROP INDEX IF EXISTS "smdb"."idx_games_white_player_created_at_id""#)
             .await?;
 
         manager
             .get_connection()
-            .execute_unprepared(r#"DROP INDEX IF EXISTS "idx_games_black_player_created_at_id""#)
+            .execute_unprepared(r#"DROP INDEX IF EXISTS "smdb"."idx_games_black_player_created_at_id""#)
             .await?;
 
         // 2. Revert `result` to NOT NULL (this might fail if there are active games with NULL result, but for `down` it is expected to try)
@@ -82,7 +82,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .modify_column(ColumnDef::new(Game::Result).string().not_null())
                     .to_owned(),
             )
@@ -101,3 +101,7 @@ enum Game {
     CreatedAt,
     Id,
 }
+
+/// Postgres schema that holds the `game` table (see db_entity::game).
+#[derive(DeriveIden)]
+struct Smdb;

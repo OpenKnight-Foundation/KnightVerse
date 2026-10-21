@@ -54,7 +54,7 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_game_move_game_id")
                             .from(GameMove::Table, GameMove::GameId)
-                            .to(Game::Table, Game::Id)
+                            .to((Smdb, Game::Table), Game::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),
                     )

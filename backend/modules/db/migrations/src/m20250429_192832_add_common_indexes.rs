@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .if_not_exists()
                     .name("idx_game_white_player")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .col(Game::WhitePlayer)
                     .to_owned(),
             )
@@ -21,7 +21,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .if_not_exists()
                     .name("idx_game_black_player")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .col(Game::BlackPlayer)
                     .to_owned(),
             )
@@ -49,7 +49,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .if_not_exists()
                     .name("idx_game_started_at")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .col(Game::StartedAt)
                     .to_owned(),
             )
@@ -63,7 +63,7 @@ impl MigrationTrait for Migration {
             .drop_index(
                 Index::drop()
                     .name("idx_game_white_player")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .to_owned(),
             )
             .await?;
@@ -71,7 +71,7 @@ impl MigrationTrait for Migration {
             .drop_index(
                 Index::drop()
                     .name("idx_game_black_player")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .to_owned(),
             )
             .await?;
@@ -79,7 +79,7 @@ impl MigrationTrait for Migration {
             .drop_index(
                 Index::drop()
                     .name("idx_game_pgn")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .to_owned(),
             )
             .await?;
@@ -95,7 +95,7 @@ impl MigrationTrait for Migration {
             .drop_index(
                 Index::drop()
                     .name("idx_game_started_at")
-                    .table(Game::Table)
+                    .table((Smdb, Game::Table))
                     .to_owned(),
             )
             .await?;
@@ -123,3 +123,7 @@ enum Player {
     Table,
     Username,
 }
+
+/// Postgres schema that holds the `game` table (see db_entity::game).
+#[derive(DeriveIden)]
+struct Smdb;

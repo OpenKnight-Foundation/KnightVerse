@@ -82,6 +82,14 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
         continue-on-error: true
 
+      # The db crate's schema tests run whenever DATABASE_URL is set, so the
+      # fresh Postgres service needs the tables before `cargo test` starts.
+      - name: Run database migrations
+        working-directory: backend
+        run: cargo run -p migration -- up
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/knightverse_test
+
       - name: Run all backend tests
         working-directory: backend
         run: cargo test --workspace

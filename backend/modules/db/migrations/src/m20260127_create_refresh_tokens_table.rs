@@ -54,21 +54,27 @@ impl MigrationTrait for Migration {
                             .to(Players::Table, Players::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
-                    .index(
-                        Index::create()
-                            .name("idx_refresh_tokens_family_id")
-                            .col(RefreshTokens::FamilyId),
-                    )
-                    .index(
-                        Index::create()
-                            .name("idx_refresh_tokens_player_id")
-                            .col(RefreshTokens::PlayerId),
-                    )
-                    .index(
-                        Index::create()
-                            .name("idx_refresh_tokens_token_hash")
-                            .col(RefreshTokens::TokenHash),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Postgres has no inline INDEX clause in CREATE TABLE, so the lookup
+        // indexes are separate statements (token_hash is already UNIQUE).
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_family_id")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::FamilyId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_player_id")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::PlayerId)
                     .to_owned(),
             )
             .await
@@ -96,7 +102,9 @@ enum RefreshTokens {
 
 #[derive(Iden)]
 enum Players {
-    #[iden = "player"]
+    // player_id is the integer account id (refresh_token::Model::player_id is
+    // i32), so it references users(id), not the UUID-keyed player table.
+    #[iden = "users"]
     Table,
     Id,
 }

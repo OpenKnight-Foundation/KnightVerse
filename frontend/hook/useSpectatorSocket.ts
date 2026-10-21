@@ -36,11 +36,21 @@ export interface SpectatorGameState {
   result?: "1-0" | "0-1" | "1/2-1/2";
 }
 
+export interface SpectatorChatMessage {
+  id: string;
+  sender: string;
+  text: string;
+  timestamp: number;
+}
+
 interface UseSpectatorSocketReturn {
   status: SpectatorStatus;
   gameState: SpectatorGameState | null;
   disconnect: () => void;
   reconnect: () => void;
+  chatMessages: SpectatorChatMessage[];
+  chatError: string | null;
+  sendChatMessage: (text: string) => void;
 }
 
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -73,6 +83,8 @@ function normalizeGameOverReason(reason: string): SpectatorGameState["status"] {
 export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketReturn {
   const [status, setStatus] = useState<SpectatorStatus>("idle");
   const [gameState, setGameState] = useState<SpectatorGameState | null>(null);
+  const [chatMessages, setChatMessages] = useState<SpectatorChatMessage[]>([]);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -146,7 +158,9 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
               | ({ type: "move"; fen?: string } & SpectatorMove)
               | { type: "clock"; whiteTime: number; blackTime: number }
               | { type: "spectator_count"; count: number }
-              | { type: "game_over"; result: "1-0" | "0-1" | "1/2-1/2"; reason: string };
+              | { type: "game_over"; result: "1-0" | "0-1" | "1/2-1/2"; reason: string }
+              | { type: "chat"; id: string; sender: string; text: string; timestamp: number }
+              | { type: "chat_rejected"; reason: string };
 
             switch (data.type) {
               case "sync": {
@@ -253,6 +267,22 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
                 );
                 break;
               }
+              case "chat": {
+                setChatMessages((previousMessages) => [
+                  ...previousMessages,
+                  {
+                    id: data.id,
+                    sender: data.sender,
+                    text: data.text,
+                    timestamp: data.timestamp,
+                  },
+                ]);
+                break;
+              }
+              case "chat_rejected": {
+                setChatError(data.reason);
+                break;
+              }
             }
           } catch {
             setStatus("error");
@@ -339,6 +369,19 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket, gameId]);
 
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      const trimmedText = text.trim();
+      if (!trimmedText || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      setChatError(null);
+      wsRef.current.send(JSON.stringify({ type: "chat", text: trimmedText }));
+    },
+    [],
+  );
+
   useEffect(() => {
     const handleOnline = () => {
       isOnlineRef.current = true;
@@ -396,5 +439,8 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
     gameState,
     disconnect,
     reconnect,
+    chatMessages,
+    chatError,
+    sendChatMessage,
   };
 }

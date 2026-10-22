@@ -2,7 +2,7 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{login, logout, logout_all, refresh, register};
+use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -426,6 +426,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(login)
                     .service(register)
                     .service(refresh)
+                    .service(issue_ws_ticket)
                     .service(logout)
                     .service(logout_all),
             )
@@ -436,6 +437,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(login)
                     .service(register)
                     .service(refresh)
+                    .service(issue_ws_ticket)
                     .service(logout)
                     .service(logout_all),
             )
@@ -449,16 +451,29 @@ pub async fn main() -> std::io::Result<()> {
                     ))
                     // BE-135: Swiss round generation, previously unreachable
                     // because nothing depended on the `pairing` crate.
+                    .route("", web::get().to(crate::tournaments::list_tournaments))
+                    .route("", web::post().to(crate::tournaments::create_tournament))
                     .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
                     .route(
                         "/{id}/register",
-                        web::post().to(|path: web::Path<String>| async move {
-                            HttpResponse::Ok().json(serde_json::json!({
-                                "status": "registered",
-                                "tournament_id": path.into_inner(),
-                                "message": "Tournament registration successful"
-                            }))
-                        }),
+                        web::post().to(crate::tournaments::register_for_tournament),
+                    ),
+            )
+            // Canonical v1 tournament routes. Keep the /api/v1 aliases above
+            // for clients already using that route shape.
+            .service(
+                web::scope("/v1/tournaments")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .route("", web::get().to(crate::tournaments::list_tournaments))
+                    .route("", web::post().to(crate::tournaments::create_tournament))
+                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
+                    .route(
+                        "/{id}/register",
+                        web::post().to(crate::tournaments::register_for_tournament),
                     ),
             )
             // Escrow routes (with Idempotency protection)

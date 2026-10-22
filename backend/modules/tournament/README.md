@@ -11,6 +11,19 @@ A professional implementation of the Swiss pairing system for chess tournaments,
 - **Repeat Prevention**: Ensures players don't face the same opponent twice
 - **Comprehensive Testing**: Full test suite with example tournament scenarios
 
+## KnightVerse API
+
+The authenticated API exposes persisted tournament operations:
+
+- `GET /api/v1/tournaments` lists tournaments.
+- `POST /api/v1/tournaments` creates a tournament with a `name` and optional
+  `format` (`single_elimination`, `double_elimination`, or `round_robin`).
+- `POST /api/v1/tournaments/{id}/register` registers the authenticated player.
+
+The database prevents a player from registering twice for the same tournament.
+Once at least two players have registered, the API generates and persists the
+bracket using this crate's `BracketService`.
+
 ## Core Components
 
 ### Player

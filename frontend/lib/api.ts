@@ -172,6 +172,7 @@ export const endpoints = {
     register: () => `${API_BASE}/v1/auth/register`,
     logout: () => `${API_BASE}/v1/auth/logout`,
     refresh: () => `${API_BASE}/v1/auth/refresh`,
+    wsTicket: () => `${API_BASE}/v1/auth/ws-ticket`,
     sessions: () => `${API_BASE}/v1/auth/sessions`,
     revokeSession: (id: string) =>
       `${API_BASE}/v1/auth/sessions/${encodeURIComponent(id)}`,
@@ -197,7 +198,7 @@ export const endpoints = {
     ws: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}`,
     spectate: (gameId: string) =>
-      `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/spectate`,
+      `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}?role=spectator`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
   },
 
@@ -260,3 +261,34 @@ export const endpoints = {
     submit: () => `${API_BASE}/v1/puzzles/submit`,
   },
 } as const;
+
+/**
+ * Request a fresh, short-lived single-use ticket before opening a browser
+ * WebSocket (which cannot set an Authorization header).
+ */
+export async function requestWebSocketTicket(accessToken?: string | null): Promise<string> {
+  const token =
+    accessToken ??
+    (typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null);
+  if (!token) {
+    throw new Error("Sign in before connecting to a game socket");
+  }
+
+  const response = await fetch(endpoints.auth.wsTicket(), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`WebSocket ticket request failed (${response.status})`);
+  }
+
+  const body: unknown = await response.json();
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as Record<string, unknown>).ticket !== "string"
+  ) {
+    throw new Error("WebSocket ticket response was invalid");
+  }
+  return (body as { ticket: string }).ticket;
+}

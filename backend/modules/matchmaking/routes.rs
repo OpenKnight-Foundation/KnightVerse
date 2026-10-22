@@ -284,11 +284,17 @@ async fn get_match(
 ) -> impl Responder {
     let match_id = path.into_inner();
 
-    if let Some(match_data) = service.get_match(match_id) {
-        HttpResponse::Ok().json(match_data)
-    } else {
-        HttpResponse::NotFound().json(serde_json::json!({
+    match service.get_match(match_id).await {
+        Ok(Some(match_data)) => HttpResponse::Ok().json(match_data),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
             "status": "Match not found"
-        }))
+        })),
+        Err(e) => {
+            error!("Failed to retrieve match {}: {}", match_id, e);
+            HttpResponse::ServiceUnavailable().json(ErrorResponse {
+                status: "error".to_string(),
+                error: "internal_error".to_string(),
+            })
+        }
     }
 }

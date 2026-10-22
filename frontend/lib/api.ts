@@ -53,6 +53,28 @@ export const IPFS_GATEWAY = withDefault(
   "https://gateway.pinata.cloud",
 );
 
+/** Staking / Escrow / NFT / Puzzle Contract IDs */
+export const CONTRACT_STAKING = withDefault(
+  process.env.NEXT_PUBLIC_STAKING_ESCROW_ADDRESS,
+  "",
+);
+export const CONTRACT_GAME_ESCROW = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_GAME_ESCROW,
+  "",
+);
+export const CONTRACT_ELO_REGISTRY = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_ELO_REGISTRY,
+  "",
+);
+export const CONTRACT_TOURNAMENT = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_TOURNAMENT,
+  "",
+);
+export const CONTRACT_AI_NFT = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_AI_NFT,
+  "",
+);
+
 // ── Retry / Backoff (#FE-75) ─────────────────────────────────────────────────
 
 /** Options that control retry behaviour for `fetchWithRetry`. */

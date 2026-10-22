@@ -3,34 +3,38 @@ use chrono::Utc;
 use deadpool_redis::Pool;
 use redis::AsyncCommands;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
 
 use super::models::*;
 
+const REQUEST_QUEUE_INDEX_KEY: &str = "matchmaking:request_queue";
 const ELO_RANGE_INCREMENT_PER_5_SECONDS: u32 = 25;
 const INITIAL_ELO_RANGE: u32 = 50;
 const MAX_ELO_RANGE: u32 = 300;
 const DEFAULT_ESTIMATED_WAIT_TIME: Duration = Duration::from_secs(60);
 /// How long a matched request id keeps resolving to its match id via `/status`.
 const MATCHED_REQUEST_TTL_SECS: u64 = 600;
+/// Keep match data available across backend restarts and deployments.
+const ACTIVE_MATCH_TTL_SECS: u64 = 24 * 60 * 60;
 
 fn matched_request_key(request_id: Uuid) -> String {
     format!("matchmaking:matched:{}", request_id)
 }
 
+fn active_match_key(match_id: Uuid) -> String {
+    format!("matchmaking:match:{}", match_id)
+}
+
 #[derive(Clone)]
 pub struct MatchmakingService {
     redis_pool: Pool,
-    active_matches: Arc<Mutex<HashMap<Uuid, Match>>>,
 }
 
 impl MatchmakingService {
     pub fn new(redis_pool: Pool) -> Self {
         Self {
             redis_pool,
-            active_matches: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -168,6 +172,17 @@ impl MatchmakingService {
             .await
             .map_err(|e| format!("Redis EXPIRE failed: {}", e))?;
 
+        conn.hset::<_, _, _, ()>(
+            REQUEST_QUEUE_INDEX_KEY,
+            request.id.to_string(),
+            &key,
+        )
+        .await
+        .map_err(|e| format!("Redis HSET request queue index failed: {}", e))?;
+        conn.expire::<_, ()>(REQUEST_QUEUE_INDEX_KEY, 3600)
+            .await
+            .map_err(|e| format!("Redis EXPIRE request queue index failed: {}", e))?;
+
         Ok(())
     }
 
@@ -185,6 +200,16 @@ impl MatchmakingService {
         conn.hset::<_, _, _, ()>(key, invite_address, &value)
             .await
             .map_err(|e| format!("Redis HSET failed: {}", e))?;
+        conn.hset::<_, _, _, ()>(
+            REQUEST_QUEUE_INDEX_KEY,
+            request.id.to_string(),
+            key,
+        )
+        .await
+        .map_err(|e| format!("Redis HSET request queue index failed: {}", e))?;
+        conn.expire::<_, ()>(REQUEST_QUEUE_INDEX_KEY, 3600)
+            .await
+            .map_err(|e| format!("Redis EXPIRE request queue index failed: {}", e))?;
 
         Ok(())
     }
@@ -221,6 +246,7 @@ impl MatchmakingService {
         // This prevents race conditions where multiple players try to accept the same invite
         let lua_script = r#"
             local key = KEYS[1]
+            local request_index = KEYS[2]
             local target_request_id = ARGV[1]
             
             local invites = redis.call('HGETALL', key)
@@ -232,6 +258,7 @@ impl MatchmakingService {
                 
                 if invite.id == target_request_id then
                     redis.call('HDEL', key, invite_address)
+                    redis.call('HDEL', request_index, target_request_id)
                     return invite_json
                 end
             end
@@ -241,6 +268,7 @@ impl MatchmakingService {
 
         let result: Option<String> = redis::Script::new(lua_script)
             .key(key)
+            .key(REQUEST_QUEUE_INDEX_KEY)
             .arg(inviter_request_id.to_string())
             .invoke_async(&mut conn)
             .await
@@ -262,11 +290,7 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[inviter_request_id], match_id)
                     .await?;
-                let mut active_matches = self
-                    .active_matches
-                    .lock()
-                    .map_err(|_| "active_matches lock poisoned".to_string())?;
-                active_matches.insert(match_id, new_match);
+                self.store_match(&mut conn, &new_match).await?;
 
                 return Ok(Some(MatchmakingResponse {
                     status: "Match created".to_string(),
@@ -282,25 +306,24 @@ impl MatchmakingService {
     pub async fn cancel_request(&self, request_id: Uuid) -> Result<bool, String> {
         let mut conn = self.get_redis_connection().await?;
 
-        // Try to remove from rated free queue
-        if self
-            .remove_from_queue(&mut conn, &QueueType::RatedFree.redis_key(), request_id)
-            .await?
-        {
-            return Ok(true);
+        let indexed_queue: Option<String> = conn
+            .hget(REQUEST_QUEUE_INDEX_KEY, request_id.to_string())
+            .await
+            .map_err(|e| format!("Redis HGET request queue index failed: {}", e))?;
+        if let Some(queue_key) = indexed_queue {
+            if queue_key == QueueType::Private.redis_key() {
+                let removed = self.remove_private_invite(&mut conn, request_id).await?;
+                if !removed {
+                    conn.hdel::<_, _, ()>(REQUEST_QUEUE_INDEX_KEY, request_id.to_string())
+                        .await
+                        .map_err(|e| format!("Redis HDEL request queue index failed: {}", e))?;
+                }
+                return Ok(removed);
+            }
+            return self
+                .remove_from_queue(&mut conn, &queue_key, request_id)
+                .await;
         }
-
-        // Try to remove from casual unrated queue
-        if self
-            .remove_from_queue(&mut conn, &QueueType::CasualUnrated.redis_key(), request_id)
-            .await?
-        {
-            return Ok(true);
-        }
-
-        // Note: For staked queues, we'd need to check all possible token/amount combinations,
-        // but in practice, we'd track active requests in a separate index for efficient cancellation
-        // For now, we'll implement a basic check that could be optimized
 
         // Try to remove from private invites
         let invites: HashMap<String, String> = conn
@@ -314,6 +337,9 @@ impl MatchmakingService {
                     conn.hdel::<_, _, ()>("matchmaking:invites", &invite_address)
                         .await
                         .map_err(|e| format!("Redis HDEL failed: {}", e))?;
+                    conn.hdel::<_, _, ()>(REQUEST_QUEUE_INDEX_KEY, request_id.to_string())
+                        .await
+                        .map_err(|e| format!("Redis HDEL request queue index failed: {}", e))?;
                     return Ok(true);
                 }
             }
@@ -322,29 +348,59 @@ impl MatchmakingService {
         Ok(false)
     }
 
+    async fn remove_private_invite(
+        &self,
+        conn: &mut deadpool_redis::Connection,
+        request_id: Uuid,
+    ) -> Result<bool, String> {
+        let lua_script = r#"
+            local invites = redis.call('HGETALL', KEYS[1])
+            for i = 1, #invites, 2 do
+                local request = cjson.decode(invites[i + 1])
+                if request.id == ARGV[1] then
+                    redis.call('HDEL', KEYS[1], invites[i])
+                    redis.call('HDEL', KEYS[2], ARGV[1])
+                    return 1
+                end
+            end
+            return 0
+        "#;
+        let removed: i32 = redis::Script::new(lua_script)
+            .key("matchmaking:invites")
+            .key(REQUEST_QUEUE_INDEX_KEY)
+            .arg(request_id.to_string())
+            .invoke_async(conn)
+            .await
+            .map_err(|e| format!("Redis Lua script failed: {}", e))?;
+        Ok(removed == 1)
+    }
+
     async fn remove_from_queue(
         &self,
         conn: &mut deadpool_redis::Connection,
         key: &str,
         request_id: Uuid,
     ) -> Result<bool, String> {
-        let members: Vec<String> = conn
-            .zrange(key, 0, -1)
+        let lua_script = r#"
+            local members = redis.call('ZRANGE', KEYS[1], 0, -1)
+            for _, member in ipairs(members) do
+                local request = cjson.decode(member)
+                if request.id == ARGV[1] then
+                    redis.call('ZREM', KEYS[1], member)
+                    redis.call('HDEL', KEYS[2], ARGV[1])
+                    return 1
+                end
+            end
+            return 0
+        "#;
+        let removed: i32 = redis::Script::new(lua_script)
+            .key(key)
+            .key(REQUEST_QUEUE_INDEX_KEY)
+            .arg(request_id.to_string())
+            .invoke_async(conn)
             .await
-            .map_err(|e| format!("Redis ZRANGE failed: {}", e))?;
-
-        for member in members {
-            if let Ok(request) = MatchRequest::from_redis_value(&member) {
-                if request.id == request_id {
-                    conn.zrem::<_, _, ()>(key, &member)
-                        .await
-                        .map_err(|e| format!("Redis ZREM failed: {}", e))?;
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
+            .map_err(|e| format!("Redis Lua script failed: {}", e))?;
+        Ok(removed == 1)
     }
 
     /// Records which match each request ended up in, so a player who was
@@ -365,6 +421,22 @@ impl MatchmakingService {
             .map_err(|e| format!("Redis SETEX failed: {}", e))?;
         }
         Ok(())
+    }
+
+    async fn store_match(
+        &self,
+        conn: &mut deadpool_redis::Connection,
+        game_match: &Match,
+    ) -> Result<(), String> {
+        let value = serde_json::to_string(game_match)
+            .map_err(|e| format!("Match serialization error: {}", e))?;
+        conn.set_ex::<_, _, ()>(
+            active_match_key(game_match.id),
+            value,
+            ACTIVE_MATCH_TTL_SECS,
+        )
+        .await
+        .map_err(|e| format!("Redis SETEX active match failed: {}", e))
     }
 
     /// The match a request was paired into, if it has been matched.
@@ -478,6 +550,7 @@ impl MatchmakingService {
         // This prevents race conditions where two players try to match with the same opponent
         let lua_script = r#"
             local key = KEYS[1]
+            local request_index = KEYS[2]
             local player_elo = tonumber(ARGV[1])
             local search_range = tonumber(ARGV[2])
             
@@ -492,6 +565,7 @@ impl MatchmakingService {
                 
                 if elo_diff <= search_range then
                     redis.call('ZREM', key, member)
+                    redis.call('HDEL', request_index, opponent.id)
                     return member
                 end
                 ::continue::
@@ -502,6 +576,7 @@ impl MatchmakingService {
 
         let result: Option<String> = redis::Script::new(lua_script)
             .key(key)
+            .key(REQUEST_QUEUE_INDEX_KEY)
             .arg(player_elo)
             .arg(search_range)
             .invoke_async(&mut conn)
@@ -523,11 +598,7 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self
-                    .active_matches
-                    .lock()
-                    .map_err(|_| "active_matches lock poisoned".to_string())?;
-                active_matches.insert(match_id, new_match);
+                self.store_match(&mut conn, &new_match).await?;
 
                 return Ok(Some(MatchmakingResponse {
                     status: "Match found".to_string(),
@@ -547,15 +618,26 @@ impl MatchmakingService {
         let mut conn = self.get_redis_connection().await?;
         let key = QueueType::CasualUnrated.redis_key();
 
-        // Pop the oldest player from queue (FIFO)
-        let result: Vec<(String, f64)> = conn
-            .zpopmin(&key, 1)
+        // Remove the queue member and its cancellation index atomically.
+        let lua_script = r#"
+            local members = redis.call('ZRANGE', KEYS[1], 0, 0)
+            if #members == 0 then
+                return nil
+            end
+            local member = members[1]
+            local request = cjson.decode(member)
+            redis.call('ZREM', KEYS[1], member)
+            redis.call('HDEL', KEYS[2], request.id)
+            return member
+        "#;
+        let result: Option<String> = redis::Script::new(lua_script)
+            .key(&key)
+            .key(REQUEST_QUEUE_INDEX_KEY)
+            .invoke_async(&mut conn)
             .await
-            .map_err(|e| format!("Redis ZPOPMIN failed: {}", e))?;
+            .map_err(|e| format!("Redis Lua script failed: {}", e))?;
 
-        let result = result.into_iter().next();
-
-        if let Some((member, _score)) = result {
+        if let Some(member) = result {
             if let Ok(opponent_request) = MatchRequest::from_redis_value(&member) {
                 // Ensure we only match with other CasualUnrated players
                 if !matches!(opponent_request.queue_type, QueueType::CasualUnrated) {
@@ -565,6 +647,13 @@ impl MatchmakingService {
                     conn.zadd::<_, _, _, ()>(&key, &member, score)
                         .await
                         .map_err(|e| format!("Redis ZADD failed: {}", e))?;
+                    conn.hset::<_, _, _, ()>(
+                        REQUEST_QUEUE_INDEX_KEY,
+                        opponent_request.id.to_string(),
+                        &key,
+                    )
+                    .await
+                    .map_err(|e| format!("Redis HSET request queue index failed: {}", e))?;
                     return Ok(None);
                 }
 
@@ -581,11 +670,7 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self
-                    .active_matches
-                    .lock()
-                    .map_err(|_| "active_matches lock poisoned".to_string())?;
-                active_matches.insert(match_id, new_match);
+                self.store_match(&mut conn, &new_match).await?;
 
                 return Ok(Some(MatchmakingResponse {
                     status: "Match found".to_string(),
@@ -626,6 +711,7 @@ impl MatchmakingService {
         // This prevents race conditions where two players try to match with the same opponent
         let lua_script = r#"
             local key = KEYS[1]
+            local request_index = KEYS[2]
             local player_elo = tonumber(ARGV[1])
             local search_range = tonumber(ARGV[2])
             local expected_token = ARGV[3]
@@ -647,6 +733,7 @@ impl MatchmakingService {
                         local elo_diff = math.abs(opponent.player.elo - player_elo)
                         if elo_diff <= search_range then
                             redis.call('ZREM', key, member)
+                            redis.call('HDEL', request_index, opponent.id)
                             return member
                         end
                     end
@@ -658,6 +745,7 @@ impl MatchmakingService {
 
         let result: Option<String> = redis::Script::new(lua_script)
             .key(&key)
+            .key(REQUEST_QUEUE_INDEX_KEY)
             .arg(player_elo)
             .arg(search_range)
             .arg(token)
@@ -687,6 +775,13 @@ impl MatchmakingService {
                     conn.zadd::<_, _, _, ()>(&key, &opponent_json, score)
                         .await
                         .map_err(|e| format!("Redis ZADD failed: {}", e))?;
+                    conn.hset::<_, _, _, ()>(
+                        REQUEST_QUEUE_INDEX_KEY,
+                        opponent_request.id.to_string(),
+                        &key,
+                    )
+                    .await
+                    .map_err(|e| format!("Redis HSET request queue index failed: {}", e))?;
                     return Err("Both players must have verified escrow deposits".to_string());
                 }
 
@@ -710,11 +805,7 @@ impl MatchmakingService {
 
                 self.remember_match(&mut conn, &[opponent_request.id, request.id], match_id)
                     .await?;
-                let mut active_matches = self
-                    .active_matches
-                    .lock()
-                    .map_err(|_| "active_matches lock poisoned".to_string())?;
-                active_matches.insert(match_id, new_match);
+                self.store_match(&mut conn, &new_match).await?;
 
                 return Ok(Some(MatchmakingResponse {
                     status: "Match found".to_string(),
@@ -800,12 +891,88 @@ impl MatchmakingService {
         Ok(())
     }
 
-    pub fn get_match(&self, match_id: Uuid) -> Option<Match> {
-        let active_matches = self.active_matches.lock().ok()?;
-        active_matches.get(&match_id).cloned()
+    pub async fn get_match(&self, match_id: Uuid) -> Result<Option<Match>, String> {
+        let mut conn = self.get_redis_connection().await?;
+        let value: Option<String> = conn
+            .get(active_match_key(match_id))
+            .await
+            .map_err(|e| format!("Redis GET active match failed: {}", e))?;
+        value
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|e| format!("Match deserialization error: {}", e))
+            })
+            .transpose()
     }
 }
 
 pub fn get_matchmaking_service(redis_pool: Pool) -> web::Data<MatchmakingService> {
     web::Data::new(MatchmakingService::new(redis_pool))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[actix_web::test]
+    async fn cancelling_a_staked_request_removes_it_from_its_queue() {
+        let redis_url = std::env::var("TEST_REDIS_URL")
+            .or_else(|_| std::env::var("REDIS_URL"))
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let pool = crate::redis::create_redis_pool(&redis_url)
+            .expect("valid Redis URL is required for matchmaking tests");
+        if pool.get().await.is_err() {
+            eprintln!("Skipping staked cancellation integration test: Redis is unavailable");
+            return;
+        }
+
+        let service = MatchmakingService::new(pool);
+        let request_id = Uuid::new_v4();
+        let token = format!("TEST-{}", Uuid::new_v4());
+        let queue_type = QueueType::RatedStaked {
+            token: token.clone(),
+            amount: 1,
+        };
+        let request = MatchRequest {
+            id: request_id,
+            player: Player {
+                wallet_address: "GTEST".to_string(),
+                elo: 1200,
+                join_time: Utc::now(),
+            },
+            queue_type: queue_type.clone(),
+            invite_address: None,
+            max_elo_diff: None,
+            stake_info: Some(StakeInfo {
+                token,
+                amount: 1,
+                escrow_signature: Some("test-signature".to_string()),
+            }),
+            time_control: TimeControl::default(),
+        };
+
+        service
+            .add_to_redis_queue(&request)
+            .await
+            .expect("staked request should be enqueued");
+        assert!(service
+            .cancel_request(request_id)
+            .await
+            .expect("cancellation should succeed"));
+
+        let mut conn = service
+            .get_redis_connection()
+            .await
+            .expect("Redis connection should remain available");
+        let queued_count: usize = conn
+            .zcard(queue_type.redis_key())
+            .await
+            .expect("queue should be readable");
+        let indexed_queue: Option<String> = conn
+            .hget(REQUEST_QUEUE_INDEX_KEY, request_id.to_string())
+            .await
+            .expect("request index should be readable");
+        assert_eq!(queued_count, 0);
+        assert_eq!(indexed_queue, None);
+    }
 }

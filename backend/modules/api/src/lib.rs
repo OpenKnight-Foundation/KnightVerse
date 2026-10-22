@@ -14,6 +14,7 @@ pub mod move_order;
 pub mod moderation;
 pub mod openapi;
 pub mod pairings;
+pub mod tournaments;
 pub mod players;
 pub mod rate_limiter;
 pub mod redis_broadcast;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { endpoints } from "@/lib/api";
+import { endpoints, requestWebSocketTicket } from "@/lib/api";
 import { debugLog } from "@/lib/debugLogger";
 
 export type ChessSocketStatus =
@@ -88,6 +88,8 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
   
   const wsRef = useRef<WebSocket | null>(null);
+  const createWebSocketRef = useRef<((attemptReconnect: boolean) => Promise<WebSocket | null>) | null>(null);
+  const connectionRequestIdRef = useRef(0);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -179,18 +181,27 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   const createWebSocket = useCallback(async (attemptReconnect = false) => {
     if (!gameId) return null;
 
+    const requestId = ++connectionRequestIdRef.current;
+    setStatus(attemptReconnect ? "reconnecting" : "connecting");
     try {
-      const wsUrl = endpoints.games.ws(gameId);
+      const ticket = await requestWebSocketTicket();
+      if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+        return null;
+      }
+      const baseSocketUrl = endpoints.games.ws(gameId);
+      const socketUrl = new URL(baseSocketUrl);
+      socketUrl.searchParams.set("ticket", ticket);
+      const wsUrl = socketUrl.toString();
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       if (attemptReconnect) {
         setStatus("reconnecting");
-        debugLog(`[WebSocket] Attempting reconnection to ${wsUrl}`);
+        debugLog(`[WebSocket] Attempting reconnection to ${baseSocketUrl}`);
       } else {
         setStatus("connecting");
-        debugLog(`[WebSocket] Connecting to ${wsUrl} for game ${gameId}`);
+        debugLog(`[WebSocket] Connecting to ${baseSocketUrl} for game ${gameId}`);
       }
 
       ws.onopen = () => {
@@ -312,11 +323,22 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
       return ws;
     } catch (error) {
-      console.error("[WebSocket] Failed to create:", error);
+      if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+        return null;
+      }
+      console.error("[WebSocket] Failed to obtain ticket or create socket:", error);
       setStatus("error");
+      if (!isManualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        const delay = calculateReconnectDelay(reconnectAttemptsRef.current);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttemptsRef.current++;
+          void createWebSocketRef.current?.(true);
+        }, delay);
+      }
       return null;
     }
   }, [gameId, calculateReconnectDelay, flushQueuedMoves]);
+  createWebSocketRef.current = createWebSocket;
 
   /**
    * Sends a chess move to the server.
@@ -362,6 +384,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
    */
   const disconnect = useCallback(() => {
     isManualDisconnectRef.current = true;
+    connectionRequestIdRef.current++;
     clearReconnectTimeout();
     
     if (wsRef.current) {
@@ -380,15 +403,16 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
    * Closes the existing connection and initiates a new one.
    */
   const reconnect = useCallback(() => {
-    isManualDisconnectRef.current = false;
+    isManualDisconnectRef.current = true;
     clearReconnectTimeout();
     
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
-    
+
     reconnectAttemptsRef.current = 0;
+    isManualDisconnectRef.current = false;
     debugLog("[WebSocket] Manual reconnection initiated");
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket]);
@@ -441,6 +465,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     let active = true;
     setOpponentResigned(false);
     if (gameId) {
+      isManualDisconnectRef.current = false;
       createWebSocket().then(ws => {
         if (!active && ws) {
           ws.close();

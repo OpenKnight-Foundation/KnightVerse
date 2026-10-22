@@ -10,6 +10,11 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // Exclude Playwright e2e specs — those run via `npx playwright test`
     exclude: ["e2e/**", "node_modules/**"],
+    server: {
+      deps: {
+        inline: ["@stellar/stellar-sdk", "@stellar/js-xdr"],
+      },
+    },
   },
   resolve: {
     alias: {

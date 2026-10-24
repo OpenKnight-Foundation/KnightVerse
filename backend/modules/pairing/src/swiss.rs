@@ -77,7 +77,10 @@ impl SwissPairer {
             if !config.avoid_recent_opponents {
                 return false;
             }
-            player_a.has_played_against(&candidate.id) || paired_ids.contains(&candidate.id)
+            // History may be recorded on either player, so check both sides.
+            player_a.has_played_against(&candidate.id)
+                || candidate.has_played_against(&player_a.id)
+                || paired_ids.contains(&candidate.id)
         };
 
         match remaining.iter().position(|(_, player)| !forbidden(player)) {
@@ -229,7 +232,11 @@ mod tests {
     fn rematches_are_allowed_when_avoidance_is_disabled() {
         let a = player("a", 2000);
         let b = player("b", 1900).with_opponents(vec![a.id]);
-        let round = build_round(vec![a, b], PairingConfig::default());
+        let config = PairingConfig {
+            avoid_recent_opponents: false,
+            ..PairingConfig::default()
+        };
+        let round = build_round(vec![a, b], config);
         assert_eq!(round.pairings.len(), 1);
     }
 

@@ -28,6 +28,7 @@ import {
   qualityFromDrillResult,
   sm2Review,
 } from "@/lib/spacedRepetition";
+import { useAuth } from "@/context/authContext";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -51,6 +52,11 @@ function fenAfterMoves(moves: string[]): string {
 
 export default function OpeningsPage() {
   const { addToast } = useToast();
+  const { accessToken, refreshToken, logout } = useAuth();
+  const authDeps = React.useMemo(
+    () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
+    [accessToken, refreshToken, logout],
+  );
   const [mode, setMode] = useState<Mode>("explore");
   const [color, setColor] = useState<RepertoireColor>("white");
   const [rep, setRep] = useState<RepertoireState>({ white: [], black: [] });
@@ -160,7 +166,7 @@ export default function OpeningsPage() {
       moves: boardMoves,
     });
     setRep((prev) => ({ ...prev, [color]: [...prev[color], line] }));
-    void syncRepertoireToProfile({ ...rep, [color]: [...rep[color], line] });
+    void syncRepertoireToProfile({ ...rep, [color]: [...rep[color], line] }, authDeps);
     setLineName("");
     resetBoard();
     addToast({ severity: "success", title: "Line saved", detail: `${line.name} added to ${color} repertoire.` });

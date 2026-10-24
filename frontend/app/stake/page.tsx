@@ -6,6 +6,11 @@ import StakingDepositModal from "@/components/StakingDepositModal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAppContext } from "@/context/walletContext";
 import { useWalletLink } from "@/hook/useWalletLink";
+import {
+  getYieldStakingConfig,
+  stakeInPool,
+  toTokenAmount,
+} from "@/contracts/client";
 import { NETWORK_PASSPHRASE } from "@/lib/api";
 import {
   TOKEN_ISSUERS,
@@ -58,7 +63,7 @@ function assetForToken(
  * confirmation, and transaction feedback.
  */
 export default function StakePage() {
-  const { address, connectWallet, sendPayment } = useAppContext();
+  const { address, connectWallet, sendPayment, signTransaction } = useAppContext();
   const { linkedWallet, isMismatched } = useWalletLink();
 
   const [open, setOpen] = useState(false);
@@ -67,46 +72,37 @@ export default function StakePage() {
   /**
    * Processes a staking deposit after the user confirms the amount and token.
    *
-   * Validates the escrow configuration and ensures the connected wallet
-   * matches the wallet linked to the user's account before submitting
-   * the payment to the Stellar network.
+   * Ensures the connected wallet matches the wallet linked to the user's
+   * account, then stakes through the yield-staking contract when it is
+   * configured, or falls back to a payment to the escrow account.
    *
    * @param deposit - The selected token, entered amount, and total deposit.
-   * @throws Error if the escrow is not configured or the wallet is mismatched.
+   * @throws Error if the wallet is mismatched or no staking target is configured.
    */
-  const handleConfirm = async ({
-    token,
-    total,
-  }: {
-    token: SupportedToken;
-    amount: number;
-    total: number;
-  }) => {
-    // Prevent deposits when the staking destination is not configured.
-    if (!STAKING_ESCROW_ADDRESS) {
-      throw new Error("Staking escrow is not configured.");
+  const handleConfirm = async ({ token, total }: { token: SupportedToken; amount: number; total: number }) => {
+    // Stakes must come from the wallet linked to the account (#FE-97).
+    if (isMismatched) throw new Error(`Switch Freighter to your linked wallet (${linkedWallet}) to stake.`);
+
+    // SC-91: when the yield-staking contract is deployed, the stake is placed
+    // through the typed bindings (`yield_staking.stake`) instead of a plain
+    // payment to the escrow account. The pool must be whitelisted on-chain and
+    // the amount is denominated in the staking contract's token (7 decimals).
+    const staking = getYieldStakingConfig();
+    if (staking) {
+      if (!address) throw new Error("Connect your wallet to stake.");
+      const { hash } = await stakeInPool({
+        caller: address,
+        pool: staking.poolAddress,
+        amount: toTokenAmount(total),
+        signer: { address, sign: signTransaction },
+      });
+      setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${hash ? ` (tx ${hash})` : ""}`);
+      return;
     }
 
-    // FE-97: Require the connected wallet to match the account's linked wallet.
-    if (isMismatched) {
-      throw new Error(
-        `Switch Freighter to your linked wallet (${linkedWallet}) to stake.`,
-      );
-    }
-
-    // Submit the staking payment using the correct Stellar asset configuration.
-    const result = await sendPayment(
-      STAKING_ESCROW_ADDRESS,
-      total.toFixed(7),
-      assetForToken(token),
-    );
-
-    // Display confirmation after the payment request succeeds.
-    setConfirmation(
-      `Stake confirmed: ${total.toFixed(4)} ${token}${
-        result?.hash ? ` (tx ${result.hash})` : ""
-      }`,
-    );
+    if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
+    const result = await sendPayment(STAKING_ESCROW_ADDRESS, total.toFixed(7), assetForToken(token));
+    setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${result?.hash ? ` (tx ${result.hash})` : ""}`);
   };
 
   return (

@@ -11,7 +11,7 @@ async fn test_idempotent_first_request_executes() {
     let count_clone = call_count.clone();
 
     let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/staking/stake",
+        "/v1/staking/stake",
         web::post().to(move || {
             let c = count_clone.clone();
             async move {
@@ -26,7 +26,7 @@ async fn test_idempotent_first_request_executes() {
     .await;
 
     let req = test::TestRequest::post()
-        .uri("/api/v1/staking/stake")
+        .uri("/v1/staking/stake")
         .insert_header(("Idempotency-Key", "test-key-001"))
         .to_request();
 
@@ -45,24 +45,28 @@ async fn test_idempotent_duplicate_request_returns_cached_response() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let count_clone = call_count.clone();
 
-    let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/tournaments/t-123/register",
-        web::post().to(move || {
-            let c = count_clone.clone();
-            async move {
-                let count = c.fetch_add(1, Ordering::SeqCst);
-                HttpResponse::Created().json(serde_json::json!({
-                    "status": "registered",
-                    "execution_id": count
-                }))
-            }
-        }),
+    let app = test::init_service(App::new().service(
+        web::scope("/v1/tournaments")
+            .wrap(IdempotencyMiddleware::in_memory())
+            .route(
+                "/{id}/register",
+                web::post().to(move || {
+                    let c = count_clone.clone();
+                    async move {
+                        let count = c.fetch_add(1, Ordering::SeqCst);
+                        HttpResponse::Created().json(serde_json::json!({
+                            "status": "registered",
+                            "execution_id": count
+                        }))
+                    }
+                }),
+            ),
     ))
     .await;
 
     // First request
     let req1 = test::TestRequest::post()
-        .uri("/api/v1/tournaments/t-123/register")
+        .uri("/v1/tournaments/t-123/register")
         .insert_header(("Idempotency-Key", "unique-tourney-key"))
         .to_request();
 
@@ -77,7 +81,7 @@ async fn test_idempotent_duplicate_request_returns_cached_response() {
 
     // Second request with SAME idempotency key
     let req2 = test::TestRequest::post()
-        .uri("/api/v1/tournaments/t-123/register")
+        .uri("/v1/tournaments/t-123/register")
         .insert_header(("Idempotency-Key", "unique-tourney-key"))
         .to_request();
 
@@ -104,7 +108,7 @@ async fn test_idempotent_concurrent_request_returns_409_conflict() {
 
     let app =
         test::init_service(App::new().wrap(middleware).route(
-            "/api/v1/escrow/release",
+            "/v1/escrow/release",
             web::post().to(|| async {
                 HttpResponse::Ok().json(serde_json::json!({"status": "released"}))
             }),
@@ -113,7 +117,7 @@ async fn test_idempotent_concurrent_request_returns_409_conflict() {
 
     // Concurrent request arriving while key is still PENDING
     let req = test::TestRequest::post()
-        .uri("/api/v1/escrow/release")
+        .uri("/v1/escrow/release")
         .insert_header(("Idempotency-Key", "pending-concurrent-key"))
         .to_request();
 
@@ -132,7 +136,7 @@ async fn test_idempotency_keys_scoped_per_user() {
     let count_clone = call_count.clone();
 
     let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/staking/deposit",
+        "/v1/staking/deposit",
         web::post().to(move || {
             let c = count_clone.clone();
             async move {
@@ -159,7 +163,7 @@ async fn test_idempotency_keys_scoped_per_user() {
     };
 
     let req_user_a = test::TestRequest::post()
-        .uri("/api/v1/staking/deposit")
+        .uri("/v1/staking/deposit")
         .insert_header(("Idempotency-Key", "shared-client-key-100"))
         .to_request();
     req_user_a.extensions_mut().insert(claims_user_a);
@@ -181,7 +185,7 @@ async fn test_idempotency_keys_scoped_per_user() {
     };
 
     let req_user_b = test::TestRequest::post()
-        .uri("/api/v1/staking/deposit")
+        .uri("/v1/staking/deposit")
         .insert_header(("Idempotency-Key", "shared-client-key-100"))
         .to_request();
     req_user_b.extensions_mut().insert(claims_user_b);
@@ -199,7 +203,7 @@ async fn test_server_error_5xx_not_cached_as_completed() {
     let count_clone = call_count.clone();
 
     let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/escrow/transfer",
+        "/v1/escrow/transfer",
         web::post().to(move || {
             let c = count_clone.clone();
             async move {
@@ -222,7 +226,7 @@ async fn test_server_error_5xx_not_cached_as_completed() {
 
     // First request returns 500
     let req1 = test::TestRequest::post()
-        .uri("/api/v1/escrow/transfer")
+        .uri("/v1/escrow/transfer")
         .insert_header(("Idempotency-Key", "retryable-key-500"))
         .to_request();
 
@@ -231,7 +235,7 @@ async fn test_server_error_5xx_not_cached_as_completed() {
 
     // Second request with SAME key should re-execute and NOT be blocked by 409 or cached 500
     let req2 = test::TestRequest::post()
-        .uri("/api/v1/escrow/transfer")
+        .uri("/v1/escrow/transfer")
         .insert_header(("Idempotency-Key", "retryable-key-500"))
         .to_request();
 
@@ -250,7 +254,7 @@ async fn test_get_requests_bypass_idempotency_middleware() {
     let count_clone = call_count.clone();
 
     let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/staking/info",
+        "/v1/staking/info",
         web::get().to(move || {
             let c = count_clone.clone();
             async move {
@@ -264,14 +268,14 @@ async fn test_get_requests_bypass_idempotency_middleware() {
     .await;
 
     let req1 = test::TestRequest::get()
-        .uri("/api/v1/staking/info")
+        .uri("/v1/staking/info")
         .insert_header(("Idempotency-Key", "ignored-on-get"))
         .to_request();
     let resp1 = test::call_service(&app, req1).await;
     assert_eq!(resp1.status(), StatusCode::OK);
 
     let req2 = test::TestRequest::get()
-        .uri("/api/v1/staking/info")
+        .uri("/v1/staking/info")
         .insert_header(("Idempotency-Key", "ignored-on-get"))
         .to_request();
     let resp2 = test::call_service(&app, req2).await;
@@ -287,7 +291,7 @@ async fn test_x_idempotency_key_header_support() {
     let count_clone = call_count.clone();
 
     let app = test::init_service(App::new().wrap(IdempotencyMiddleware::in_memory()).route(
-        "/api/v1/staking/claim",
+        "/v1/staking/claim",
         web::put().to(move || {
             let c = count_clone.clone();
             async move {
@@ -299,14 +303,14 @@ async fn test_x_idempotency_key_header_support() {
     .await;
 
     let req1 = test::TestRequest::put()
-        .uri("/api/v1/staking/claim")
+        .uri("/v1/staking/claim")
         .insert_header(("X-Idempotency-Key", "x-prefix-key-999"))
         .to_request();
     let resp1 = test::call_service(&app, req1).await;
     assert_eq!(resp1.status(), StatusCode::OK);
 
     let req2 = test::TestRequest::put()
-        .uri("/api/v1/staking/claim")
+        .uri("/v1/staking/claim")
         .insert_header(("X-Idempotency-Key", "x-prefix-key-999"))
         .to_request();
     let resp2 = test::call_service(&app, req2).await;

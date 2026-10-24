@@ -31,7 +31,7 @@ RUN useradd -m -s /bin/bash appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
-ENV PORT=8080
+ENV SERVER_ADDR=0.0.0.0:8080
 EXPOSE 8080
 
 CMD ["./api"]

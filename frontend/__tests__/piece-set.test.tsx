@@ -1,7 +1,9 @@
+import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GamePreferencesProvider, useGamePreferences } from "@/context/GamePreferencesContext";
 import AppearanceSettings from "@/components/AppearanceSettings";
 import { BoardThemeProvider } from "@/context/ThemeContext";
+import { AuthProvider } from "@/context/authContext";
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -25,11 +27,13 @@ describe("Piece Set Functionality", () => {
 
   it("loads default piece set as neo", () => {
     render(
-      <BoardThemeProvider>
-        <GamePreferencesProvider>
-          <AppearanceSettings />
-        </GamePreferencesProvider>
-      </BoardThemeProvider>
+      <AuthProvider>
+        <BoardThemeProvider>
+          <GamePreferencesProvider>
+            <AppearanceSettings />
+          </GamePreferencesProvider>
+        </BoardThemeProvider>
+      </AuthProvider>
     );
     
     const selector = screen.getByTestId("piece-set-selector");
@@ -38,11 +42,13 @@ describe("Piece Set Functionality", () => {
 
   it("persists piece set selection to localStorage", () => {
     render(
-      <BoardThemeProvider>
-        <GamePreferencesProvider>
-          <AppearanceSettings />
-        </GamePreferencesProvider>
-      </BoardThemeProvider>
+      <AuthProvider>
+        <BoardThemeProvider>
+          <GamePreferencesProvider>
+            <AppearanceSettings />
+          </GamePreferencesProvider>
+        </BoardThemeProvider>
+      </AuthProvider>
     );
     
     const selector = screen.getByTestId("piece-set-selector");
@@ -56,11 +62,13 @@ describe("Piece Set Functionality", () => {
     localStorage.setItem("knightverse_game_preferences", JSON.stringify({ pieceSet: "medieval" }));
     
     render(
-      <BoardThemeProvider>
-        <GamePreferencesProvider>
-          <AppearanceSettings />
-        </GamePreferencesProvider>
-      </BoardThemeProvider>
+      <AuthProvider>
+        <BoardThemeProvider>
+          <GamePreferencesProvider>
+            <AppearanceSettings />
+          </GamePreferencesProvider>
+        </BoardThemeProvider>
+      </AuthProvider>
     );
     
     const selector = screen.getByTestId("piece-set-selector");
@@ -69,11 +77,13 @@ describe("Piece Set Functionality", () => {
 
   it("allows switching between all piece sets", () => {
     render(
-      <BoardThemeProvider>
-        <GamePreferencesProvider>
-          <AppearanceSettings />
-        </GamePreferencesProvider>
-      </BoardThemeProvider>
+      <AuthProvider>
+        <BoardThemeProvider>
+          <GamePreferencesProvider>
+            <AppearanceSettings />
+          </GamePreferencesProvider>
+        </BoardThemeProvider>
+      </AuthProvider>
     );
     
     const selector = screen.getByTestId("piece-set-selector");

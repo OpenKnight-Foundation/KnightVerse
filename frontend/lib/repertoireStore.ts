@@ -9,7 +9,7 @@ import {
   initialCardState,
   type SrsCardState,
 } from "./spacedRepetition";
-import { API_BASE } from "./api";
+import { API_BASE, authFetch, type AuthFetchDeps } from "./api";
 
 export type RepertoireColor = "white" | "black";
 
@@ -82,18 +82,19 @@ export function saveRepertoire(state: RepertoireState): void {
  */
 export async function syncRepertoireToProfile(
   state: RepertoireState,
+  deps: AuthFetchDeps,
 ): Promise<boolean> {
   try {
-    const token = localStorage.getItem("access_token");
-    if (!token) return false;
-    const res = await fetch(`${API_BASE}/v1/repertoires/sync`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+    if (!deps.getToken()) return false;
+    const res = await authFetch(
+      `${API_BASE}/v1/repertoires/sync`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(state),
       },
-      body: JSON.stringify(state),
-    });
+      deps,
+    );
     return res.ok;
   } catch {
     return false;

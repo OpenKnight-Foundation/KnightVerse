@@ -1,0 +1,79 @@
+name: Contract Bindings CI
+
+# SC-91 (#1420): the typed clients in frontend/contracts/ are generated from
+# the contract WASM. Regenerate them whenever the contracts change and fail
+# the build when the committed bindings no longer match the generated output.
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'frontend/contracts/**'
+      - 'frontend/scripts/generate-contract-bindings.sh'
+      - '.github/workflows/contract-bindings.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'contracts/**'
+      - 'frontend/contracts/**'
+      - 'frontend/scripts/generate-contract-bindings.sh'
+      - '.github/workflows/contract-bindings.yml'
+
+env:
+  # Keep in sync with frontend/contracts/README.md — different CLI versions
+  # emit different output and would show up as drift.
+  STELLAR_CLI_VERSION: '28.1.0'
+
+jobs:
+  bindings:
+    name: Generated bindings are up to date
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-bindings-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bindings-cargo-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: contracts/target
+          key: ${{ runner.os }}-bindings-build-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bindings-build-
+
+      - name: Install stellar CLI
+        run: |
+          curl -sSL -o /tmp/stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Generate contract bindings
+        run: ./frontend/scripts/generate-contract-bindings.sh
+
+      - name: Fail if committed bindings drifted
+        run: |
+          git add -A frontend/contracts
+          if ! git diff --cached --quiet -- frontend/contracts; then
+            echo "::error::frontend/contracts is out of date with contracts/. Run 'npm run bindings:generate' inside frontend/ and commit the result."
+            git diff --cached --stat -- frontend/contracts
+            exit 1
+          fi
+          echo "frontend/contracts matches the generated output."

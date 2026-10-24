@@ -41,6 +41,9 @@ Open `.env.local` and set at least the following:
 | `NEXT_PUBLIC_CONTRACT_GAME_ESCROW` | On-chain game escrow contract ID | placeholder |
 | `NEXT_PUBLIC_CONTRACT_ELO_REGISTRY` | On-chain ELO registry contract ID | placeholder |
 | `NEXT_PUBLIC_CONTRACT_TOURNAMENT` | On-chain tournament prize pool contract ID | placeholder |
+| `NEXT_PUBLIC_GAME_CONTRACT_ID` | Deployed game contract used by the typed clients in [`contracts/`](./contracts) (puzzle-reward claims) | _(leave blank)_ |
+| `NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID` | Deployed yield-staking contract used by the `/stake` page | _(leave blank)_ |
+| `NEXT_PUBLIC_YIELD_STAKING_POOL_ADDRESS` | Whitelisted liquidity pool the stake is routed into | _(leave blank)_ |
 | `NEXT_PUBLIC_IPFS_GATEWAY` | IPFS/Pinata gateway | `https://gateway.pinata.cloud` |
 | `NEXT_PUBLIC_FEATURE_FLAGS` | Feature flag JSON config | `{"new_board_renderer":{"enabled":false},...}` |
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN (optional, disabled outside production) | _(leave blank)_ |

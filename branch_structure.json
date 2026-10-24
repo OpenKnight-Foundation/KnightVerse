@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1381-be-109-two-players-can-join-the-same-open-game",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1381-be-109-two-players-can-join-the-same-open-game": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1381-be-109-two-players-can-join-the-same-open-game",
+    "origin"
+  ]
+}

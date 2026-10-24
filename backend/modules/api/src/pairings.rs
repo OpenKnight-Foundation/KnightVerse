@@ -133,7 +133,7 @@ pub fn validate_round(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/tournaments/{id}/pairings",
+    path = "/v1/tournaments/{id}/pairings",
     responses(
         (status = 200, description = "Swiss round generated"),
         (status = 400, description = "The generated round was not a valid pairing")

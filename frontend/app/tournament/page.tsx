@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { FaCheck, FaPlus, FaSpinner } from "react-icons/fa";
 import type { TournamentBracket, BracketFormat } from "@/components/tournament/TournamentBracketViewer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { endpoints } from "@/lib/api";
+import { endpoints, authFetch } from "@/lib/api";
 import { useAuth } from "@/context/authContext";
 
 // FE-121 (#1362): TournamentBracketViewer is the canonical bracket — it
@@ -42,20 +42,17 @@ export default function TournamentPage() {
   const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
 
   // The backend tournament scope is JWT-protected (#FE-100).
-  const { accessToken } = useAuth();
-  const authHeaders = React.useMemo<Record<string, string>>(
-    (): Record<string, string> => (accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    [accessToken],
+  const { accessToken, refreshToken, logout } = useAuth();
+  const authDeps = React.useMemo(
+    () => ({ getToken: () => accessToken, refresh: refreshToken, logout }),
+    [accessToken, refreshToken, logout],
   );
 
   const fetchBrackets = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(endpoints.tournaments.list(), {
-        headers: authHeaders,
-        credentials: "include",
-      });
+      const res = await authFetch(endpoints.tournaments.list(), {}, authDeps);
       // No tournaments endpoint yet (or nothing published) is an empty list,
       // not an error (#FE-100).
       if (res.status === 404) {
@@ -74,7 +71,7 @@ export default function TournamentPage() {
     } finally {
       setLoading(false);
     }
-  }, [authHeaders]);
+  }, [authDeps]);
 
   useEffect(() => {
     void fetchBrackets();
@@ -85,12 +82,15 @@ export default function TournamentPage() {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch(endpoints.tournaments.create(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        credentials: "include",
-        body: JSON.stringify({ name: name.trim(), format }),
-      });
+      const res = await authFetch(
+        endpoints.tournaments.create(),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), format }),
+        },
+        authDeps,
+      );
       if (!res.ok) throw new Error(`Failed to create tournament: ${res.status}`);
       const created: TournamentBracket = await res.json();
       setBrackets((prev) => [created, ...prev]);
@@ -109,14 +109,11 @@ export default function TournamentPage() {
     setRegistrationMessage(null);
     setError(null);
     try {
-      const res = await fetch(endpoints.tournaments.register(tournament.id), {
-        method: "POST",
-        headers: authHeaders,
-        credentials: "include",
-      });
-      if (res.status === 401) {
-        throw new Error("Sign in to register for tournaments.");
-      }
+      const res = await authFetch(
+        endpoints.tournaments.register(tournament.id),
+        { method: "POST" },
+        authDeps,
+      );
       if (res.status === 409) {
         setRegisteredIds((prev) => new Set(prev).add(tournament.id));
         throw new Error("You are already registered for this tournament.");

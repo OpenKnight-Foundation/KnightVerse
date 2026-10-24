@@ -1,13 +1,6 @@
 import React from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render as rtlRender, screen, fireEvent, act } from "@testing-library/react";
-import AppearanceSettings from "@/components/AppearanceSettings";
-
-import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
-
-// Board components read useGamePreferences(), which requires its provider.
-const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
-  rtlRender(ui, { wrapper: GamePreferencesProvider, ...options });
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
 import {
   BoardThemeProvider,
   useBoardTheme,
@@ -21,6 +14,21 @@ import {
   syncThemeWithBackend,
   fetchThemePreferencesFromBackend,
 } from "@/services/themeService";
+import AppearanceSettings from "@/components/AppearanceSettings";
+import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
+import { AuthProvider } from "@/context/authContext";
+
+// BoardThemeProvider now calls useAuth() and GamePreferencesProvider wraps
+// board components; both are required in every render in this suite.
+const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
+  rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <AuthProvider>
+        <GamePreferencesProvider>{children}</GamePreferencesProvider>
+      </AuthProvider>
+    ),
+    ...options,
+  });
 
 describe("Theme Studio & Appearance Unit Tests", () => {
   beforeEach(() => {
@@ -32,6 +40,8 @@ describe("Theme Studio & Appearance Unit Tests", () => {
     localStorage.clear();
     vi.unstubAllGlobals();
   });
+
+  // ── 1. Preset Themes ─────────────────────────────────────────────────────
 
   describe("1. Preset Themes & Configuration", () => {
     it("defines all 6 required preset themes with complete color palettes", () => {
@@ -64,6 +74,8 @@ describe("Theme Studio & Appearance Unit Tests", () => {
     });
   });
 
+  // ── 2. Contrast Ratio ────────────────────────────────────────────────────
+
   describe("2. Contrast Ratio & Accessibility Calculations", () => {
     it("converts hex strings to RGB correctly", () => {
       expect(hexToRgb("#ffffff")).toEqual({ r: 255, g: 255, b: 255 });
@@ -73,49 +85,41 @@ describe("Theme Studio & Appearance Unit Tests", () => {
     });
 
     it("calculates 21:1 contrast ratio between pure white and pure black", () => {
-      const ratio = calculateContrastRatio("#ffffff", "#000000");
-      expect(ratio).toBe(21);
+      expect(calculateContrastRatio("#ffffff", "#000000")).toBe(21);
     });
 
     it("calculates 1:1 contrast ratio for identical colors", () => {
-      const ratio = calculateContrastRatio("#779954", "#779954");
-      expect(ratio).toBe(1);
+      expect(calculateContrastRatio("#779954", "#779954")).toBe(1);
     });
 
     it("evaluates high contrast ratio as accessible with AAA rating", () => {
-      const evalResult = getContrastEvaluation(7.5);
-      expect(evalResult.isAccessible).toBe(true);
-      expect(evalResult.rating).toBe("AAA");
-      expect(evalResult.warning).toBeNull();
+      const result = getContrastEvaluation(7.5);
+      expect(result.isAccessible).toBe(true);
+      expect(result.rating).toBe("AAA");
+      expect(result.warning).toBeNull();
     });
 
     it("evaluates low contrast ratio with a warning banner", () => {
-      const evalResult = getContrastEvaluation(1.6);
-      expect(evalResult.isAccessible).toBe(false);
-      expect(evalResult.rating).toBe("POOR");
-      expect(evalResult.warning).toContain("Low contrast warning");
+      const result = getContrastEvaluation(1.6);
+      expect(result.isAccessible).toBe(false);
+      expect(result.rating).toBe("POOR");
+      expect(result.warning).toContain("Low contrast warning");
     });
 
     it("evaluates identical colors as FAIL with appropriate warning", () => {
-      const evalResult = getContrastEvaluation(1.0);
-      expect(evalResult.isAccessible).toBe(false);
-      expect(evalResult.rating).toBe("FAIL");
-      expect(evalResult.warning).toContain("Square colors are too similar or identical");
+      const result = getContrastEvaluation(1.0);
+      expect(result.isAccessible).toBe(false);
+      expect(result.rating).toBe("FAIL");
+      expect(result.warning).toContain("Square colors are too similar or identical");
     });
   });
 
+  // ── 3. ThemeContext State & Persistence ───────────────────────────────────
+
   describe("3. ThemeContext State & Persistence", () => {
     const TestConsumer = () => {
-      const {
-        boardTheme,
-        setBoardTheme,
-        colors,
-        customPalette,
-        setCustomPalette,
-        resetTheme,
-        contrastRatio,
-      } = useBoardTheme();
-
+      const { boardTheme, setBoardTheme, colors, setCustomPalette, resetTheme, contrastRatio } =
+        useBoardTheme();
       return (
         <div>
           <span data-testid="theme-id">{boardTheme}</span>
@@ -124,14 +128,7 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <span data-testid="contrast">{contrastRatio}</span>
           <button onClick={() => setBoardTheme("wood")}>Set Wood</button>
           <button onClick={() => setBoardTheme("obsidian")}>Set Obsidian</button>
-          <button
-            onClick={() =>
-              setCustomPalette({
-                light: "#ffffff",
-                dark: "#123456",
-              })
-            }
-          >
+          <button onClick={() => setCustomPalette({ light: "#ffffff", dark: "#123456" })}>
             Set Custom
           </button>
           <button onClick={resetTheme}>Reset</button>
@@ -145,14 +142,9 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       expect(screen.getByTestId("theme-id").textContent).toBe("emerald");
-      expect(screen.getByTestId("color-light").textContent).toBe(
-        PRESET_THEMES.emerald.colors.light
-      );
-      expect(screen.getByTestId("color-dark").textContent).toBe(
-        PRESET_THEMES.emerald.colors.dark
-      );
+      expect(screen.getByTestId("color-light").textContent).toBe(PRESET_THEMES.emerald.colors.light);
+      expect(screen.getByTestId("color-dark").textContent).toBe(PRESET_THEMES.emerald.colors.dark);
     });
 
     it("switches presets and persists to localStorage", () => {
@@ -161,13 +153,9 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByText("Set Wood"));
-
       expect(screen.getByTestId("theme-id").textContent).toBe("wood");
-      expect(screen.getByTestId("color-light").textContent).toBe(
-        PRESET_THEMES.wood.colors.light
-      );
+      expect(screen.getByTestId("color-light").textContent).toBe(PRESET_THEMES.wood.colors.light);
       expect(localStorage.getItem("knightverse_board_theme")).toBe("wood");
     });
 
@@ -177,16 +165,12 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByText("Set Custom"));
-
       expect(screen.getByTestId("theme-id").textContent).toBe("custom");
       expect(screen.getByTestId("color-light").textContent).toBe("#ffffff");
       expect(screen.getByTestId("color-dark").textContent).toBe("#123456");
       expect(localStorage.getItem("knightverse_board_theme")).toBe("custom");
-      expect(localStorage.getItem("knightverse_custom_board_palette")).toContain(
-        "#123456"
-      );
+      expect(localStorage.getItem("knightverse_custom_board_palette")).toContain("#123456");
     });
 
     it("resets theme to default emerald and clears custom palette from localStorage", () => {
@@ -195,15 +179,12 @@ describe("Theme Studio & Appearance Unit Tests", () => {
         "knightverse_custom_board_palette",
         JSON.stringify({ light: "#ffffff", dark: "#000000" })
       );
-
       render(
         <BoardThemeProvider>
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByText("Reset"));
-
       expect(screen.getByTestId("theme-id").textContent).toBe("emerald");
       expect(localStorage.getItem("knightverse_board_theme")).toBe("emerald");
       expect(localStorage.getItem("knightverse_custom_board_palette")).toBeNull();
@@ -211,17 +192,13 @@ describe("Theme Studio & Appearance Unit Tests", () => {
 
     it("restores previously saved preset on mount", () => {
       localStorage.setItem("knightverse_board_theme", "bordeaux");
-
       render(
         <BoardThemeProvider>
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       expect(screen.getByTestId("theme-id").textContent).toBe("bordeaux");
-      expect(screen.getByTestId("color-dark").textContent).toBe(
-        PRESET_THEMES.bordeaux.colors.dark
-      );
+      expect(screen.getByTestId("color-dark").textContent).toBe(PRESET_THEMES.bordeaux.colors.dark);
     });
 
     it("updates CSS variables on document.documentElement", () => {
@@ -230,17 +207,17 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <TestConsumer />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByText("Set Obsidian"));
-
-      expect(
-        document.documentElement.style.getPropertyValue("--board-dark")
-      ).toBe(PRESET_THEMES.obsidian.colors.dark);
-      expect(
-        document.documentElement.style.getPropertyValue("--board-light")
-      ).toBe(PRESET_THEMES.obsidian.colors.light);
+      expect(document.documentElement.style.getPropertyValue("--board-dark")).toBe(
+        PRESET_THEMES.obsidian.colors.dark
+      );
+      expect(document.documentElement.style.getPropertyValue("--board-light")).toBe(
+        PRESET_THEMES.obsidian.colors.light
+      );
     });
   });
+
+  // ── 4. AppearanceSettings UI ──────────────────────────────────────────────
 
   describe("4. AppearanceSettings Component UI & Interactions", () => {
     it("renders Theme Studio header, preset buttons, and live preview", () => {
@@ -249,13 +226,10 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       expect(screen.getByText("Chessboard Theme Studio")).toBeInTheDocument();
       expect(screen.getByText("Curated Presets")).toBeInTheDocument();
       expect(screen.getByText("Custom Palette")).toBeInTheDocument();
       expect(screen.getByText("Live Interactive Preview")).toBeInTheDocument();
-
-      // Check all 6 presets are rendered
       expect(screen.getByText("Emerald")).toBeInTheDocument();
       expect(screen.getByText("Wood")).toBeInTheDocument();
       expect(screen.getByText("Obsidian")).toBeInTheDocument();
@@ -270,10 +244,8 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       const neonButton = screen.getByRole("radio", { name: /neon/i });
       fireEvent.click(neonButton);
-
       expect(neonButton).toHaveAttribute("aria-checked", "true");
       expect(localStorage.getItem("knightverse_board_theme")).toBe("neon");
     });
@@ -284,18 +256,12 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       const customTab = screen.getByRole("button", { name: /custom palette/i });
       fireEvent.click(customTab);
-
       expect(screen.getByLabelText(/light square color/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/dark square color/i)).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/selected square highlight color/i)
-      ).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/last move highlight color/i)
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/selected square highlight color/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/last move highlight color/i)).toBeInTheDocument();
       expect(screen.getByText(/board contrast ratio/i)).toBeInTheDocument();
     });
 
@@ -305,15 +271,13 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByRole("button", { name: /custom palette/i }));
-
-      const lightInput = screen.getByLabelText(/light square color/i);
-      fireEvent.change(lightInput, { target: { value: "#ffffff" } });
-
-      const darkInput = screen.getByLabelText(/dark square color/i);
-      fireEvent.change(darkInput, { target: { value: "#000000" } });
-
+      fireEvent.change(screen.getByLabelText(/light square color/i), {
+        target: { value: "#ffffff" },
+      });
+      fireEvent.change(screen.getByLabelText(/dark square color/i), {
+        target: { value: "#000000" },
+      });
       expect(screen.getByText("21:1")).toBeInTheDocument();
       expect(screen.getByText("WCAG AAA")).toBeInTheDocument();
     });
@@ -324,15 +288,13 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       fireEvent.click(screen.getByRole("button", { name: /custom palette/i }));
-
-      const lightInput = screen.getByLabelText(/light square color/i);
-      const darkInput = screen.getByLabelText(/dark square color/i);
-
-      fireEvent.change(lightInput, { target: { value: "#555555" } });
-      fireEvent.change(darkInput, { target: { value: "#555555" } });
-
+      fireEvent.change(screen.getByLabelText(/light square color/i), {
+        target: { value: "#555555" },
+      });
+      fireEvent.change(screen.getByLabelText(/dark square color/i), {
+        target: { value: "#555555" },
+      });
       expect(
         screen.getByText(/Square colors are too similar or identical/i)
       ).toBeInTheDocument();
@@ -344,22 +306,26 @@ describe("Theme Studio & Appearance Unit Tests", () => {
           <AppearanceSettings />
         </BoardThemeProvider>
       );
-
       const previewSquare = screen.getByLabelText("Square e4");
       expect(previewSquare).toBeInTheDocument();
-
       fireEvent.click(previewSquare);
-      // Clicking toggles selection on preview board
     });
   });
+
+  // ── 5. Player Preference Sync ─────────────────────────────────────────────
 
   describe("5. Player Preference Sync", () => {
     it("keeps preferences local when no authentication token is available", async () => {
       const onWarning = vi.fn();
+      const noTokenDeps = {
+        getToken: () => null as string | null,
+        refresh: async () => {},
+        logout: async () => {},
+      };
 
       const result = await syncThemeWithBackend(
         { boardTheme: "emerald" },
-        undefined,
+        noTokenDeps,
         onWarning
       );
 
@@ -369,36 +335,38 @@ describe("Theme Studio & Appearance Unit Tests", () => {
 
     it("sends authenticated preferences to the backend and loads them back", async () => {
       const fetchMock = vi.fn()
-        .mockResolvedValueOnce({ ok: true } as Response)
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
         .mockResolvedValueOnce({
           ok: true,
+          status: 200,
           json: async () => ({
             data: { preferences: { appearance: { boardTheme: "wood" } } },
           }),
         } as Response);
       vi.stubGlobal("fetch", fetchMock);
 
-      const result = await syncThemeWithBackend(
-        { boardTheme: "wood" },
-        "mock_token_123"
-      );
+      const deps = {
+        getToken: () => "mock_token_123" as string | null,
+        refresh: async () => {},
+        logout: async () => {},
+      };
 
+      const result = await syncThemeWithBackend({ boardTheme: "wood" }, deps);
       expect(result).toBe(true);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({
-        method: "PUT",
-        headers: {
-          Authorization: "Bearer mock_token_123",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ appearance: { boardTheme: "wood" } }),
-      });
 
-      const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
+      // headers is a Headers instance — check via .get()
+      const headers: Headers = fetchMock.mock.calls[0][1].headers;
+      expect(headers.get("Authorization")).toBe("Bearer mock_token_123");
+      expect(headers.get("Content-Type")).toBe("application/json");
+      expect(fetchMock.mock.calls[0][1].body).toBe(
+        JSON.stringify({ appearance: { boardTheme: "wood" } })
+      );
+
+      const prefs = await fetchThemePreferencesFromBackend(deps);
       expect(prefs?.boardTheme).toBe("wood");
-      expect(fetchMock.mock.calls[1][1]).toMatchObject({
-        headers: { Authorization: "Bearer mock_token_123" },
-      });
+      const headers2: Headers = fetchMock.mock.calls[1][1].headers;
+      expect(headers2.get("Authorization")).toBe("Bearer mock_token_123");
     });
 
     it("round-trips a custom palette through local storage", async () => {
@@ -408,10 +376,15 @@ describe("Theme Studio & Appearance Unit Tests", () => {
         selected: "#ff007f",
         lastMove: "#39ff14",
       };
+      const noTokenDeps = {
+        getToken: () => null as string | null,
+        refresh: async () => {},
+        logout: async () => {},
+      };
 
-      await syncThemeWithBackend({ boardTheme: "custom", customPalette });
+      await syncThemeWithBackend({ boardTheme: "custom", customPalette }, noTokenDeps);
 
-      const prefs = await fetchThemePreferencesFromBackend();
+      const prefs = await fetchThemePreferencesFromBackend(noTokenDeps);
       expect(prefs).not.toBeNull();
       expect(prefs?.boardTheme).toBe("custom");
       expect(prefs?.customPalette?.light).toBe("#00f0ff");
@@ -422,10 +395,16 @@ describe("Theme Studio & Appearance Unit Tests", () => {
         "fetch",
         vi.fn().mockResolvedValue({
           ok: true,
+          status: 200,
           json: async () => ({ data: { preferences: {} } }),
-        } as Response),
+        } as Response)
       );
-      const prefs = await fetchThemePreferencesFromBackend("mock_token_123");
+      const deps = {
+        getToken: () => "mock_token_123" as string | null,
+        refresh: async () => {},
+        logout: async () => {},
+      };
+      const prefs = await fetchThemePreferencesFromBackend(deps);
       expect(prefs).toBeNull();
     });
   });

@@ -2,6 +2,7 @@ import {
   fetchPlayerPreferences,
   savePlayerPreferences,
 } from "@/services/playerPreferencesService";
+import type { AuthFetchDeps } from "@/lib/api";
 import type { BoardTheme, ThemeColors } from "@/context/ThemeContext";
 
 export interface ThemePreferencesPayload {
@@ -36,13 +37,13 @@ function writeLocalPreferences(payload: ThemePreferencesPayload): void {
 
 export async function syncThemeWithBackend(
   payload: ThemePreferencesPayload,
-  token?: string | null,
+  deps: AuthFetchDeps,
   onWarning?: ThemeSyncWarning,
 ): Promise<boolean> {
   writeLocalPreferences(payload);
 
   try {
-    return await savePlayerPreferences({ appearance: payload }, token);
+    return await savePlayerPreferences({ appearance: payload }, deps);
   } catch (error) {
     const warning = onWarning ?? ((message: string) => console.warn(message));
     warning(`Theme preferences are saved on this device only. ${String(error)}`);
@@ -51,10 +52,10 @@ export async function syncThemeWithBackend(
 }
 
 export async function fetchThemePreferencesFromBackend(
-  token?: string | null,
+  deps: AuthFetchDeps,
 ): Promise<ThemePreferencesPayload | null> {
   try {
-    const preferences = await fetchPlayerPreferences(token);
+    const preferences = await fetchPlayerPreferences(deps);
     const appearance = preferences?.appearance;
     if (
       appearance &&

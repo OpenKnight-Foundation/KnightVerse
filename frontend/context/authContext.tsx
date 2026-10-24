@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { endpoints } from "@/lib/api";
+import { endpoints, authFetch } from "@/lib/api";
 
 interface AuthUser {
   user_id: number;
@@ -291,39 +291,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const getSessions = useCallback(async (): Promise<SessionInfo[]> => {
-    const response = await fetch(endpoints.auth.sessions(), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    const response = await authFetch(
+      endpoints.auth.sessions(),
+      {},
+      { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
+    );
 
     if (!response.ok) {
       throw new Error("Failed to fetch sessions");
     }
 
     return response.json();
-  }, [accessToken]);
+  }, [refreshToken, logout]);
 
   const revokeSession = useCallback(async (sessionId: string) => {
-    const response = await fetch(endpoints.auth.revokeSession(sessionId), {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    const response = await authFetch(
+      endpoints.auth.revokeSession(sessionId),
+      { method: "DELETE" },
+      { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
+    );
 
     if (!response.ok) {
       throw new Error("Failed to revoke session");
     }
-  }, [accessToken]);
+  }, [refreshToken, logout]);
 
   const revokeAllSessions = useCallback(async () => {
-    const response = await fetch(endpoints.auth.revokeAllSessions(), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    const response = await authFetch(
+      endpoints.auth.revokeAllSessions(),
+      { method: "POST" },
+      { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
+    );
 
     if (!response.ok) {
       throw new Error("Failed to revoke all sessions");
@@ -331,7 +329,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Logout from current device as well
     await logout();
-  }, [accessToken, logout]);
+  }, [refreshToken, logout]);
 
   return (
     <AuthContext.Provider

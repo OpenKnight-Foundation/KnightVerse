@@ -206,7 +206,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // 1) Try official @stellar/freighter-api package if available
     try {
       const freighterApi = await import("@stellar/freighter-api");
-      if (freighterApi && typeof freighterApi.signTransaction === "function") {
+      // Only use the package when the extension is actually present: without
+      // it, signTransaction() waits for an extension reply that never comes.
+      if (
+        freighterApi &&
+        typeof freighterApi.signTransaction === "function" &&
+        (await freighterApi.isConnected())
+      ) {
         const signed = await freighterApi.signTransaction(txXDR, {
           networkPassphrase: NETWORK_PASSPHRASE,
         });

@@ -51,7 +51,7 @@ function wsOriginOf(httpOrigin: string): string {
 export function buildConnectSrc(env: CspEnv): string[] {
   const sources = new Set<string>(["'self'"]);
 
-  for (const value of [env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000", env.NEXT_PUBLIC_BACKEND_URL]) {
+  for (const value of [env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080", env.NEXT_PUBLIC_BACKEND_URL]) {
     const origin = originOf(value);
     if (origin) {
       sources.add(origin);

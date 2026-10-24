@@ -15,7 +15,7 @@ describe("buildConnectSrc (#FE-87)", () => {
   it("defaults to the local backend when no API URL is set", () => {
     const sources = buildConnectSrc({});
 
-    expect(sources).toEqual(expect.arrayContaining(["'self'", "http://localhost:8000", "ws://localhost:8000"]));
+    expect(sources).toEqual(expect.arrayContaining(["'self'", "http://localhost:8080", "ws://localhost:8080"]));
   });
 
   it("allows the third-party hosts the app calls", () => {

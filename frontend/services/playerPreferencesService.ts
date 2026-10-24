@@ -1,16 +1,6 @@
-import { endpoints } from "@/lib/api";
+import { endpoints, authFetch, type AuthFetchDeps } from "@/lib/api";
 
 export type PlayerPreferences = Record<string, unknown>;
-
-function currentToken(token?: string | null): string | null {
-  if (token) return token;
-  if (typeof window === "undefined") return null;
-  try {
-    return localStorage.getItem("access_token");
-  } catch {
-    return null;
-  }
-}
 
 function parsePreferences(value: unknown): PlayerPreferences | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -22,14 +12,14 @@ function parsePreferences(value: unknown): PlayerPreferences | null {
 }
 
 export async function fetchPlayerPreferences(
-  token?: string | null,
+  deps: AuthFetchDeps,
 ): Promise<PlayerPreferences | null> {
-  const authToken = currentToken(token);
-  if (!authToken) return null;
-  const response = await fetch(endpoints.players.preferences(), {
-    headers: { Authorization: `Bearer ${authToken}` },
-    cache: "no-store",
-  });
+  if (!deps.getToken()) return null;
+  const response = await authFetch(
+    endpoints.players.preferences(),
+    { cache: "no-store" },
+    deps,
+  );
   if (!response.ok) {
     throw new Error(`Preference fetch failed (HTTP ${response.status})`);
   }
@@ -38,18 +28,18 @@ export async function fetchPlayerPreferences(
 
 export async function savePlayerPreferences(
   updates: PlayerPreferences,
-  token?: string | null,
+  deps: AuthFetchDeps,
 ): Promise<boolean> {
-  const authToken = currentToken(token);
-  if (!authToken) return false;
-  const response = await fetch(endpoints.players.preferences(), {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
+  if (!deps.getToken()) return false;
+  const response = await authFetch(
+    endpoints.players.preferences(),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
     },
-    body: JSON.stringify(updates),
-  });
+    deps,
+  );
   if (!response.ok) {
     throw new Error(`Preference sync failed (HTTP ${response.status})`);
   }

@@ -262,3 +262,47 @@ export const endpoints = {
     submit: () => `${API_BASE}/v1/puzzles/submit`,
   },
 } as const;
+
+// ── Auth-aware fetch (#FE-95) ────────────────────────────────────────────────
+
+/**
+ * Callbacks the helper needs to interact with the auth context without
+ * importing React (which would pull in hooks into a plain module).
+ */
+export interface AuthFetchDeps {
+  getToken: () => string | null;
+  refresh: () => Promise<void>;
+  logout: () => Promise<void>;
+}
+
+/**
+ * Fetch wrapper that:
+ *  1. Injects the current bearer token automatically.
+ *  2. On a 401, calls `refresh()` once and retries the request.
+ *  3. If the retry is still 401 (token truly revoked), calls `logout()`.
+ *
+ * All other network / server errors are passed through so callers can handle
+ * them. Non-authenticated routes should keep using `fetchWithRetry` directly.
+ */
+export async function authFetch(
+  url: string,
+  options: RequestInit = {},
+  deps: AuthFetchDeps,
+): Promise<Response> {
+  const token = deps.getToken();
+  const headers = new Headers(options.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetchWithRetry(url, { ...options, headers });
+
+  if (res.status !== 401) return res;
+
+  // One refresh attempt then retry.
+  await deps.refresh();
+  const newToken = deps.getToken();
+  if (newToken) headers.set("Authorization", `Bearer ${newToken}`);
+
+  const retried = await fetchWithRetry(url, { ...options, headers });
+  if (retried.status === 401) await deps.logout();
+  return retried;
+}

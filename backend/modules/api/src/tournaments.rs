@@ -231,7 +231,7 @@ pub async fn register_for_tournament(
             Ok(bracket) => match serde_json::to_value(bracket) {
                 Ok(value) => {
                     let mut update: tournament_entity::ActiveModel = event.into();
-                    update.bracket_data = Set(Some(value.into()));
+                    update.bracket_data = Set(Some(value.clone().into()));
                     if let Err(error) = update.update(conn).await {
                         tracing::error!(%error, "failed to persist tournament bracket");
                         return HttpResponse::InternalServerError().json(json!({ "message": "Failed to generate tournament bracket" }));
@@ -292,7 +292,7 @@ mod tests {
         ];
         let bracket = BracketService::create_bracket(
             Uuid::new_v4(),
-            "Test".into(),
+            "Test",
             players,
             BracketFormat::SingleElimination,
         )

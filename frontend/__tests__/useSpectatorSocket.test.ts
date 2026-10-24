@@ -42,6 +42,14 @@ describe("useSpectatorSocket", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    localStorage.setItem("access_token", "test-access-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ticket: "spectator-ticket", expires_in: 60 }),
+      }),
+    );
   });
 
   afterEach(() => {
@@ -88,7 +96,9 @@ describe("useSpectatorSocket", () => {
     });
 
     await waitFor(() => {
-      expect(MockWebSocket.instances.at(-1)?.url).toContain("/v1/games/live-game-42/spectate");
+      expect(MockWebSocket.instances.at(-1)?.url).toContain(
+        "/v1/ws/game/live-game-42?role=spectator&ticket=spectator-ticket",
+      );
       expect(result.current.gameState?.fen).toContain("4P3");
       expect(result.current.gameState?.spectatorCount).toBe(9);
     });

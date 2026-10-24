@@ -6,7 +6,7 @@ import {
   createMockSpectatorGameState,
   getMockLiveGameById,
 } from "@/constants/mockLiveGames";
-import { WS_BASE, endpoints } from "@/lib/api";
+import { endpoints, requestWebSocketTicket } from "@/lib/api";
 
 export type SpectatorStatus =
   | "idle"
@@ -75,6 +75,8 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
   const [gameState, setGameState] = useState<SpectatorGameState | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const createWebSocketRef = useRef<((attemptReconnect: boolean) => Promise<WebSocket | null>) | null>(null);
+  const connectionRequestIdRef = useRef(0);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -117,21 +119,28 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
   }, []);
 
   const createWebSocket = useCallback(
-    (attemptReconnect = false): WebSocket | null => {
+    async (attemptReconnect = false): Promise<WebSocket | null> => {
       if (!gameId) {
         return null;
       }
 
+      const requestId = ++connectionRequestIdRef.current;
       if (getMockLiveGameById(gameId)) {
         bootstrapMockState(gameId);
         return null;
       }
 
       try {
-        const ws = new WebSocket(endpoints.games.spectate(gameId));
+        setStatus(attemptReconnect ? "reconnecting" : "connecting");
+        const ticket = await requestWebSocketTicket();
+        if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+          return null;
+        }
+        const socketUrl = new URL(endpoints.games.spectate(gameId));
+        socketUrl.searchParams.set("ticket", ticket);
+        const ws = new WebSocket(socketUrl.toString());
         wsRef.current = ws;
         usingMockDataRef.current = false;
-        setStatus(attemptReconnect ? "reconnecting" : "connecting");
 
         ws.onopen = () => {
           setStatus("connected");
@@ -290,23 +299,34 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
           }, delay);
 
           reconnectTimerRef.current = setTimeout(() => {
-            if (status === "reconnecting") {
-              setStatus("reconnecting");
-            }
+            setStatus("reconnecting");
           }, RECONNECT_TIMEOUT);
         };
 
         return ws;
-      } catch {
+      } catch (error) {
+        if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+          return null;
+        }
+        console.error("[SpectatorWebSocket] Failed to obtain ticket or create socket:", error);
         setStatus("error");
+        if (!isManualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = calculateReconnectDelay(reconnectAttemptsRef.current);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current += 1;
+            void createWebSocketRef.current?.(true);
+          }, delay);
+        }
         return null;
       }
     },
-    [bootstrapMockState, calculateReconnectDelay, gameId, status],
+    [bootstrapMockState, calculateReconnectDelay, gameId],
   );
+  createWebSocketRef.current = createWebSocket;
 
   const disconnect = useCallback(() => {
     isManualDisconnectRef.current = true;
+    connectionRequestIdRef.current++;
     clearReconnectTimeout();
     reconnectAttemptsRef.current = 0;
     usingMockDataRef.current = false;
@@ -327,7 +347,7 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
 
     clearReconnectTimeout();
     reconnectAttemptsRef.current = 0;
-    isManualDisconnectRef.current = false;
+    isManualDisconnectRef.current = true;
     usingMockDataRef.current = false;
 
     if (wsRef.current) {
@@ -335,6 +355,7 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
       wsRef.current = null;
     }
 
+    isManualDisconnectRef.current = false;
     setGameState(null);
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket, gameId]);
@@ -370,14 +391,20 @@ export function useSpectatorSocket(gameId: string | null): UseSpectatorSocketRet
       return;
     }
 
-    const ws = createWebSocket(false);
+    isManualDisconnectRef.current = false;
+    let active = true;
+    void createWebSocket(false).then((ws) => {
+      if (!active) ws?.close();
+    });
 
     return () => {
+      active = false;
       isManualDisconnectRef.current = true;
       clearReconnectTimeout();
       usingMockDataRef.current = false;
-      if (ws) {
-        ws.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [clearReconnectTimeout, createWebSocket, gameId]);

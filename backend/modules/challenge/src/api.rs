@@ -133,7 +133,7 @@ pub async fn verify_reward_token(
 /// Configure puzzle routes
 pub fn configure_puzzle_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/v1/puzzles")
+        web::scope("/v1/puzzles")
             .route("", web::get().to(get_puzzles))
             .route("/{puzzle_id}", web::get().to(get_puzzle_by_id))
             .route("/submit", web::post().to(submit_solution))

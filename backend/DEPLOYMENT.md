@@ -45,7 +45,7 @@ GRANT ALL PRIVILEGES ON DATABASE knightverse TO knightverse;
 Edit `/home/gabriel/KnightVerse/backend/.env` with your database credentials:
 
 ```env
-SERVER_ADDR=127.0.0.1:8080
+SERVER_ADDR=0.0.0.0:8080
 DATABASE_URL=postgresql://knightverse:your_secure_password@localhost:5432/knightverse
 JWT_SECRET_KEY=your_secret_key_change_this_in_production
 JWT_EXPIRATION_SECS=3600
@@ -53,7 +53,14 @@ RUST_LOG=info
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
 ```
 
-### 4. Run Database Migrations (Optional - required if using full auth)
+The API defaults to `0.0.0.0:8080` (also used by the Docker image), matching
+the frontend's `http://localhost:8080` default. Set `SERVER_ADDR` to override it.
+
+### 4. Database Migrations
+
+The API applies database migrations to the primary database before binding its
+HTTP listener. Startup exits with an error if migrations fail. To apply them
+manually before deployment:
 
 ```bash
 cd /home/gabriel/KnightVerse/backend/modules/db/migrations
@@ -131,17 +138,16 @@ The backend is organized into modular components:
 ⏳ **Partially Implemented (Stubs):**
 - User registration (mock response - no database persistence)
 - User login (mock response - no authentication check)
-- Database migrations for users table (created but not applied)
+- Database migrations run automatically at API startup
 - User service layer (created but disabled due to compilation issues)
 
 ## Development Notes
 
 The backend compiles successfully with the release build. The authentication endpoints are implemented but currently return mock responses. To enable full functionality with database persistence:
 
-1. Apply the users table migration
-2. Re-enable the `service::user` module by uncommenting it in `/backend/modules/service/src/lib.rs`
-3. Update the endpoint handlers to call the actual UserService methods
-4. Rebuild with `cargo build --release --bin server`
+1. Re-enable the `service::user` module by uncommenting it in `/backend/modules/service/src/lib.rs`
+2. Update the endpoint handlers to call the actual UserService methods
+3. Rebuild with `cargo build --release --bin server`
 
 ## Troubleshooting
 

@@ -565,7 +565,7 @@ pub async fn logout(
 /// Logout all sessions for the current user and immediately blacklist the active token.
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/logout_all",
+    path = "/v1/auth/logout_all",
     responses(
         (status = 200, description = "Logout all sessions successful", body = LogoutResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse)

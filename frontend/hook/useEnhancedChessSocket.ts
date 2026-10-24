@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { WS_BASE, endpoints } from "@/lib/api";
+import { endpoints, requestWebSocketTicket } from "@/lib/api";
 import { debugLog } from "@/lib/debugLogger";
 
 export type EnhancedSocketStatus =
@@ -86,6 +86,8 @@ export function useEnhancedChessSocket(
   });
 
   const wsRef = useRef<WebSocket | null>(null);
+  const createWebSocketRef = useRef<((attemptReconnect: boolean) => Promise<WebSocket | null>) | null>(null);
+  const connectionRequestIdRef = useRef(0);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const moveQueueRef = useRef<ChessMove[]>([]);
@@ -107,12 +109,19 @@ export function useEnhancedChessSocket(
     return Math.min(delay, MAX_RECONNECT_DELAY);
   }, []);
 
-  const createWebSocket = useCallback((attemptReconnect = false): WebSocket | null => {
+  const createWebSocket = useCallback(async (attemptReconnect = false): Promise<WebSocket | null> => {
     if (!gameId) return null;
 
+    const requestId = ++connectionRequestIdRef.current;
     try {
+      setStatus(attemptReconnect ? "reconnecting" : "connecting");
+      const ticket = await requestWebSocketTicket(accessToken);
+      if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+        return null;
+      }
       let wsUrl = endpoints.enhancedGame.ws(gameId);
       const params = new URLSearchParams();
+      params.set("ticket", ticket);
 
       if (reconnectTokenRef.current && attemptReconnect) {
         params.set("reconnect", reconnectTokenRef.current);
@@ -265,11 +274,22 @@ export function useEnhancedChessSocket(
 
       return ws;
     } catch (error) {
-      console.error("[EnhancedWebSocket] Failed to create:", error);
+      if (requestId !== connectionRequestIdRef.current || isManualDisconnectRef.current) {
+        return null;
+      }
+      console.error("[EnhancedWebSocket] Failed to obtain ticket or create socket:", error);
       setStatus("error");
+      if (!isManualDisconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        const delay = calculateReconnectDelay(reconnectAttemptsRef.current);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttemptsRef.current++;
+          void createWebSocketRef.current?.(true);
+        }, delay);
+      }
       return null;
     }
-  }, [gameId, calculateReconnectDelay]);
+  }, [gameId, accessToken, calculateReconnectDelay]);
+  createWebSocketRef.current = createWebSocket;
 
   const startLatencyMonitoring = useCallback((ws: WebSocket) => {
     // Send ping every 10 seconds to monitor latency
@@ -308,6 +328,7 @@ export function useEnhancedChessSocket(
 
   const disconnect = useCallback(() => {
     isManualDisconnectRef.current = true;
+    connectionRequestIdRef.current++;
     clearReconnectTimeout();
 
     if (wsRef.current) {
@@ -321,7 +342,7 @@ export function useEnhancedChessSocket(
   }, [clearReconnectTimeout]);
 
   const reconnect = useCallback(() => {
-    isManualDisconnectRef.current = false;
+    isManualDisconnectRef.current = true;
     clearReconnectTimeout();
 
     if (wsRef.current) {
@@ -330,18 +351,25 @@ export function useEnhancedChessSocket(
     }
 
     reconnectAttemptsRef.current = 0;
+    isManualDisconnectRef.current = false;
     debugLog("[EnhancedWebSocket] Manual reconnection initiated");
     createWebSocket(true);
   }, [clearReconnectTimeout, createWebSocket]);
 
   useEffect(() => {
     if (gameId) {
-      const ws = createWebSocket();
+      isManualDisconnectRef.current = false;
+      let active = true;
+      void createWebSocket().then((ws) => {
+        if (!active) ws?.close();
+      });
       return () => {
+        active = false;
         isManualDisconnectRef.current = true;
         clearReconnectTimeout();
-        if (ws) {
-          ws.close();
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
         }
       };
     } else {

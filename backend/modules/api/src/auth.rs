@@ -21,6 +21,114 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use security::{JwtService, TokenService, TokenServiceError};
 use service::helper::password;
 
+/// WebSocket tickets are intentionally short-lived and single-use. The opaque
+/// value itself is the Redis key suffix; the associated claims never reach the
+/// browser.
+pub const WS_TICKET_TTL_SECONDS: usize = 60;
+
+#[utoipa::path(
+    post,
+    path = "/v1/auth/ws-ticket",
+    responses(
+        (status = 200, description = "WebSocket ticket issued"),
+        (status = 401, description = "Missing or invalid access token")
+    ),
+    tag = "Authentication"
+)]
+#[post("/ws-ticket")]
+pub async fn issue_ws_ticket(
+    req: HttpRequest,
+    jwt_service: web::Data<JwtService>,
+    redis_pool: web::Data<Pool>,
+) -> HttpResponse {
+    let token = match req
+        .headers()
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    {
+        Some(token) if !token.is_empty() => token,
+        _ => {
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "message": "Missing or invalid authorization token"
+            }));
+        }
+    };
+
+    let claims = match jwt_service.validate_token(token) {
+        Ok(claims) if claims.token_type == security::jwt::TokenType::Access => claims,
+        _ => {
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "message": "Invalid or expired access token"
+            }));
+        }
+    };
+
+    let mut conn = match redis_pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            error!("Failed to acquire Redis connection for WebSocket ticket: {}", error);
+            return HttpResponse::ServiceUnavailable().finish();
+        }
+    };
+
+    if let Some(jti) = claims.jti.as_deref() {
+        let blacklisted: redis::RedisResult<bool> =
+            conn.exists(format!("token_blacklist:{}", jti)).await;
+        match blacklisted {
+            Ok(true) => {
+                return HttpResponse::Unauthorized().json(serde_json::json!({
+                    "message": "Access token has been revoked"
+                }));
+            }
+            Err(error) => {
+                error!("Failed to check access-token revocation for WebSocket ticket: {}", error);
+                return HttpResponse::ServiceUnavailable().finish();
+            }
+            Ok(false) => {}
+        }
+    }
+
+    let claims_json = match serde_json::to_string(&claims) {
+        Ok(json) => json,
+        Err(error) => {
+            error!("Failed to encode WebSocket ticket claims: {}", error);
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    // Retry a rare UUID collision rather than overwriting an outstanding ticket.
+    for _ in 0..3 {
+        let ticket = Uuid::new_v4().to_string();
+        let key = format!("ws_ticket:{}", ticket);
+        let stored: redis::RedisResult<Option<String>> = redis::cmd("SET")
+            .arg(&key)
+            .arg(&claims_json)
+            .arg("EX")
+            .arg(WS_TICKET_TTL_SECONDS)
+            .arg("NX")
+            .query_async(&mut conn)
+            .await;
+        match stored {
+            Ok(Some(_)) => {
+                return HttpResponse::Ok()
+                    .insert_header(("Cache-Control", "no-store"))
+                    .json(serde_json::json!({
+                        "ticket": ticket,
+                        "expires_in": WS_TICKET_TTL_SECONDS
+                    }));
+            }
+            Ok(None) => continue,
+            Err(error) => {
+                error!("Failed to store WebSocket ticket in Redis: {}", error);
+                return HttpResponse::ServiceUnavailable().finish();
+            }
+        }
+    }
+
+    HttpResponse::ServiceUnavailable().finish()
+}
+
 async fn add_jti_to_blacklist(
     redis_pool: &Pool,
     jti: &str,
@@ -565,7 +673,7 @@ pub async fn logout(
 /// Logout all sessions for the current user and immediately blacklist the active token.
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/logout_all",
+    path = "/v1/auth/logout_all",
     responses(
         (status = 200, description = "Logout all sessions successful", body = LogoutResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse)

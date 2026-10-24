@@ -2,7 +2,7 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{login, logout, logout_all, refresh, register};
+use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -35,7 +35,7 @@ use migration::MigratorTrait;
 use security::jwt::{JwtAuthMiddleware, JwtService};
 use std::env;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
@@ -189,7 +189,7 @@ pub async fn main() -> std::io::Result<()> {
     }
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
-    let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let _database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     // JWT: strict env — crash on missing/insecure secret
@@ -212,13 +212,15 @@ pub async fn main() -> std::io::Result<()> {
     );
 
     // Run database migrations against the primary
-    eprintln!("Running database migrations...");
-    match Migrator::up(db_pool.primary(), None).await {
-        Ok(_) => eprintln!("Database migrations completed successfully"),
-        Err(e) => {
-            eprintln!("Warning: Failed to run database migrations: {}", e);
-        }
-    }
+    info!("Running database migrations");
+    Migrator::up(db_pool.primary(), None).await.map_err(|e| {
+        error!(error = %e, "Database migrations failed; refusing to start");
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Database migrations failed: {e}"),
+        )
+    })?;
+    info!("Database migrations completed successfully");
 
     let db_pool = Arc::new(db_pool);
 
@@ -334,7 +336,7 @@ pub async fn main() -> std::io::Result<()> {
         );
 
         // BE-46: Redis-backed IdempotencyMiddleware for mutating financial, staking & tournament requests
-        let _idempotency_middleware = IdempotencyMiddleware::new(rate_limiter_pool.clone());
+        let idempotency_middleware = IdempotencyMiddleware::new(rate_limiter_pool.clone());
 
         App::new()
             .wrap(RequestIdMiddleware)
@@ -426,22 +428,14 @@ pub async fn main() -> std::io::Result<()> {
                     .service(login)
                     .service(register)
                     .service(refresh)
-                    .service(logout)
-                    .service(logout_all),
-            )
-            .service(
-                web::scope("/api/v1/auth")
-                    .wrap(Governor::new(&auth_governor_conf))
-                    .wrap(auth_redis_limiter)
-                    .service(login)
-                    .service(register)
-                    .service(refresh)
+                    .service(issue_ws_ticket)
                     .service(logout)
                     .service(logout_all),
             )
             // Tournament routes (with Idempotency protection)
             .service(
-                web::scope("/api/v1/tournaments")
+                web::scope("/v1/tournaments")
+                    .wrap(idempotency_middleware.clone())
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -449,21 +443,35 @@ pub async fn main() -> std::io::Result<()> {
                     ))
                     // BE-135: Swiss round generation, previously unreachable
                     // because nothing depended on the `pairing` crate.
+                    .route("", web::get().to(crate::tournaments::list_tournaments))
+                    .route("", web::post().to(crate::tournaments::create_tournament))
                     .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
                     .route(
                         "/{id}/register",
-                        web::post().to(|path: web::Path<String>| async move {
-                            HttpResponse::Ok().json(serde_json::json!({
-                                "status": "registered",
-                                "tournament_id": path.into_inner(),
-                                "message": "Tournament registration successful"
-                            }))
-                        }),
+                        web::post().to(crate::tournaments::register_for_tournament),
+                    ),
+            )
+            // Canonical v1 tournament routes. Keep the /api/v1 aliases above
+            // for clients already using that route shape.
+            .service(
+                web::scope("/v1/tournaments")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .route("", web::get().to(crate::tournaments::list_tournaments))
+                    .route("", web::post().to(crate::tournaments::create_tournament))
+                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
+                    .route(
+                        "/{id}/register",
+                        web::post().to(crate::tournaments::register_for_tournament),
                     ),
             )
             // Escrow routes (with Idempotency protection)
             .service(
-                web::scope("/api/v1/escrow")
+                web::scope("/v1/escrow")
+                    .wrap(idempotency_middleware.clone())
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -482,7 +490,8 @@ pub async fn main() -> std::io::Result<()> {
             )
             // Staking routes (with Idempotency protection)
             .service(
-                web::scope("/api/v1/staking")
+                web::scope("/v1/staking")
+                    .wrap(idempotency_middleware.clone())
                     .wrap(JwtAuthMiddleware::new_with_redis(
                         jwt_secret.clone(),
                         jwt_expiration,
@@ -523,7 +532,7 @@ pub async fn main() -> std::io::Result<()> {
             // gate and the limiters.
             .route("/health/engine", web::get().to(ai_health))
             // NFT routes (placeholder — not yet implemented)
-            // .service(web::scope("/api/v1").configure(configure_nft_routes))
+            // .service(web::scope("/v1").configure(configure_nft_routes))
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")
@@ -568,21 +577,21 @@ pub async fn main() -> std::io::Result<()> {
                 signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
             tokio::select! {
                 _ = sigterm.recv() => {
-                    eprintln!("Received SIGTERM — initiating graceful shutdown...");
+                    info!("Received SIGTERM; initiating graceful shutdown");
                 }
                 _ = sigint.recv() => {
-                    eprintln!("Received SIGINT — initiating graceful shutdown...");
+                    info!("Received SIGINT; initiating graceful shutdown");
                 }
             }
         }
         #[cfg(not(unix))]
         {
             let _ = tokio::signal::ctrl_c().await;
-            eprintln!("Received Ctrl+C — initiating graceful shutdown...");
+            info!("Received Ctrl+C; initiating graceful shutdown");
         }
         // true = graceful: finish active connections, then drain workers
         server_handle.stop(true).await;
-        eprintln!("Server stopped gracefully");
+        info!("Server stopped gracefully");
     });
 
     server.await

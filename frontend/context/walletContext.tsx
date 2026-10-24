@@ -23,6 +23,7 @@ import {
   CONTRACT_GAME_ESCROW,
   CONTRACT_AI_NFT,
 } from "@/lib/api";
+import { invokeBoundContract as invokeGeneratedBinding } from "@/contracts/client";
 import {
   InvokeContractOptions,
   TypedContractClient,
@@ -47,6 +48,24 @@ type AppContextType = {
   ) => Promise<any>;
   /** Convenience wrapper over {@link sendPayment} for native XLM. */
   sendXLM: (destination: string, amount: string | number) => Promise<any>;
+  /**
+   * Sign an XDR envelope with the connected Freighter wallet. Returns the
+   * signed envelope XDR — the shape the generated contract clients in
+   * `@/contracts` expect from their signer.
+   */
+  signTransaction: (txXdr: string) => Promise<string>;
+  /**
+   * Invoke a Soroban contract method through the generated TypeScript
+   * bindings (`@/contracts`, SC-91). `params` is keyed by the contract's
+   * parameter names. The contract id must have bindings registered via a
+   * `NEXT_PUBLIC_*_CONTRACT_ID` variable; otherwise this throws instead of
+   * guessing an ABI.
+   */
+  invokeBoundContract: (
+    contractId: string,
+    functionName: string,
+    params?: Record<string, unknown>,
+  ) => Promise<unknown>;
   /**
    * Invokes a Soroban smart contract using @stellar/stellar-sdk's rpc module:
    * simulate -> sign (Freighter) -> submit -> poll.
@@ -433,6 +452,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ) as T;
   };
 
+  const invokeBoundContract = async (
+    contractId: string,
+    functionName: string,
+    params: Record<string, unknown> = {},
+  ) => {
+    if (!address) throw new Error("No wallet connected");
+    try {
+      // Dispatch through the generated bindings (SC-91). Read calls are
+      // simulated and resolved without a signature; write calls are signed
+      // with Freighter and submitted.
+      return await invokeGeneratedBinding({
+        contractId,
+        method: functionName,
+        args: params,
+        signer: { address, sign: signWithFreighter },
+      });
+    } catch (err) {
+      console.error("invokeBoundContract", err);
+      throw err;
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -443,6 +484,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         disconnectWallet,
         sendPayment,
         sendXLM,
+        signTransaction: signWithFreighter,
+        invokeBoundContract,
         invokeSorobanContract,
         getContractClient,
       }}

@@ -23,28 +23,30 @@ async fn test_tournament_registration_idempotency_flow() {
 
     let srv = actix_test::start(move || {
         let c = counter_clone.clone();
-        App::new()
-            .wrap(IdempotencyMiddleware::in_memory())
-            .wrap(JwtAuthMiddleware::new(JWT_SECRET.to_string(), 3600))
-            .route(
-                "/api/v1/tournaments/{id}/register",
-                web::post().to(move |path: web::Path<String>| {
-                    let c = c.clone();
-                    async move {
-                        let exec_id = c.fetch_add(1, Ordering::SeqCst);
-                        HttpResponse::Ok().json(serde_json::json!({
-                            "status": "registered",
-                            "tournament_id": path.into_inner(),
-                            "execution_seq": exec_id
-                        }))
-                    }
-                }),
-            )
+        App::new().service(
+            web::scope("/v1/tournaments")
+                .wrap(IdempotencyMiddleware::in_memory())
+                .wrap(JwtAuthMiddleware::new(JWT_SECRET.to_string(), 3600))
+                .route(
+                    "/{id}/register",
+                    web::post().to(move |path: web::Path<String>| {
+                        let c = c.clone();
+                        async move {
+                            let exec_id = c.fetch_add(1, Ordering::SeqCst);
+                            HttpResponse::Ok().json(serde_json::json!({
+                                "status": "registered",
+                                "tournament_id": path.into_inner(),
+                                "execution_seq": exec_id
+                            }))
+                        }
+                    }),
+                ),
+        )
     });
 
     let client = awc::Client::default();
     let token = make_access_token(42, "grandmaster");
-    let target_url = srv.url("/api/v1/tournaments/t-swiss-2026/register");
+    let target_url = srv.url("/v1/tournaments/t-swiss-2026/register");
 
     // 1. Initial request with Idempotency-Key
     let mut resp1 = client
@@ -103,7 +105,7 @@ async fn test_staking_and_escrow_multi_tenant_isolation() {
             .wrap(IdempotencyMiddleware::in_memory())
             .wrap(JwtAuthMiddleware::new(JWT_SECRET.to_string(), 3600))
             .route(
-                "/api/v1/staking/deposit",
+                "/v1/staking/deposit",
                 web::post().to(move || {
                     let c = c.clone();
                     async move {
@@ -120,7 +122,7 @@ async fn test_staking_and_escrow_multi_tenant_isolation() {
     let client = awc::Client::default();
     let token_user_1 = make_access_token(1001, "player_one");
     let token_user_2 = make_access_token(2002, "player_two");
-    let target_url = srv.url("/api/v1/staking/deposit");
+    let target_url = srv.url("/v1/staking/deposit");
 
     // User 1 executes with key "stake-key-abc"
     let resp1 = client
@@ -157,7 +159,7 @@ async fn test_5xx_errors_release_lock_for_retry() {
         App::new()
             .wrap(IdempotencyMiddleware::in_memory())
             .route(
-                "/api/v1/escrow/transfer",
+                "/v1/escrow/transfer",
                 web::post().to(move || {
                     let a = a.clone();
                     async move {
@@ -177,7 +179,7 @@ async fn test_5xx_errors_release_lock_for_retry() {
     });
 
     let client = awc::Client::default();
-    let target_url = srv.url("/api/v1/escrow/transfer");
+    let target_url = srv.url("/v1/escrow/transfer");
 
     // First attempt fails with 500
     let resp1 = client

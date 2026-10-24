@@ -1,4 +1,4 @@
-use crate::{ai, auth, chess960, games, lc0, pairings, players};
+use crate::{ai, auth, chess960, games, lc0, pairings, players, tournaments};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
 use utoipa::OpenApi;
@@ -48,6 +48,9 @@ impl Modify for SecurityAddon {
 
         // Tournament pairing (BE-135)
         pairings::build_pairing_round,
+        tournaments::list_tournaments,
+        tournaments::create_tournament,
+        tournaments::register_for_tournament,
 
         // AI suggestion endpoints
         ai::get_ai_suggestion,
@@ -110,6 +113,8 @@ impl Modify for SecurityAddon {
             dto::responses::PlayerDeleted,
             dto::responses::InvalidCredentialsResponse,
             dto::responses::NotFoundResponse,
+            tournaments::CreateTournamentRequest,
+            tournaments::TournamentFormat,
         )
     ),
     modifiers(&SecurityAddon),

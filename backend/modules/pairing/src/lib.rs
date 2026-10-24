@@ -1,7 +1,7 @@
 //! Tournament pairing (BE-135).
 //!
 //! `SwissPairer` implements the `PairingStrategy` trait; it is what the
-//! `/api/v1/tournaments/{id}/pairings` route calls to build a round.
+//! `/v1/tournaments/{id}/pairings` route calls to build a round.
 
 pub mod swiss;
 

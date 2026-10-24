@@ -42,17 +42,17 @@ function createMockSimSuccess(retval: xdr.ScVal) {
       footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
       instructions: 100,
       diskReadBytes: 0,
-      readBytes: 0,
       writeBytes: 0,
     }),
-    resourceFee: 100n,
-    ext: xdr.ExtensionPoint.v0(),
+    resourceFee: new xdr.Int64(100),
+    ext: new xdr.SorobanTransactionDataExt(0),
   });
   return rpc.parseRawSimulation({
     transactionData: td.toXDR("base64"),
     minResourceFee: "100",
     results: [{ auth: [], xdr: retval.toXDR("base64") }],
-  });
+    latestLedger: 1,
+  } as unknown as rpc.Api.RawSimulateTransactionResponse);
 }
 
 describe("Wallet Context - Soroban Contract Invocation", () => {
@@ -183,7 +183,7 @@ describe("Wallet Context - Soroban Contract Invocation", () => {
     );
     expect(response.status).toBe("SUCCESS");
     expect(response.hash).toBe("mock_tx_hash_1234567890");
-    expect(response.returnValue).toBe(42n);
+    expect(response.returnValue).toBe(BigInt(42));
   });
 
   it("handles simulateOnly queries without signing or submitting", async () => {
@@ -377,24 +377,24 @@ describe("Typed Contract Clients & Registry", () => {
     const mockInvoker = vi.fn().mockResolvedValue({
       status: "SUCCESS",
       hash: "hash123",
-      returnValue: 500n,
+      returnValue: BigInt(500),
     });
 
     const client = new YieldStakingContractClient(TEST_CONTRACT_ID, mockInvoker);
 
-    await client.stake("user1", "pool1", 1000n);
+    await client.stake("user1", "pool1", BigInt(1000));
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "stake",
-      ["user1", "pool1", 1000n],
+      ["user1", "pool1", BigInt(1000)],
       expect.objectContaining({ simulateOnly: false }),
     );
 
-    await client.unstake("user1", "pool1", 500n);
+    await client.unstake("user1", "pool1", BigInt(500));
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "unstake",
-      ["user1", "pool1", 500n],
+      ["user1", "pool1", BigInt(500)],
       expect.objectContaining({ simulateOnly: false }),
     );
 
@@ -402,7 +402,7 @@ describe("Typed Contract Clients & Registry", () => {
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "harvest_yield",
-      ["user1", 1n],
+      ["user1", BigInt(1)],
       expect.objectContaining({ simulateOnly: false }),
     );
 
@@ -413,28 +413,28 @@ describe("Typed Contract Clients & Registry", () => {
       ["user1"],
       expect.objectContaining({ simulateOnly: true }),
     );
-    expect(escrowBal).toBe(500n);
+    expect(escrowBal).toBe(BigInt(500));
   });
 
   it("invokes PuzzleRewardsContractClient methods properly", async () => {
     const mockInvoker = vi.fn().mockResolvedValue({
       status: "SUCCESS",
       hash: "hash_puzzle",
-      returnValue: 100n,
+      returnValue: BigInt(100),
     });
 
     const client = new PuzzleRewardsContractClient(TEST_CONTRACT_ID, mockInvoker);
 
-    await client.claimPuzzleReward("player1", 5, 100n);
+    await client.claimPuzzleReward("player1", 5, BigInt(100));
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "claim_puzzle_reward",
-      ["player1", 5n, 100n],
+      ["player1", BigInt(5), BigInt(100)],
       expect.objectContaining({ simulateOnly: false }),
     );
 
     const balance = await client.getRewardBalance("player1");
-    expect(balance).toBe(100n);
+    expect(balance).toBe(BigInt(100));
   });
 
   it("invokes AiNftContractClient methods properly", async () => {
@@ -467,11 +467,11 @@ describe("Typed Contract Clients & Registry", () => {
 
     const client = new ArbiterEscrowContractClient(TEST_CONTRACT_ID, mockInvoker);
 
-    await client.createEscrow(10, "playerA", "playerB", "arbiter1", 5000n, "tokenX");
+    await client.createEscrow(10, "playerA", "playerB", "arbiter1", BigInt(5000), "tokenX");
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "create_escrow",
-      [10n, "playerA", "playerB", "arbiter1", 5000n, "tokenX"],
+      [BigInt(10), "playerA", "playerB", "arbiter1", BigInt(5000), "tokenX"],
       expect.objectContaining({ simulateOnly: false }),
     );
 
@@ -479,7 +479,7 @@ describe("Typed Contract Clients & Registry", () => {
     expect(mockInvoker).toHaveBeenCalledWith(
       TEST_CONTRACT_ID,
       "settle_match",
-      [10n, "admin1", "playerA"],
+      [BigInt(10), "admin1", "playerA"],
       expect.objectContaining({ simulateOnly: false }),
     );
   });

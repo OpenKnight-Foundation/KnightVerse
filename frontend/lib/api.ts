@@ -21,7 +21,7 @@ function withDefault(value: string | undefined, fallback: string): string {
 }
 
 /** Backend / game-server base URL (REST + WebSocket) */
-export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8000");
+export const API_BASE = withDefault(process.env.NEXT_PUBLIC_API_URL, "http://localhost:8080");
 
 /** Derive the WebSocket base from the HTTP base automatically */
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
@@ -194,6 +194,7 @@ export const endpoints = {
     register: () => `${API_BASE}/v1/auth/register`,
     logout: () => `${API_BASE}/v1/auth/logout`,
     refresh: () => `${API_BASE}/v1/auth/refresh`,
+    wsTicket: () => `${API_BASE}/v1/auth/ws-ticket`,
     sessions: () => `${API_BASE}/v1/auth/sessions`,
     revokeSession: (id: string) =>
       `${API_BASE}/v1/auth/sessions/${encodeURIComponent(id)}`,
@@ -214,12 +215,13 @@ export const endpoints = {
 
   /** Games */
   games: {
-    live: () => `${API_BASE}/v1/games/live`,
+    // TODO(FE-101): uncomment once the backend implements GET /v1/games/live
+    // live: () => `${API_BASE}/v1/games/live`,
     /** Game socket — served by the backend at `/v1/ws/game/{game_id}`. */
     ws: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}`,
     spectate: (gameId: string) =>
-      `${WS_BASE}/v1/games/${encodeURIComponent(gameId)}/spectate`,
+      `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}?role=spectator`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
   },
 
@@ -260,14 +262,14 @@ export const endpoints = {
   /** Tournaments */
   /**
    * Tournaments — the backend mounts these under its JWT-protected
-   * `/api/v1/tournaments` scope. Only `register` exists server-side today;
+  * `/v1/tournaments` scope. Only `register` exists server-side today;
    * list/create follow the same scope (see BE-114).
    */
   tournaments: {
-    list: () => `${API_BASE}/api/v1/tournaments`,
-    create: () => `${API_BASE}/api/v1/tournaments`,
+    list: () => `${API_BASE}/v1/tournaments`,
+    create: () => `${API_BASE}/v1/tournaments`,
     register: (id: string) =>
-      `${API_BASE}/api/v1/tournaments/${encodeURIComponent(id)}/register`,
+      `${API_BASE}/v1/tournaments/${encodeURIComponent(id)}/register`,
   },
 
   /** Horizon */
@@ -282,3 +284,78 @@ export const endpoints = {
     submit: () => `${API_BASE}/v1/puzzles/submit`,
   },
 } as const;
+
+/**
+ * Request a fresh, short-lived single-use ticket before opening a browser
+ * WebSocket (which cannot set an Authorization header).
+ */
+export async function requestWebSocketTicket(accessToken?: string | null): Promise<string> {
+  const token =
+    accessToken ??
+    (typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null);
+  if (!token) {
+    throw new Error("Sign in before connecting to a game socket");
+  }
+
+  const response = await fetch(endpoints.auth.wsTicket(), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`WebSocket ticket request failed (${response.status})`);
+  }
+
+  const body: unknown = await response.json();
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as Record<string, unknown>).ticket !== "string"
+  ) {
+    throw new Error("WebSocket ticket response was invalid");
+  }
+  return (body as { ticket: string }).ticket;
+}
+
+// ── Auth-aware fetch (#FE-95) ────────────────────────────────────────────────
+
+/**
+ * Callbacks the helper needs to interact with the auth context without
+ * importing React (which would pull in hooks into a plain module).
+ */
+export interface AuthFetchDeps {
+  getToken: () => string | null;
+  refresh: () => Promise<void>;
+  logout: () => Promise<void>;
+}
+
+/**
+ * Fetch wrapper that:
+ *  1. Injects the current bearer token automatically.
+ *  2. On a 401, calls `refresh()` once and retries the request.
+ *  3. If the retry is still 401 (token truly revoked), calls `logout()`.
+ *
+ * All other network / server errors are passed through so callers can handle
+ * them. Non-authenticated routes should keep using `fetchWithRetry` directly.
+ */
+export async function authFetch(
+  url: string,
+  options: RequestInit = {},
+  deps: AuthFetchDeps,
+): Promise<Response> {
+  const token = deps.getToken();
+  const headers = new Headers(options.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetchWithRetry(url, { ...options, headers });
+
+  if (res.status !== 401) return res;
+
+  // One refresh attempt then retry.
+  await deps.refresh();
+  const newToken = deps.getToken();
+  if (newToken) headers.set("Authorization", `Bearer ${newToken}`);
+
+  const retried = await fetchWithRetry(url, { ...options, headers });
+  if (retried.status === 401) await deps.logout();
+  return retried;
+}

@@ -1,5 +1,5 @@
 use actix::prelude::*;
-use actix_web::error::ErrorUnauthorized;
+use actix_web::error::{ErrorInternalServerError, ErrorUnauthorized};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use db::DbPool;
@@ -925,12 +925,14 @@ pub async fn ws_route(
     lobby: web::Data<Addr<LobbyState>>,
     redis: web::Data<RedisBroadcaster>,
     connection_tracker: web::Data<Addr<ConnectionStateTracker>>,
+    ticket_redis_pool: Option<web::Data<deadpool_redis::Pool>>,
 ) -> Result<HttpResponse, Error> {
     let auth_header = req
         .headers()
         .get("Authorization")
         .and_then(|h| h.to_str().ok());
     let mut reconnect_token: Option<String> = None;
+    let mut ticket: Option<String> = None;
     let mut is_spectator = false;
 
     // Parse query string manually
@@ -940,6 +942,7 @@ pub async fn ws_route(
             if let Some((key, value)) = param.split_once('=') {
                 match key {
                     "reconnect" => reconnect_token = Some(value.to_string()),
+                    "ticket" => ticket = Some(value.to_string()),
                     "role" if value == "spectator" => is_spectator = true,
                     _ => {}
                 }
@@ -947,8 +950,55 @@ pub async fn ws_route(
         }
     }
 
-    let claims = if let Some(ref reconnect_token_str) = reconnect_token {
-        // Validate reconnection token
+    let claims = if let Some(ticket) = ticket.as_deref() {
+        let pool = ticket_redis_pool
+            .as_ref()
+            .ok_or_else(|| ErrorInternalServerError("WebSocket ticket storage unavailable"))?;
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|_| ErrorInternalServerError("WebSocket ticket storage unavailable"))?;
+
+        // GET+DEL must be one indivisible Redis operation: concurrent upgrade
+        // requests presenting the same ticket can result in only one success.
+        let ticket_key = format!("ws_ticket:{}", ticket);
+        let claims_json: Option<String> = ::redis::Script::new(
+            "local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]); end; return value",
+        )
+        .key(ticket_key)
+        .invoke_async(&mut conn)
+        .await
+        .map_err(|_| ErrorInternalServerError("Failed to consume WebSocket ticket"))?;
+
+        let claims_json =
+            claims_json.ok_or_else(|| ErrorUnauthorized("Invalid or expired WebSocket ticket"))?;
+        let claims: Claims = serde_json::from_str(&claims_json)
+            .map_err(|_| ErrorUnauthorized("Invalid WebSocket ticket"))?;
+        if claims.token_type != TokenType::Access {
+            return Err(ErrorUnauthorized("Invalid WebSocket ticket"));
+        }
+        if let Some(reconnect_token) = reconnect_token.as_deref() {
+            match validate_reconnect_token(reconnect_token) {
+                Ok(reconnect_claims)
+                    if reconnect_claims.user_id == claims.user_id
+                        && reconnect_claims.player_id == claims.player_id =>
+                {
+                    reconnect_claims
+                }
+                Ok(_) => {
+                    return Err(ErrorUnauthorized(
+                        "WebSocket ticket does not match reconnect token",
+                    ));
+                }
+                // A valid, newly-issued ticket is sufficient for reconnecting
+                // when the older short-lived reconnect token has expired.
+                Err(_) => claims,
+            }
+        } else {
+            claims
+        }
+    } else if let Some(ref reconnect_token_str) = reconnect_token {
+        // Preserve reconnect-token-only clients predating WebSocket tickets.
         validate_reconnect_token(reconnect_token_str)?
     } else {
         // Validate regular JWT token from header

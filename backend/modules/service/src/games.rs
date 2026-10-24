@@ -343,25 +343,48 @@ impl GameService {
             ));
         }
 
-        if model.black_player != NIL_UUID {
-            return Err(ApiError::BadRequest(
-                "Game already has two players".to_string(),
-            ));
-        }
-
         if model.white_player == player_id {
             return Err(ApiError::BadRequest(
                 "Cannot join your own game as opponent".to_string(),
             ));
         }
 
-        let mut active: game::ActiveModel = model.into();
-        active.black_player = Set(player_id);
-        active.result = Set(Some(db_entity::game::ResultSide::Ongoing));
-        active.started_at = Set(Utc::now().into());
-        active.updated_at = Set(Utc::now().into());
+        let now = Utc::now();
+        let update_result = game::Entity::update_many()
+            .col_expr(
+                game::Column::BlackPlayer,
+                sea_orm::sea_query::Expr::value(player_id),
+            )
+            .col_expr(
+                game::Column::Result,
+                sea_orm::sea_query::Expr::value(Some(db_entity::game::ResultSide::Ongoing)),
+            )
+            .col_expr(
+                game::Column::StartedAt,
+                sea_orm::sea_query::Expr::value(now),
+            )
+            .col_expr(
+                game::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(now),
+            )
+            .filter(game::Column::Id.eq(game_id))
+            .filter(game::Column::BlackPlayer.eq(NIL_UUID))
+            .exec(db)
+            .await
+            .map_err(ApiError::from)?;
 
-        let updated = active.update(db).await.map_err(ApiError::from)?;
+        if update_result.rows_affected == 0 {
+            return Err(ApiError::BadRequest(
+                "Game already has two players".to_string(),
+            ));
+        }
+
+        let updated = game::Entity::find_by_id(game_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
         Ok(Self::model_to_dto(updated))
     }
 

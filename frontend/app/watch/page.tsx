@@ -9,9 +9,9 @@ import { usePipWindows } from "@/hook/usePipWindows";
 import {
   type LiveGameMode,
   type LiveGameSummary,
+  MOCK_LIVE_GAMES,
 } from "@/constants/mockLiveGames";
 import { cn } from "@/lib/utils";
-import { endpoints } from "@/lib/api";
 
 const FILTERS: Array<{ label: string; value: "all" | LiveGameMode }> = [
   { label: "All", value: "all" },
@@ -23,42 +23,17 @@ type LiveGameRecord = LiveGameSummary & {
   mode: LiveGameMode;
 };
 
-function normalizeLiveGame(game: Partial<LiveGameRecord>, index: number): LiveGameRecord | null {
-  if (!game.gameId || !game.white?.address || !game.black?.address) {
-    return null;
-  }
-
-  return {
-    gameId: game.gameId,
-    white: {
-      address: game.white.address,
-      elo: game.white.elo ?? 1200,
-    },
-    black: {
-      address: game.black.address,
-      elo: game.black.elo ?? 1200,
-    },
-    moveCount: game.moveCount ?? 0,
-    spectatorCount: game.spectatorCount ?? 0,
-    timeControl: game.timeControl ?? "10+0",
-    status: game.status === "ending_soon" ? "ending_soon" : "playing",
-    mode:
-      game.mode ??
-      ((game as { rated?: boolean }).rated === true
-        ? "rated"
-        : (game as { rated?: boolean }).rated === false
-          ? "casual"
-          : index % 2 === 0
-            ? "rated"
-            : "casual"),
-  };
-}
+const useMockLiveGames =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_USE_MOCK_LIVE_GAMES === "true";
 
 export default function WatchPage() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | LiveGameMode>("all");
-  const [liveGames, setLiveGames] = useState<LiveGameRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [liveGames, setLiveGames] = useState<LiveGameRecord[]>(
+    useMockLiveGames ? (MOCK_LIVE_GAMES as LiveGameRecord[]) : []
+  );
+  const [loading, setLoading] = useState(!useMockLiveGames);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const {
     windows: pipWindows,
@@ -71,48 +46,11 @@ export default function WatchPage() {
   } = usePipWindows();
 
   useEffect(() => {
-    let active = true;
+    if (useMockLiveGames) return;
 
-    const fetchLiveGames = async () => {
-      try {
-        const response = await fetch(endpoints.games.live(), {
-          credentials: "include",
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const payload = (await response.json()) as Array<Partial<LiveGameRecord>>;
-        const normalizedGames = payload
-          .map((game, index) => normalizeLiveGame(game, index))
-          .filter((game): game is LiveGameRecord => game !== null);
-
-        if (active) {
-          setLiveGames(normalizedGames);
-          setFetchError(null);
-        }
-      } catch (err) {
-        if (active) {
-          setFetchError(
-            err instanceof Error ? err.message : "Failed to load live games."
-          );
-          setLiveGames([]);
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchLiveGames();
-    const intervalId = window.setInterval(fetchLiveGames, 10000);
-
-    return () => {
-      active = false;
-      clearInterval(intervalId);
-    };
+    // TODO(FE-101): wire up real fetch once GET /v1/games/live exists on the backend
+    setLoading(false);
+    setFetchError("Live games endpoint is not yet available.");
   }, []);
 
   const filteredGames = useMemo(() => {

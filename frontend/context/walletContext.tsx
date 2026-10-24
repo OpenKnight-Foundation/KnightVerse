@@ -1,9 +1,35 @@
 "use client";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { Server, TransactionBuilder, Operation, Asset } from "stellar-sdk";
+import {
+  Horizon,
+  TransactionBuilder,
+  Operation,
+  Asset,
+  Contract,
+  Account,
+  rpc,
+  nativeToScVal,
+  scValToNative,
+  Address,
+  StrKey,
+  xdr,
+} from "@stellar/stellar-sdk";
 
-import { invokeBoundContract } from "@/contracts/client";
-import { HORIZON_URL, NETWORK_PASSPHRASE } from "@/lib/api";
+import {
+  HORIZON_URL,
+  SOROBAN_RPC,
+  NETWORK_PASSPHRASE,
+  CONTRACT_STAKING,
+  CONTRACT_GAME_ESCROW,
+  CONTRACT_AI_NFT,
+} from "@/lib/api";
+import { invokeBoundContract as invokeGeneratedBinding } from "@/contracts/client";
+import {
+  InvokeContractOptions,
+  TypedContractClient,
+  KnownContractType,
+  createTypedContractClient,
+} from "@/lib/contracts";
 
 type AppContextType = {
   address?: string;
@@ -35,27 +61,93 @@ type AppContextType = {
    * `NEXT_PUBLIC_*_CONTRACT_ID` variable; otherwise this throws instead of
    * guessing an ABI.
    */
-  invokeSorobanContract: (
+  invokeBoundContract: (
     contractId: string,
     functionName: string,
     params?: Record<string, unknown>,
   ) => Promise<unknown>;
+  /**
+   * Invokes a Soroban smart contract using @stellar/stellar-sdk's rpc module:
+   * simulate -> sign (Freighter) -> submit -> poll.
+   * If `options.simulateOnly` is true, simulates and returns the value without submitting.
+   */
+  invokeSorobanContract: (
+    contractId: string,
+    functionName: string,
+    args?: any[],
+    options?: InvokeContractOptions,
+  ) => Promise<any>;
+  /**
+   * Returns a typed contract client for Staking, Puzzle Rewards, AI NFTs, or Escrow.
+   */
+  getContractClient: <T extends TypedContractClient = TypedContractClient>(
+    contractType: KnownContractType | string,
+    contractId?: string,
+  ) => T;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+function toScVal(arg: any): xdr.ScVal {
+  if (
+    arg &&
+    typeof arg === "object" &&
+    ("_arm" in arg || "_value" in arg || arg instanceof xdr.ScVal)
+  ) {
+    return arg as xdr.ScVal;
+  }
+  if (
+    typeof arg === "string" &&
+    (StrKey.isValidEd25519PublicKey(arg) || StrKey.isValidContract(arg))
+  ) {
+    try {
+      return new Address(arg).toScVal();
+    } catch {
+      // fallback
+    }
+  }
+  return nativeToScVal(arg);
+}
+
+function resolveContractId(type: KnownContractType | string): string {
+  switch (type.toLowerCase()) {
+    case "staking":
+    case "yield_staking":
+      return CONTRACT_STAKING;
+    case "puzzle":
+    case "puzzles":
+    case "puzzle_rewards":
+    case "game":
+      return CONTRACT_GAME_ESCROW;
+    case "nft":
+    case "ai_nft":
+      return CONTRACT_AI_NFT;
+    case "escrow":
+    case "arbiter_escrow":
+      return CONTRACT_GAME_ESCROW;
+    default:
+      return "";
+  }
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | undefined>(undefined);
   const [status, setStatus] =
     useState<AppContextType["status"]>("disconnected");
-  const server = new Server(HORIZON_URL);
+  const server = new Horizon.Server(HORIZON_URL);
 
   useEffect(() => {
-    // Auto-detect previously connected Freighter account
-    const stored = localStorage.getItem("freighter_address");
-    if (stored) {
-      setAddress(stored);
-      setStatus("connected");
+    // Auto-detect previously connected Freighter account safely across environments
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const stored = window.localStorage.getItem("freighter_address");
+        if (stored) {
+          setAddress(stored);
+          setStatus("connected");
+        }
+      }
+    } catch {
+      // Ignore storage errors in non-browser/restricted environments
     }
   }, []);
 
@@ -83,7 +175,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!publicKey)
         throw new Error("Unable to read public key from Freighter");
       setAddress(publicKey);
-      localStorage.setItem("freighter_address", publicKey);
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          window.localStorage.setItem("freighter_address", publicKey);
+        }
+      } catch {
+        // Ignore storage errors
+      }
       setStatus("connected");
     } catch (err) {
       console.error("connectWallet", err);
@@ -94,12 +192,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const disconnectWallet = async () => {
     setAddress(undefined);
-    localStorage.removeItem("freighter_address");
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.removeItem("freighter_address");
+      }
+    } catch {
+      // Ignore storage errors
+    }
     setStatus("disconnected");
   };
 
   async function signWithFreighter(txXDR: string): Promise<string> {
-    const freighter = (window as any).freighterApi || (window as any).freighter;
+    // 1) Try official @stellar/freighter-api package if available
+    try {
+      const freighterApi = await import("@stellar/freighter-api");
+      if (freighterApi && typeof freighterApi.signTransaction === "function") {
+        const signed = await freighterApi.signTransaction(txXDR, {
+          networkPassphrase: NETWORK_PASSPHRASE,
+        });
+        if (signed) return signed;
+      }
+    } catch {
+      // Fall through to window injection
+    }
+
+    const freighter =
+      typeof window !== "undefined"
+        ? (window as any).freighterApi || (window as any).freighter
+        : undefined;
     if (!freighter) throw new Error("Freighter not available");
 
     // freighter API variants differ; try common shapes
@@ -186,6 +306,155 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const invokeSorobanContract = async (
     contractId: string,
     functionName: string,
+    args: any[] = [],
+    options: InvokeContractOptions = {},
+  ): Promise<any> => {
+    if (!address) {
+      throw new Error("No wallet connected. Please connect Freighter first.");
+    }
+
+    try {
+      // Modern @stellar/stellar-sdk rpc module
+      const rpcServer = new rpc.Server(SOROBAN_RPC, {
+        allowHttp: SOROBAN_RPC.startsWith("http://"),
+      });
+
+      // 1. Convert arguments to ScVals
+      const scValArgs = args.map(toScVal);
+
+      // 2. Fetch source account (try Soroban RPC first, fallback to Horizon)
+      let sourceAccount: Account;
+      try {
+        sourceAccount = await rpcServer.getAccount(address);
+      } catch {
+        const horizonAcct = await server.loadAccount(address);
+        sourceAccount = new Account(address, horizonAcct.sequence);
+      }
+
+      // 3. Build contract invocation operation and transaction
+      const baseFee =
+        options.fee?.toString() ?? (await server.fetchBaseFee()).toString();
+      const contract = new Contract(contractId);
+      const callOp = contract.call(functionName, ...scValArgs);
+
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: baseFee,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(callOp)
+        .setTimeout(options.timeoutInSeconds ?? 60)
+        .build();
+
+      // 4. SIMULATE transaction using rpc.Server
+      const sim = await rpcServer.simulateTransaction(tx);
+      if (rpc.Api.isSimulationError(sim)) {
+        const errorMsg = sim.error || "Simulation failed";
+        console.error("Soroban simulation error:", errorMsg, sim);
+        throw new Error(
+          `Soroban simulation failed for ${functionName}: ${errorMsg}`,
+        );
+      }
+
+      // If simulateOnly is requested (read-only query), return decoded retval
+      if (options.simulateOnly) {
+        if (sim.result?.retval) {
+          try {
+            return scValToNative(sim.result.retval);
+          } catch {
+            return sim.result.retval;
+          }
+        }
+        return sim.result;
+      }
+
+      // 5. ASSEMBLE transaction with footprint, auth entries, and resource fees
+      const preparedTx = rpc.assembleTransaction(tx, sim).build();
+
+      // 6. SIGN with Freighter
+      const txXDR = preparedTx.toXDR();
+      const signedEnvelopeXDR = await signWithFreighter(txXDR);
+      const signedTx = TransactionBuilder.fromXDR(
+        signedEnvelopeXDR,
+        NETWORK_PASSPHRASE,
+      );
+
+      // 7. SUBMIT to Soroban RPC
+      const sendResponse = await rpcServer.sendTransaction(signedTx);
+      if (sendResponse.status === "ERROR") {
+        const errDetail =
+          sendResponse.errorResult?.toXDR("base64") ||
+          JSON.stringify(sendResponse);
+        throw new Error(`Soroban transaction submission failed: ${errDetail}`);
+      }
+
+      // 8. POLL for transaction confirmation
+      const pollInterval = options.pollIntervalMs ?? 1000;
+      const maxAttempts = options.maxPollAttempts ?? 30;
+
+      const txResult = await rpcServer.pollTransaction(sendResponse.hash, {
+        attempts: maxAttempts,
+        sleepStrategy: () => pollInterval,
+      });
+
+      if (txResult.status === rpc.Api.GetTransactionStatus.FAILED) {
+        const failDetail =
+          (txResult as any).resultXdr?.toString() ||
+          (txResult as any).errorResult?.toXDR?.("base64") ||
+          "Transaction execution failed on-chain";
+        throw new Error(`Soroban transaction failed: ${failDetail}`);
+      }
+
+      if (txResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
+        throw new Error(
+          `Soroban transaction timed out waiting for confirmation (hash: ${sendResponse.hash})`,
+        );
+      }
+
+      // Parse return value if present
+      let returnValue: any = undefined;
+      if ((txResult as any).returnValue) {
+        try {
+          returnValue = scValToNative((txResult as any).returnValue);
+        } catch {
+          returnValue = (txResult as any).returnValue;
+        }
+      }
+
+      return {
+        status: "SUCCESS",
+        hash: sendResponse.hash,
+        returnValue,
+        raw: txResult,
+      };
+    } catch (err) {
+      console.error(`invokeSorobanContract [${functionName}]`, err);
+      throw err;
+    }
+  };
+
+  const getContractClient = <
+    T extends TypedContractClient = TypedContractClient,
+  >(
+    contractType: KnownContractType | string,
+    contractId?: string,
+  ): T => {
+    const id = contractId || resolveContractId(contractType);
+    if (!id) {
+      throw new Error(
+        `No contract ID provided or configured for type: ${contractType}. ` +
+          `Please provide a contractId or set the environment variable.`,
+      );
+    }
+    return createTypedContractClient(
+      contractType,
+      id,
+      invokeSorobanContract,
+    ) as T;
+  };
+
+  const invokeBoundContract = async (
+    contractId: string,
+    functionName: string,
     params: Record<string, unknown> = {},
   ) => {
     if (!address) throw new Error("No wallet connected");
@@ -193,14 +462,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Dispatch through the generated bindings (SC-91). Read calls are
       // simulated and resolved without a signature; write calls are signed
       // with Freighter and submitted.
-      return await invokeBoundContract({
+      return await invokeGeneratedBinding({
         contractId,
         method: functionName,
         args: params,
         signer: { address, sign: signWithFreighter },
       });
     } catch (err) {
-      console.error("invokeSorobanContract", err);
+      console.error("invokeBoundContract", err);
       throw err;
     }
   };
@@ -216,7 +485,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sendPayment,
         sendXLM,
         signTransaction: signWithFreighter,
+        invokeBoundContract,
         invokeSorobanContract,
+        getContractClient,
       }}
     >
       {children}

@@ -37,7 +37,7 @@ Import the env-aware factories and typed flows from `@/contracts/client`:
   connected Freighter wallet.
 - `stakeInPool({ caller, pool, amount, signer })` — `yield_staking.stake`.
 - `invokeBoundContract(...)` — generic dispatch used by
-  `useAppContext().invokeSorobanContract`.
+  `useAppContext().invokeBoundContract`.
 
 Contracts are optional deployment config, read at call time from:
 

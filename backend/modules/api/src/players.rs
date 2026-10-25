@@ -14,7 +14,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use validator::Validate;
 
-
+use service::players::{
+    add_player as add_new_player, delete_player as delete_player_by_id,
+    find_player_by_id as get_single_player_by_id, get_player_preferences,
+    update_player as update_player_by_id, update_player_preferences,
+};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------

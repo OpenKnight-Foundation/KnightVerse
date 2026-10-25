@@ -43,9 +43,20 @@ describe("useChessSocket sync & offline queue (FE-113 / FE-114)", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    // Game sockets authenticate with a single-use ticket fetched with the
+    // signed-in user's access token (BE-103), so provide both.
+    localStorage.setItem("access_token", "test-access-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ticket: "single-use-ticket", expires_in: 60 }),
+      }),
+    );
   });
 
   afterEach(() => {
+    localStorage.removeItem("access_token");
     vi.unstubAllGlobals();
     globalThis.WebSocket = originalWebSocket;
   });

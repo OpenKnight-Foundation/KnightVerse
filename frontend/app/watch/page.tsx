@@ -30,7 +30,7 @@ const useMockLiveGames =
 export default function WatchPage() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | LiveGameMode>("all");
-  const [liveGames, setLiveGames] = useState<LiveGameRecord[]>(
+  const [liveGames] = useState<LiveGameRecord[]>(
     useMockLiveGames ? (MOCK_LIVE_GAMES as LiveGameRecord[]) : []
   );
   const [loading, setLoading] = useState(!useMockLiveGames);

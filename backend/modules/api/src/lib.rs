@@ -7,7 +7,10 @@ pub mod chess960;
 mod auth_tests;
 pub mod config;
 pub mod games;
-pub mod player_stats;
+// pub mod player_stats;
+// ^ #1539's rating-history/online-count module is not compiled yet: it uses
+//   sqlx with a PgPool and table names that don't exist in this schema. Port
+//   it to db::DbPool + sea-orm (smdb.game) and register it in server.rs.
 pub mod idempotency;
 pub mod lc0;
 pub mod metrics;
@@ -31,6 +34,5 @@ extern crate challenge;
 // Re-export server module for external use
 pub use auth::{login, logout, logout_all, refresh, register};
 pub use idempotency::IdempotencyMiddleware;
-.configure(crate::player_stats::configure)
 pub use players::export_player_data;
 pub use server::main;

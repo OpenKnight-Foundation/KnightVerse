@@ -58,7 +58,7 @@ describe("useChessSocket URL (#FE-90)", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "");
 
     await expect(openSocketFor("abc")).resolves.toBe(
-      "ws://localhost:8000/v1/ws/game/abc?ticket=single-use-ticket",
+      "ws://localhost:8080/v1/ws/game/abc?ticket=single-use-ticket",
     );
   });
 

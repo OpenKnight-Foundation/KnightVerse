@@ -21,11 +21,18 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { AuthProvider } from "@/context/authContext";
 import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 
-// Board components read useGamePreferences(), which requires its provider.
+// Board components read useGamePreferences(), whose provider syncs through
+// useAuth(), so both providers are needed (same nesting as app/layout.tsx).
+const Providers = ({ children }: { children: React.ReactNode }) => (
+  <AuthProvider>
+    <GamePreferencesProvider>{children}</GamePreferencesProvider>
+  </AuthProvider>
+);
 const render = (ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) =>
-  rtlRender(ui, { wrapper: GamePreferencesProvider, ...options });
+  rtlRender(ui, { wrapper: Providers, ...options });
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { axe } from "vitest-axe";
 import type { AxeMatchers } from "vitest-axe";

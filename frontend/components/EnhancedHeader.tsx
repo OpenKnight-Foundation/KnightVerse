@@ -37,7 +37,7 @@ export function EnhancedHeader() {
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">
-                XLMate
+                KnightVerse
               </span>
               <span className="text-[10px] text-gray-500 -mt-1">
                 Chess on Stellar

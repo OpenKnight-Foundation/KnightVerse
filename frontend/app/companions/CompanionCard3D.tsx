@@ -19,12 +19,14 @@ interface CompanionCard3DProps {
   companion: AICompanion;
   onMint: (companionId: string) => void;
   onRent: (companionId: string) => void;
+  disabled?: boolean;
 }
 
 export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
   companion,
   onMint,
   onRent,
+  disabled = false,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [rotateX, setRotateX] = useState(0);
@@ -132,14 +134,26 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => onRent(companion.id)}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600/50 transition-colors"
+            onClick={() => !disabled && onRent(companion.id)}
+            disabled={disabled}
+            title={disabled ? "Contract action disabled during preview mode" : undefined}
+            className={`w-full py-2.5 px-4 rounded-xl font-semibold text-sm transition-colors ${
+              disabled
+                ? "bg-slate-800/50 text-slate-500 border border-slate-700/30 cursor-not-allowed"
+                : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600/50"
+            }`}
           >
             Rent Agent
           </button>
           <button
-            onClick={() => onMint(companion.id)}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-colors"
+            onClick={() => !disabled && onMint(companion.id)}
+            disabled={disabled}
+            title={disabled ? "Contract action disabled during preview mode" : undefined}
+            className={`w-full py-2.5 px-4 rounded-xl font-semibold text-sm transition-colors ${
+              disabled
+                ? "bg-indigo-900/40 text-indigo-400/50 border border-indigo-800/30 cursor-not-allowed shadow-none"
+                : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30"
+            }`}
           >
             Mint ({companion.priceXLM} XLM)
           </button>

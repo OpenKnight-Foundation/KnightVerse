@@ -15,6 +15,7 @@ const STYLES = ['All', 'Aggressive', 'Defensive', 'Tactical', 'Endgame Master'] 
 export default function AICompanionsPage() {
   const [selectedStyle, setSelectedStyle] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [notification, setNotification] = useState<string | null>(null);
 
   const filteredCompanions = useMemo(() => {
     return MOCK_COMPANIONS.filter((c) => {
@@ -25,16 +26,42 @@ export default function AICompanionsPage() {
   }, [selectedStyle, searchQuery]);
 
   const handleMint = (id: string) => {
-    alert(`Initiating Soroban contract call to mint AI Companion #${id}...`);
+    setNotification(`Companion #${id}: On-chain minting will be enabled with the Soroban ai_nft contract rollout.`);
   };
 
   const handleRent = (id: string) => {
-    alert(`Connecting to Soroban rental market for Companion #${id}...`);
+    setNotification(`Companion #${id}: Rental market will be activated with the Soroban ai_nft contract rollout.`);
   };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-8 md:p-12">
       <div className="max-w-7xl mx-auto">
+        {/* Preview Mode Banner */}
+        <div className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="px-2 py-0.5 rounded text-xs font-bold uppercase bg-amber-500/20 border border-amber-500/40">
+              Preview Mode
+            </span>
+            <span>
+              On-chain minting and rentals are in preview while the Soroban <code>ai_nft</code> contract rollout is staged. Card actions are view-only.
+            </span>
+          </div>
+          {notification && (
+            <button
+              onClick={() => setNotification(null)}
+              className="text-xs text-amber-200 hover:text-white underline ml-4"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+
+        {notification && (
+          <div className="mb-6 p-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs">
+            {notification}
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
           <div>
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
@@ -77,6 +104,7 @@ export default function AICompanionsPage() {
                 companion={companion}
                 onMint={handleMint}
                 onRent={handleRent}
+                disabled={true}
               />
             ))}
           </div>

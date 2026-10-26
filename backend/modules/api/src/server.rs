@@ -185,13 +185,14 @@ pub async fn main() -> std::io::Result<()> {
         #[cfg(not(debug_assertions))]
         let subscriber = subscriber.json();
 
-        subscriber.init();
+        let _ = subscriber.try_init();
     }
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let _database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
+    // JWT: strict env — crash on missing/insecure secret
     // JWT: strict env — crash on missing/insecure secret
     let jwt_service = JwtService::from_env();
     let jwt_secret = jwt_service.secret_key.clone();

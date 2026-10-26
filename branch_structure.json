@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-1396-be-131-knightverse-core-binary-panics-at",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-1396-be-131-knightverse-core-binary-panics-at": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-1396-be-131-knightverse-core-binary-panics-at",
+    "origin"
+  ]
+}

@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   Horizon,
   TransactionBuilder,
@@ -134,7 +134,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | undefined>(undefined);
   const [status, setStatus] =
     useState<AppContextType["status"]>("disconnected");
-  const server = new Horizon.Server(HORIZON_URL);
+  const server = useMemo(() => new Horizon.Server(HORIZON_URL), []);
 
   useEffect(() => {
     // Auto-detect previously connected Freighter account safely across environments

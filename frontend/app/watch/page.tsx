@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Eye, Radio, SearchX } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Radio, SearchX, Send } from "lucide-react";
 import { LiveGameCard } from "@/components/watch/LiveGameCard";
 import { SpectatorBoard } from "@/components/watch/SpectatorBoard";
 import { PipWindowLayer } from "@/components/watch/PipWindowLayer";
 import { usePipWindows } from "@/hook/usePipWindows";
+import { useSpectatorSocket } from "@/hook/useSpectatorSocket";
 import {
   type LiveGameMode,
   type LiveGameSummary,
@@ -26,6 +27,107 @@ type LiveGameRecord = LiveGameSummary & {
 const useMockLiveGames =
   process.env.NODE_ENV === "development" &&
   process.env.NEXT_PUBLIC_USE_MOCK_LIVE_GAMES === "true";
+
+type SpectatorChatMessage = {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: number;
+};
+
+function SpectatorChatPanel({ gameId }: { gameId: string }) {
+  const { messages, sendChat, moderationError, connected } = useSpectatorSocket(gameId);
+  const [draft, setDraft] = useState("");
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      return;
+    }
+    sendChat(trimmed);
+    setDraft("");
+  };
+
+  return (
+    <aside
+      className="flex h-full flex-col rounded-xl border border-gray-700/30 bg-gray-800/40"
+      aria-label="Spectator chat"
+    >
+      <div className="flex items-center justify-between border-b border-gray-700/30 px-4 py-3">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">
+          Spectator chat
+        </h2>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs",
+            connected ? "text-teal-300" : "text-gray-400",
+          )}
+        >
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              connected ? "bg-teal-400" : "bg-gray-500",
+            )}
+          />
+          {connected ? "Live" : "Connecting…"}
+        </span>
+      </div>
+
+      <div
+        ref={listRef}
+        className="flex-1 space-y-2 overflow-y-auto px-4 py-3 text-sm"
+        aria-live="polite"
+      >
+        {messages.length === 0 ? (
+          <p className="text-gray-500">No messages yet. Say hello!</p>
+        ) : (
+          messages.map((message: SpectatorChatMessage) => (
+            <div key={message.id} className="text-gray-200">
+              <span className="font-semibold text-teal-300">{message.author}: </span>
+              <span>{message.text}</span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {moderationError && (
+        <div
+          className="mx-4 mb-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+          role="alert"
+        >
+          {moderationError}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-gray-700/30 p-3">
+        <input
+          type="text"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Send a message…"
+          aria-label="Chat message"
+          className="flex-1 rounded-md border border-gray-700/50 bg-gray-900/60 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-teal-400/50 focus:outline-none"
+        />
+        <button
+          type="submit"
+          aria-label="Send chat message"
+          className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-teal-500 to-blue-700 px-3 py-2 text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          disabled={!draft.trim()}
+        >
+          <Send className="h-4 w-4" />
+        </button>
+      </form>
+    </aside>
+  );
+}
 
 export default function WatchPage() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
@@ -74,7 +176,10 @@ export default function WatchPage() {
   if (selectedGameId) {
     return (
       <>
-        <SpectatorBoard gameId={selectedGameId} onLeave={() => setSelectedGameId(null)} />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
+          <SpectatorBoard gameId={selectedGameId} onLeave={() => setSelectedGameId(null)} />
+          <SpectatorChatPanel gameId={selectedGameId} />
+        </div>
         <PipWindowLayer
           windows={pipWindows}
           viewport={pipViewport}

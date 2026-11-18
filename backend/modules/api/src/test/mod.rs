@@ -2,6 +2,8 @@
 mod idempotency;
 #[cfg(test)]
 mod rate_limit;
+#[cfg(test)]
+mod tournament_routes;
 
 #[cfg(test)]
 mod tests {

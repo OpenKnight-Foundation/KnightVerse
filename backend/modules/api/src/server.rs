@@ -441,32 +441,7 @@ pub async fn main() -> std::io::Result<()> {
                         jwt_expiration,
                         Some(redis_pool.clone()),
                     ))
-                    // BE-135: Swiss round generation, previously unreachable
-                    // because nothing depended on the `pairing` crate.
-                    .route("", web::get().to(crate::tournaments::list_tournaments))
-                    .route("", web::post().to(crate::tournaments::create_tournament))
-                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
-                    .route(
-                        "/{id}/register",
-                        web::post().to(crate::tournaments::register_for_tournament),
-                    ),
-            )
-            // Canonical v1 tournament routes. Keep the /api/v1 aliases above
-            // for clients already using that route shape.
-            .service(
-                web::scope("/v1/tournaments")
-                    .wrap(JwtAuthMiddleware::new_with_redis(
-                        jwt_secret.clone(),
-                        jwt_expiration,
-                        Some(redis_pool.clone()),
-                    ))
-                    .route("", web::get().to(crate::tournaments::list_tournaments))
-                    .route("", web::post().to(crate::tournaments::create_tournament))
-                    .route("/{id}/pairings", web::post().to(crate::pairings::build_pairing_round))
-                    .route(
-                        "/{id}/register",
-                        web::post().to(crate::tournaments::register_for_tournament),
-                    ),
+                    .configure(crate::tournaments::configure_routes),
             )
             // Escrow routes (with Idempotency protection)
             .service(

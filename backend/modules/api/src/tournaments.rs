@@ -61,6 +61,22 @@ fn default_format() -> TournamentFormat {
     TournamentFormat::SingleElimination
 }
 
+/// Registers the tournament routes on the `/v1/tournaments` scope.
+///
+/// `server.rs` mounts this behind the JWT and idempotency middleware; route
+/// tests call it directly so they exercise the exact same route table.
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("", web::get().to(list_tournaments))
+        .route("", web::post().to(create_tournament))
+        // BE-135: Swiss round generation, previously unreachable
+        // because nothing depended on the `pairing` crate.
+        .route(
+            "/{id}/pairings",
+            web::post().to(crate::pairings::build_pairing_round),
+        )
+        .route("/{id}/register", web::post().to(register_for_tournament));
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/tournaments",

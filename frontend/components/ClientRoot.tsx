@@ -4,6 +4,8 @@ import { useState } from "react";
 import { GameSidebar } from "@/components/GameSidebar";
 import { TransactionStatusIndicator } from "@/components/TransactionStatusIndicator";
 import { AuthButton } from "@/components/AuthButton";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { NotificationsProvider } from "@/context/NotificationsContext";
 import Image from "next/image";
 import clsx from "clsx";
 
@@ -14,6 +16,7 @@ export default function ClientRoot({
 }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   return (
+    <NotificationsProvider>
     <div className="flex h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 text-white">
       <GameSidebar
         collapsed={isSidebarCollapsed}
@@ -47,7 +50,8 @@ export default function ClientRoot({
           </div>
         </div>
         <div className="container mx-auto p-4 md:p-8">
-          <div className="mb-2 flex justify-end">
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <NotificationBell />
             <AuthButton />
           </div>
           {children}
@@ -55,5 +59,6 @@ export default function ClientRoot({
       </main>
       <TransactionStatusIndicator />
     </div>
+    </NotificationsProvider>
   );
 }

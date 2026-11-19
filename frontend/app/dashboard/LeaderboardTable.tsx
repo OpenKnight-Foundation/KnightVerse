@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { playerHref } from "@/lib/playerProfileService";
 
 interface LeaderboardRow {
   rank: number;
@@ -48,7 +50,11 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
           {filtered.map((r) => (
             <tr key={r.rank} className="border-t">
               <td className="p-2">{r.rank}</td>
-              <td className="p-2">{r.player}</td>
+              <td className="p-2">
+                <Link href={playerHref(r.player)} className="hover:underline">
+                  {r.player}
+                </Link>
+              </td>
               <td className="p-2">
                 <span className={`rounded px-2 py-0.5 text-xs ${TIER_COLORS[r.tier]}`}>{r.tier}</span>
               </td>

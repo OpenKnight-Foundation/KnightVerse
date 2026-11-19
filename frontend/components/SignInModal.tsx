@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/authContext";
+import { endpoints } from "@/lib/api";
 
 /**
  * Sign-in / register modal wired to the auth API (#FE-96).
@@ -18,7 +19,23 @@ export interface SignInModalProps {
   onClose?: () => void;
 }
 
-type Mode = "login" | "register";
+type Mode = "login" | "register" | "forgot";
+
+/**
+ * Requests a password-reset email (BE-159). The backend should answer 2xx
+ * whether or not the account exists, so the UI never reveals that.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const res = await fetch(endpoints.auth.forgotPassword(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (res.status === 429) throw new Error("Too many requests — please try again later.");
+  if (!res.ok && res.status >= 500) {
+    throw new Error("Could not send the reset email. Please try again.");
+  }
+}
 
 export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModalProps) {
   const visible = open ?? isOpen ?? false;
@@ -29,6 +46,7 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const close = () => {
@@ -40,7 +58,9 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
   useEffect(() => {
     if (visible) {
       setError(null);
+      setNotice(null);
       setPassword("");
+      setMode((m) => (m === "forgot" ? "login" : m));
     }
   }, [visible]);
 
@@ -59,8 +79,16 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setNotice(null);
     setSubmitting(true);
     try {
+      if (mode === "forgot") {
+        await requestPasswordReset(email.trim());
+        setNotice(
+          "If an account exists for that email, a password reset link is on its way. Check your inbox.",
+        );
+        return;
+      }
       if (mode === "login") {
         await login(username, password);
       } else {
@@ -74,7 +102,14 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
     }
   };
 
-  const title = mode === "login" ? "Sign in" : "Create account";
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setNotice(null);
+  };
+
+  const title =
+    mode === "login" ? "Sign in" : mode === "register" ? "Create account" : "Reset password";
 
   return (
     <div
@@ -94,6 +129,13 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-3">
+          {mode === "forgot" && (
+            <p className="text-sm text-muted-foreground">
+              Enter the email on your account and we&apos;ll send you a link to reset your password.
+            </p>
+          )}
+
+          {mode !== "forgot" && (
           <div className="space-y-1">
             <label htmlFor="sign-in-username" className="text-sm font-medium">
               Username
@@ -106,8 +148,9 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
               required
             />
           </div>
+          )}
 
-          {mode === "register" && (
+          {mode !== "login" && (
             <div className="space-y-1">
               <label htmlFor="sign-in-email" className="text-sm font-medium">
                 Email
@@ -123,10 +166,23 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
             </div>
           )}
 
+          {mode !== "forgot" && (
           <div className="space-y-1">
-            <label htmlFor="sign-in-password" className="text-sm font-medium">
-              Password
-            </label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="sign-in-password" className="text-sm font-medium">
+                Password
+              </label>
+              {mode === "login" && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-500 hover:underline"
+                  onClick={() => switchMode("forgot")}
+                  data-testid="forgot-password-link"
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <Input
               id="sign-in-password"
               type="password"
@@ -136,10 +192,17 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
               required
             />
           </div>
+          )}
 
           {error && (
             <p role="alert" data-testid="sign-in-error" className="text-sm text-red-500">
               {error}
+            </p>
+          )}
+
+          {notice && (
+            <p role="status" data-testid="sign-in-notice" className="text-sm text-emerald-500">
+              {notice}
             </p>
           )}
 
@@ -149,7 +212,7 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
             disabled={submitting}
             data-testid="sign-in-submit"
           >
-            {submitting ? "Please wait…" : title}
+            {submitting ? "Please wait…" : mode === "forgot" ? "Send reset link" : title}
           </Button>
         </form>
 
@@ -157,12 +220,9 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
           <button
             type="button"
             className="text-blue-500 hover:underline"
-            onClick={() => {
-              setMode(mode === "login" ? "register" : "login");
-              setError(null);
-            }}
+            onClick={() => switchMode(mode === "login" ? "register" : "login")}
           >
-            {mode === "login" ? "Create an account" : "Have an account? Sign in"}
+            {mode === "login" ? "Create an account" : mode === "forgot" ? "Back to sign in" : "Have an account? Sign in"}
           </button>
           <button type="button" className="text-muted-foreground hover:underline" onClick={close}>
             Cancel

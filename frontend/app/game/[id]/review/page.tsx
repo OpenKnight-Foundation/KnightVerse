@@ -16,6 +16,7 @@ import GameReviewSummary, {
 import CentipawnAdvantageChart, {
   type EvaluatedPly,
 } from "@/components/chess/CentipawnAdvantageChart";
+import { analyseGame, type GameAnalysis } from "@/lib/gameAnalysis";
 
 /**
  * Game Review Page (FE-120, Issue #1361)
@@ -27,8 +28,8 @@ import CentipawnAdvantageChart, {
  * stores it when a game ends. If the stored PGN is missing or inaccessible,
  * the page falls back to a mock game for demonstration purposes.
  *
- * Engine evaluation data is not yet integrated, so move evaluations and
- * player accuracy statistics currently use neutral placeholder values.
+ * Per-move evaluations (BE-179) come from the server's stored analysis when
+ * available, otherwise from a browser-side Stockfish pass (lib/gameAnalysis).
  *
  * Features:
  * - Replays completed games from their PGN notation.
@@ -88,25 +89,53 @@ export default function GameReviewPage() {
     }
   }, [gameId]);
 
-  // Parse the PGN into individual moves for the evaluation chart.
-  // Evaluations remain null until chess-engine analysis is integrated.
-  const plies: EvaluatedPly[] = useMemo(() => {
-    if (!pgn) return [];
+  // BE-179: real per-move evaluations — server analysis first, otherwise the
+  // bundled Stockfish worker analyses the game in the browser.
+  const [analysis, setAnalysis] = useState<GameAnalysis | null>(null);
+  const [analysisState, setAnalysisState] = useState<"idle" | "running" | "done" | "failed">("idle");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
+  useEffect(() => {
+    if (!pgn) return;
+    const controller = new AbortController();
+    setAnalysis(null);
+    setProgress(null);
+    setAnalysisState("running");
+    analyseGame({
+      gameId,
+      pgn,
+      signal: controller.signal,
+      onProgress: (done, total) => {
+        if (!controller.signal.aborted) setProgress({ done, total });
+      },
+    }).then((result) => {
+      if (controller.signal.aborted) return;
+      setAnalysis(result);
+      setAnalysisState(result ? "done" : "failed");
+    });
+    return () => controller.abort();
+  }, [gameId, pgn]);
+
+  // Until evaluations arrive, show the move list with neutral evaluations.
+  const plies: EvaluatedPly[] = useMemo(() => {
+    if (analysis) return analysis.plies;
+    if (!pgn) return [];
     try {
       const game = new Chess();
       game.loadPgn(pgn);
-
-      return game.history().map((san, index) => ({
-        plyIndex: index,
-        evaluation: null,
-        san,
-      }));
+      return [
+        { plyIndex: 0, evaluation: null },
+        ...game.history().map((san, index) => ({
+          plyIndex: index + 1,
+          evaluation: null,
+          san,
+        })),
+      ];
     } catch {
       // Return an empty move list when the PGN is invalid or cannot be parsed.
       return [];
     }
-  }, [pgn]);
+  }, [pgn, analysis]);
 
   return (
     <main
@@ -153,6 +182,17 @@ export default function GameReviewPage() {
           >
             Evaluation
           </h2>
+          <p className="mb-2 text-xs text-gray-500" role="status" aria-live="polite">
+            {analysisState === "running" &&
+              (progress
+                ? `Analysing with Stockfish… ${progress.done}/${progress.total} positions`
+                : "Loading engine analysis…")}
+            {analysisState === "done" &&
+              (analysis?.source === "server"
+                ? "Server engine analysis"
+                : "Analysed in your browser with Stockfish (depth 10)")}
+            {analysisState === "failed" && "Engine analysis is unavailable for this game."}
+          </p>
 
           {plies.length > 0 ? (
             <CentipawnAdvantageChart
@@ -170,9 +210,9 @@ export default function GameReviewPage() {
         {/* Player accuracy and move-classification summary. */}
         <section aria-label="Game review summary">
           <GameReviewSummary
-            whiteAccuracy={0}
-            blackAccuracy={0}
-            counts={ZERO_COUNTS}
+            whiteAccuracy={analysis?.whiteAccuracy ?? 0}
+            blackAccuracy={analysis?.blackAccuracy ?? 0}
+            counts={analysis?.counts ?? ZERO_COUNTS}
           />
         </section>
 

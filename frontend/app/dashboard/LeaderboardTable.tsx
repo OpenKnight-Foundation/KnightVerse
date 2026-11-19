@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { playerHref } from "@/lib/playerProfileService";
 
 export type LeaderboardTier = "Grandmaster" | "Master" | "Diamond" | "Gold" | "Silver" | "Bronze";
 
@@ -80,7 +82,9 @@ export function LeaderboardTable({
                   >
                     <td className="p-2 font-semibold text-gray-300">{r.rank}</td>
                     <td className="p-2 text-white">
-                      {r.player}
+                      <Link href={playerHref(r.player)} className="hover:underline">
+                        {r.player}
+                      </Link>
                       {isMe && <span className="ml-2 text-xs text-teal-300">(you)</span>}
                     </td>
                     <td className="p-2">

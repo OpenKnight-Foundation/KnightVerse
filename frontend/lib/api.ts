@@ -199,6 +199,9 @@ export const endpoints = {
     revokeSession: (id: string) =>
       `${API_BASE}/v1/auth/sessions/${encodeURIComponent(id)}`,
     revokeAllSessions: () => `${API_BASE}/v1/auth/sessions/revoke-all`,
+    /** Password reset (BE-159). */
+    forgotPassword: () => `${API_BASE}/v1/auth/forgot-password`,
+    resetPassword: () => `${API_BASE}/v1/auth/reset-password`,
   },
 
   /** Matchmaking */
@@ -223,6 +226,9 @@ export const endpoints = {
     spectate: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}?role=spectator`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
+    /** Per-move engine evaluations for a finished game (BE-179). */
+    analysis: (gameId: string) =>
+      `${API_BASE}/v1/games/${encodeURIComponent(gameId)}/analysis`,
   },
 
   /** Enhanced game socket */
@@ -242,6 +248,12 @@ export const endpoints = {
      * issue before surfacing a count to users.
      */
     online: () => `${API_BASE}/v1/players/online`,
+    /** Public profile of any player by username (ratings, titles). */
+    profile: (username: string) =>
+      `${API_BASE}/v1/players/${encodeURIComponent(username)}`,
+    /** Recent games of any player by username. */
+    games: (username: string, limit = 10) =>
+      `${API_BASE}/v1/players/${encodeURIComponent(username)}/games?limit=${limit}`,
     export: () => `${API_BASE}/v1/players/me/export`,
     preferences: () => `${API_BASE}/v1/players/me/preferences`,
     /**

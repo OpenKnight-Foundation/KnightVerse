@@ -67,6 +67,8 @@ export function buildConnectSrc(env: CspEnv): string[] {
   }
 
   sources.add(originOf(env.NEXT_PUBLIC_IPFS_GATEWAY) ?? "https://gateway.pinata.cloud");
+  // Public opening explorer used as a fallback for move statistics (BE-178).
+  sources.add("https://explorer.lichess.ovh");
   for (const host of STATIC_CONNECT_HOSTS) sources.add(host);
 
   // Sentry DSNs look like https://<key>@o123.ingest.sentry.io/<project>.

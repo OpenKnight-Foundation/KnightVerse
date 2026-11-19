@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers, FaClock, FaFlag, FaSearch } from "react-icons/fa";
+import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers, FaClock, FaFlag, FaSearch, FaBan } from "react-icons/fa";
 import { useFocusTrap } from "@/hook/useFocusTrap";
 
 type GameResult =
@@ -12,7 +12,9 @@ type GameResult =
   | "win_on_time"
   | "loss_on_time"
   | "win_by_resignation"
-  | "loss_by_resignation";
+  | "loss_by_resignation"
+  | "draw_by_agreement"
+  | "aborted";
 
 interface GameResultOverlayProps {
   result: GameResult;
@@ -20,6 +22,8 @@ interface GameResultOverlayProps {
   onPlayOnline: () => void;
   /** Optional: open the post-game review view (FE-120 / #1361). */
   onReview?: () => void;
+  /** Optional extra controls rendered above the default buttons (e.g. rematch). */
+  extraActions?: React.ReactNode;
 }
 
 const resultConfig: Record<
@@ -82,9 +86,23 @@ const resultConfig: Record<
     gradient: "from-gray-500/20 to-slate-600/10",
     borderColor: "border-gray-500/30",
   },
+  draw_by_agreement: {
+    icon: <FaHandshake className="text-5xl text-blue-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "Draw",
+    subtitle: "Draw agreed by both players",
+    gradient: "from-blue-500/20 to-indigo-600/10",
+    borderColor: "border-blue-500/30",
+  },
+  aborted: {
+    icon: <FaBan className="text-5xl text-gray-400 drop-shadow-lg" aria-hidden="true" />,
+    title: "Game Aborted",
+    subtitle: "The game was aborted before it started — no result recorded",
+    gradient: "from-gray-500/20 to-slate-600/10",
+    borderColor: "border-gray-500/30",
+  },
 };
 
-export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview }: GameResultOverlayProps) {
+export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview, extraActions }: GameResultOverlayProps) {
   const cfg = resultConfig[result];
 
   // Focus trap: keep keyboard focus within the modal while it is open.
@@ -125,6 +143,7 @@ export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview 
 
           {/* Buttons */}
           <div className="flex flex-col gap-3 w-full mt-2" role="group" aria-label="Post-game options">
+            {extraActions}
             {onReview && (
               <button
                 onClick={onReview}

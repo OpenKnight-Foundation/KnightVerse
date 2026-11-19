@@ -37,6 +37,51 @@ export interface SyncedGameState {
   lastPly: number;
 }
 
+/**
+ * In-game negotiation actions (BE-170): draw, abort, takeback and rematch.
+ * Outgoing frames are `{ type, gameId, ...extra }`; the server relays the same
+ * `type` to the opponent and reports final outcomes via `game_over`.
+ */
+export type GameActionType =
+  | "draw_offer"
+  | "draw_accept"
+  | "draw_decline"
+  | "abort"
+  | "takeback_offer"
+  | "takeback_accept"
+  | "takeback_decline"
+  | "rematch_offer"
+  | "rematch_accept"
+  | "rematch_decline";
+
+/** An action/event received from the server (relayed from the opponent). */
+export interface GameActionEvent {
+  /** Monotonic id so identical consecutive events still trigger effects. */
+  id: number;
+  type: GameActionType | "game_over";
+  /** For `takeback_accept`: ply count the board should be rolled back to. */
+  ply?: number;
+  /** For `rematch_accept`: id of the newly created game. */
+  newGameId?: string;
+  /** For `game_over`: reason string (e.g. "draw_agreed", "aborted"). */
+  reason?: string;
+}
+
+/**
+ * Authoritative clock snapshot from the server (BE-149). Times are in ms and
+ * describe the clocks at `serverTime`; `receivedAt` is the local
+ * `performance.now()` when the frame arrived.
+ */
+export interface ServerClockState {
+  whiteMs: number;
+  blackMs: number;
+  /** Side whose clock is running, or null when paused/finished. */
+  turn: "w" | "b" | null;
+  /** Server wall-clock (epoch ms) at which the snapshot was taken, if sent. */
+  serverTime?: number;
+  receivedAt: number;
+}
+
 interface UseChessSocketReturn {
   status: ChessSocketStatus;
   gameId: string | null;
@@ -44,12 +89,106 @@ interface UseChessSocketReturn {
   /** True once the opponent has resigned (FE-117 / #1358). */
   opponentResigned: boolean;
   lastSyncedState: SyncedGameState | null;
+  /** Latest negotiation event from the opponent/server (BE-170). */
+  lastGameAction: GameActionEvent | null;
+  /** Latest authoritative clock snapshot from the server (BE-149). */
+  serverClock: ServerClockState | null;
+  /** Smoothed round-trip time in ms, measured via ping/pong. */
+  latencyMs: number;
+  /** Estimated `serverNow - Date.now()` in ms (0 until measured). */
+  clockOffsetMs: number;
   sendMove: (move: ChessMove) => void;
   /** Sends an explicit resign message to the server (FE-117 / #1358). */
   sendResign: () => void;
+  /** Sends a draw/abort/takeback/rematch action (BE-170). Returns false if offline. */
+  sendGameAction: (type: GameActionType, extra?: Record<string, unknown>) => boolean;
   disconnect: () => void;
   reconnect: () => void;
 }
+
+const PING_INTERVAL_MS = 5000;
+
+/** Parses clock fields from any server frame (ms preferred, seconds accepted). */
+export function parseClock(
+  data: Record<string, unknown>,
+  receivedAt: number,
+): ServerClockState | null {
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const clock =
+    data.clock && typeof data.clock === "object"
+      ? (data.clock as Record<string, unknown>)
+      : data;
+  let whiteMs = num(clock.whiteMs) ?? num(clock.white_ms);
+  let blackMs = num(clock.blackMs) ?? num(clock.black_ms);
+  if (whiteMs === undefined || blackMs === undefined) {
+    // Only treat seconds fields as a clock frame when this is an explicit clock message.
+    if (data.type !== "clock") return null;
+    const ws = num(clock.whiteTime);
+    const bs = num(clock.blackTime);
+    if (ws === undefined || bs === undefined) return null;
+    whiteMs = ws * 1000;
+    blackMs = bs * 1000;
+  }
+  const rawTurn = clock.turn ?? clock.activeColor ?? clock.active_color;
+  const turn =
+    rawTurn === "w" || rawTurn === "white"
+      ? "w"
+      : rawTurn === "b" || rawTurn === "black"
+        ? "b"
+        : null;
+  return {
+    whiteMs,
+    blackMs,
+    turn,
+    serverTime: num(clock.serverTime) ?? num(clock.server_time) ?? num(data.serverTime),
+    receivedAt,
+  };
+}
+
+/**
+ * Remaining ms for each side "now", correcting a server snapshot for transit
+ * latency. With a server timestamp we use the measured clock offset; otherwise
+ * we assume the frame spent half the RTT in flight.
+ */
+export function projectClock(
+  clock: ServerClockState,
+  nowPerf: number,
+  nowEpoch: number,
+  latencyMs: number,
+  clockOffsetMs: number,
+): { whiteMs: number; blackMs: number } {
+  let elapsed: number;
+  if (typeof clock.serverTime === "number" && clockOffsetMs !== 0) {
+    elapsed = nowEpoch + clockOffsetMs - clock.serverTime;
+  } else {
+    elapsed = nowPerf - clock.receivedAt + latencyMs / 2;
+  }
+  elapsed = Math.max(0, elapsed);
+  return {
+    whiteMs: Math.max(0, clock.whiteMs - (clock.turn === "w" ? elapsed : 0)),
+    blackMs: Math.max(0, clock.blackMs - (clock.turn === "b" ? elapsed : 0)),
+  };
+}
+
+const GAME_ACTION_TYPES = new Set<string>([
+  "draw_offer",
+  "draw_accept",
+  "draw_decline",
+  "abort",
+  "takeback_offer",
+  "takeback_accept",
+  "takeback_decline",
+  "rematch_offer",
+  "rematch_accept",
+  "rematch_decline",
+]);
+
+/** Maps legacy PascalCase server names (backend/src/socket) onto the action set. */
+const LEGACY_ACTION_ALIASES: Record<string, GameActionType> = {
+  TakebackOffered: "takeback_offer",
+  TakebackAccepted: "takeback_accept",
+  TakebackRejected: "takeback_decline",
+};
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000; // 1 second
@@ -85,8 +224,14 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   const [lastOpponentMove, setLastOpponentMove] = useState<ChessMove | null>(null);
   const [opponentResigned, setOpponentResigned] = useState(false);
   const [lastSyncedState, setLastSyncedState] = useState<SyncedGameState | null>(null);
+  const [lastGameAction, setLastGameAction] = useState<GameActionEvent | null>(null);
+  const [serverClock, setServerClock] = useState<ServerClockState | null>(null);
+  const [latencyMs, setLatencyMs] = useState(0);
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const actionIdRef = useRef(0);
+  const latencyRef = useRef(0);
+  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  
   const wsRef = useRef<WebSocket | null>(null);
   const createWebSocketRef = useRef<((attemptReconnect: boolean) => Promise<WebSocket | null>) | null>(null);
   const connectionRequestIdRef = useRef(0);
@@ -209,6 +354,16 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
         setStatus("connected");
         reconnectAttemptsRef.current = 0;
 
+        // Latency probe (BE-149): RTT drives clock latency correction.
+        const sendPing = () => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping", gameId, clientTime: Date.now() }));
+          }
+        };
+        if (pingTimerRef.current) clearInterval(pingTimerRef.current);
+        sendPing();
+        pingTimerRef.current = setInterval(sendPing, PING_INTERVAL_MS);
+
         if (attemptReconnect) {
           // Ask for the authoritative board first; the offline queue is flushed
           // in the `sync` handler once we know which moves the server applied.
@@ -224,7 +379,55 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "move") {
+          const receivedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+          // Any frame may carry an authoritative clock snapshot (BE-149).
+          if (data && typeof data === "object") {
+            const clock = parseClock(data as Record<string, unknown>, receivedAt);
+            if (clock) setServerClock(clock);
+          }
+
+          const actionType: string | undefined =
+            LEGACY_ACTION_ALIASES[data.type as string] ??
+            (GAME_ACTION_TYPES.has(data.type) ? data.type : undefined);
+
+          if (data.type === "pong") {
+            if (typeof data.clientTime === "number") {
+              const now = Date.now();
+              const rtt = Math.max(0, now - data.clientTime);
+              // Exponential smoothing keeps one slow frame from jerking the clock.
+              const smoothed =
+                latencyRef.current === 0 ? rtt : latencyRef.current * 0.7 + rtt * 0.3;
+              latencyRef.current = smoothed;
+              setLatencyMs(Math.round(smoothed));
+              if (typeof data.serverTime === "number") {
+                setClockOffsetMs(Math.round(data.serverTime - (data.clientTime + rtt / 2)));
+              }
+            }
+          } else if (data.type === "clock") {
+            // Already handled by parseClock above.
+          } else if (actionType) {
+            setLastGameAction({
+              id: ++actionIdRef.current,
+              type: actionType as GameActionType,
+              ply: typeof data.ply === "number" ? data.ply : undefined,
+              newGameId:
+                typeof data.newGameId === "string"
+                  ? data.newGameId
+                  : typeof data.new_game_id === "string"
+                    ? data.new_game_id
+                    : undefined,
+            });
+          } else if (
+            data.type === "game_over" &&
+            /draw|abort/i.test(String(data.reason ?? ""))
+          ) {
+            setLastGameAction({
+              id: ++actionIdRef.current,
+              type: "game_over",
+              reason: String(data.reason),
+            });
+          } else if (data.type === "move") {
             debugLog(`[WebSocket] Received opponent move:`, data);
             const move = toMove(data);
             if (move) {
@@ -284,7 +487,11 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
 
       ws.onclose = (event) => {
         debugLog(`[WebSocket] Closed for game ${gameId}. Code: ${event.code}, Reason: ${event.reason}`);
-        
+        if (pingTimerRef.current) {
+          clearInterval(pingTimerRef.current);
+          pingTimerRef.current = null;
+        }
+
         if (!isManualDisconnectRef.current) {
           setStatus("disconnected");
           
@@ -378,6 +585,20 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     }
   }, [gameId]);
 
+  /** Sends a draw/abort/takeback/rematch frame (BE-170). */
+  const sendGameAction = useCallback(
+    (type: GameActionType, extra: Record<string, unknown> = {}) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ ...extra, type, gameId }));
+        debugLog(`[WebSocket] Game action sent: ${type}`);
+        return true;
+      }
+      console.warn(`[WebSocket] Cannot send ${type} — socket is not open`);
+      return false;
+    },
+    [gameId],
+  );
+
   /**
    * Manually disconnects from the WebSocket server.
    * Clears the move queue and prevents automatic reconnection.
@@ -464,6 +685,8 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   useEffect(() => {
     let active = true;
     setOpponentResigned(false);
+    setLastGameAction(null);
+    setServerClock(null);
     if (gameId) {
       isManualDisconnectRef.current = false;
       createWebSocket().then(ws => {
@@ -492,6 +715,7 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
   useEffect(() => {
     return () => {
       clearReconnectTimeout();
+      if (pingTimerRef.current) clearInterval(pingTimerRef.current);
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -504,8 +728,13 @@ export function useChessSocket(gameId: string | null): UseChessSocketReturn {
     lastOpponentMove,
     opponentResigned,
     lastSyncedState,
+    lastGameAction,
+    serverClock,
+    latencyMs,
+    clockOffsetMs,
     sendMove,
     sendResign,
+    sendGameAction,
     disconnect,
     reconnect,
   };

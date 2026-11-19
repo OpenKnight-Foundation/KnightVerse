@@ -278,6 +278,12 @@ export const endpoints = {
       `${HORIZON_URL}/transactions/${encodeURIComponent(hash)}`,
   },
 
+  /** Opening explorer — next-move statistics for a FEN (BE-178). */
+  openings: {
+    explorer: (fen: string) =>
+      `${API_BASE}/v1/openings/explorer?fen=${encodeURIComponent(fen)}`,
+  },
+
   /** Puzzles (#FE-68) */
   puzzles: {
     list: () => `${API_BASE}/v1/puzzles`,

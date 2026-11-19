@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useToast } from "@/components/ui/toast";
 import { OpeningExplorer } from "@/components/openings/OpeningExplorer";
+import { OpeningMoveStats } from "@/components/openings/OpeningMoveStats";
 import {
   ECO_BOOK,
   classifyOpening,
@@ -153,6 +154,19 @@ export default function OpeningsPage() {
     },
     [],
   );
+
+  // BE-178: clicking a move in the statistics table plays it on the board.
+  const handleStatMove = useCallback((san: string) => {
+    try {
+      const move = gameRef.current.move(san);
+      if (!move) return false;
+      setBoardMoves((m) => [...m, move.san]);
+      setBoardFen(gameRef.current.fen());
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const handleSaveLine = useCallback(() => {
     if (boardMoves.length === 0) {
@@ -426,6 +440,7 @@ export default function OpeningsPage() {
                 >
                   Reset board
                 </button>
+                <OpeningMoveStats fen={boardFen} onPlayMove={handleStatMove} />
               </div>
             )}
           </div>

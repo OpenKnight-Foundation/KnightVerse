@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Chess } from "chess.js";
@@ -17,6 +17,9 @@ import CentipawnAdvantageChart, {
   type EvaluatedPly,
 } from "@/components/chess/CentipawnAdvantageChart";
 import { analyseGame, type GameAnalysis } from "@/lib/gameAnalysis";
+import { useGameShortcuts } from "@/hook/useGameShortcuts";
+import { ShortcutsHelpDialog } from "@/components/ShortcutsHelpDialog";
+import { GameChatPanel } from "@/components/GameChatPanel";
 
 /**
  * Game Review Page (FE-120, Issue #1361)
@@ -65,6 +68,15 @@ export default function GameReviewPage() {
 
   const [pgn, setPgn] = useState<string>("");
   const [activePly, setActivePly] = useState(0);
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const replayControlsRef = useRef<{
+    stepBack: () => void;
+    stepForward: () => void;
+  } | null>(null);
 
   // Load the saved PGN when the game ID changes.
   // Fall back to the mock game if storage is unavailable or no PGN is saved.
@@ -137,6 +149,37 @@ export default function GameReviewPage() {
     }
   }, [pgn, analysis]);
 
+  const handleControlsChange = useCallback(
+    (controls: { stepBack: () => void; stepForward: () => void }) => {
+      replayControlsRef.current = controls;
+    },
+    [],
+  );
+
+  const openChat = useCallback(() => {
+    setChatOpen(true);
+    requestAnimationFrame(() => chatInputRef.current?.focus());
+  }, []);
+
+  const showResignNotice = useCallback(() => {
+    setNotice("Resign is only available during a live game.");
+  }, []);
+
+  useGameShortcuts({
+    flipBoard: () => setOrientation((prev) => (prev === "white" ? "black" : "white")),
+    stepBack: () => replayControlsRef.current?.stepBack(),
+    stepForward: () => replayControlsRef.current?.stepForward(),
+    openChat,
+    resign: showResignNotice,
+    help: () => setHelpOpen((prev) => !prev),
+  });
+
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(id);
+  }, [notice]);
+
   return (
     <main
       className="min-h-screen p-4 text-white md:p-8"
@@ -155,20 +198,57 @@ export default function GameReviewPage() {
             </p>
           </div>
 
-          <Link
-            href="/"
-            className="text-sm text-gray-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
-          >
-            Back to Lobby
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOrientation((prev) => (prev === "white" ? "black" : "white"))}
+              aria-label="Flip board orientation"
+              className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+            >
+              Flip
+            </button>
+            <button
+              type="button"
+              onClick={openChat}
+              aria-label="Open game chat"
+              className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              aria-label="Keyboard shortcuts help"
+              className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+            >
+              ?
+            </button>
+            <Link
+              href="/"
+              className="text-sm text-gray-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+            >
+              Back to Lobby
+            </Link>
+          </div>
         </header>
+
+        {notice && (
+          <p className="text-xs text-yellow-300" role="status">
+            {notice}
+          </p>
+        )}
 
         {/* Interactive replay of the selected game's PGN. */}
         <section
           className="rounded-2xl border border-gray-700/50 bg-gray-900/60 p-4"
           aria-label="Game replay"
         >
-          <GameHistoryPGNViewer pgn={pgn || MOCK_PGN} />
+          <GameHistoryPGNViewer
+            pgn={pgn || MOCK_PGN}
+            orientation={orientation}
+            enableKeyboardNavigation={false}
+            onControlsChange={handleControlsChange}
+          />
         </section>
 
         {/* Move-by-move evaluation visualization. */}
@@ -227,6 +307,16 @@ export default function GameReviewPage() {
           />
         </section>
       </div>
+
+      <ShortcutsHelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+      />
+      <GameChatPanel
+        ref={chatInputRef}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
     </main>
   );
 }

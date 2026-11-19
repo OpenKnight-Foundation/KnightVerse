@@ -65,8 +65,9 @@ impl JwtService {
 
     /// Create a JWT service from environment variables.
     ///
-    /// Requires `JWT_SECRET` (preferred) or `JWT_SECRET_KEY`. The process will
-    /// panic on startup if neither is set — no hardcoded fallback is allowed.
+    /// Requires `JWT_SECRET` (preferred) or `JWT_SECRET_KEY` with at least 32
+    /// characters. The process will panic on startup if the secret is missing
+    /// or insecure — no hardcoded fallback is allowed.
     /// Optional: `JWT_EXPIRATION_SECS` (default 3600).
     pub fn from_env() -> Self {
         let secret_key = std::env::var("JWT_SECRET")
@@ -75,24 +76,7 @@ impl JwtService {
                 "JWT_SECRET (or JWT_SECRET_KEY) must be set. Refusing to start with a hardcoded fallback secret.",
             );
 
-        if secret_key.trim().is_empty() {
-            panic!("JWT_SECRET must not be empty");
-        }
-
-        // Reject well-known insecure defaults that might still be in .env templates
-        const INSECURE_DEFAULTS: &[&str] = &[
-            "knightverse_dev_secret_key_change_in_production",
-            "xlmate_super_secret_jwt_key_change_in_production",
-            "your_secret_key_here",
-            "your_secret_key_change_this_in_production",
-            "change_me",
-            "secret",
-        ];
-        if INSECURE_DEFAULTS.iter().any(|d| secret_key == *d) {
-            panic!(
-                "JWT_SECRET appears to be an insecure default value. Set a strong, unique secret before starting the server."
-            );
-        }
+        validate_jwt_secret(&secret_key).unwrap_or_else(|message| panic!("{message}"));
 
         let expiration_time = std::env::var("JWT_EXPIRATION_SECS")
             .ok()
@@ -186,6 +170,63 @@ impl JwtService {
     /// Extract token from Authorization header
     pub fn extract_token_from_header(auth_header: &str) -> Option<String> {
         auth_header.strip_prefix("Bearer ").map(|s| s.to_string())
+    }
+}
+
+fn validate_jwt_secret(secret_key: &str) -> Result<(), &'static str> {
+    if secret_key.trim().is_empty() {
+        return Err("JWT_SECRET must not be empty");
+    }
+
+    if secret_key.chars().count() < 32 {
+        return Err("JWT_SECRET must be at least 32 characters long");
+    }
+
+    // Reject well-known insecure defaults that might still be in .env templates.
+    const INSECURE_DEFAULTS: &[&str] = &[
+        "knightverse_dev_secret_key_change_in_production",
+        "xlmate_super_secret_jwt_key_change_in_production",
+        "generate_a_long_random_secret_here",
+        "your_secret_key_here",
+        "your_secret_key_change_this_in_production",
+        "change_me",
+        "secret",
+    ];
+    if INSECURE_DEFAULTS
+        .iter()
+        .any(|default| secret_key == *default)
+    {
+        return Err(
+            "JWT_SECRET appears to be an insecure default value. Set a strong, unique secret before starting the server.",
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_jwt_secret;
+
+    #[test]
+    fn rejects_secrets_shorter_than_32_characters() {
+        assert_eq!(
+            validate_jwt_secret("a".repeat(31).as_str()),
+            Err("JWT_SECRET must be at least 32 characters long")
+        );
+    }
+
+    #[test]
+    fn accepts_a_secret_of_exactly_32_characters() {
+        assert_eq!(
+            validate_jwt_secret("0123456789abcdef0123456789abcdef"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn rejects_the_environment_example_placeholder() {
+        assert!(validate_jwt_secret("generate_a_long_random_secret_here").is_err());
     }
 }
 

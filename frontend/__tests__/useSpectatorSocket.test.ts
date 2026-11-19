@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useSpectatorSocket } from "@/hook/useSpectatorSocket";
+import { setSessionAccessToken } from "@/lib/sessionToken";
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -42,7 +43,7 @@ describe("useSpectatorSocket", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
-    localStorage.setItem("access_token", "test-access-token");
+    setSessionAccessToken("test-access-token");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -55,6 +56,7 @@ describe("useSpectatorSocket", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     globalThis.WebSocket = originalWebSocket;
+    setSessionAccessToken(null);
   });
 
   it("initializes with idle status and null game state when no game is selected", () => {

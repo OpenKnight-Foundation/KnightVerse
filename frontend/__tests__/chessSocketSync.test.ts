@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { useChessSocket } from "@/hook/useChessSocket";
+import { setSessionAccessToken } from "@/lib/sessionToken";
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -44,8 +45,9 @@ describe("useChessSocket sync & offline queue (FE-113 / FE-114)", () => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
     // Game sockets authenticate with a single-use ticket fetched with the
-    // signed-in user's access token (BE-103), so provide both.
-    localStorage.setItem("access_token", "test-access-token");
+    // signed-in user's access token (BE-103), so provide both. The token is
+    // kept in memory only (#FE-166), not localStorage.
+    setSessionAccessToken("test-access-token");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -56,7 +58,7 @@ describe("useChessSocket sync & offline queue (FE-113 / FE-114)", () => {
   });
 
   afterEach(() => {
-    localStorage.removeItem("access_token");
+    setSessionAccessToken(null);
     vi.unstubAllGlobals();
     globalThis.WebSocket = originalWebSocket;
   });

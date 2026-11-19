@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { endpoints, authFetch } from "@/lib/api";
+import { setSessionAccessToken } from "@/lib/sessionToken";
 
 interface AuthUser {
   user_id: number;
@@ -49,59 +50,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = "access_token";
-const USER_KEY = "user";
 /** Refresh this many seconds before the access token expires. */
 const REFRESH_MARGIN_SECONDS = 300;
-/** Web Locks name that serialises token refresh across tabs (#FE-93). */
+/** Web Locks name that serialises concurrent refresh calls within this tab. */
 const REFRESH_LOCK = "knightverse-auth-refresh";
 
-interface StoredSession {
-  token: string;
-  user: AuthUser;
-}
-
 /**
- * Reads the persisted session. A malformed `user` entry (old format, manual
- * edit, partial write) clears both keys instead of crashing the app (#FE-92).
- */
-function readStoredSession(): StoredSession | null {
-  try {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const rawUser = localStorage.getItem(USER_KEY);
-    if (!token || !rawUser) return null;
-    const user = JSON.parse(rawUser) as AuthUser;
-    if (!user || typeof user !== "object") throw new Error("Invalid stored user");
-    return { token, user };
-  } catch {
-    clearStoredSession();
-    return null;
-  }
-}
-
-function persistSession(token: string, user: AuthUser) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-function clearStoredSession() {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-  } catch {
-    // Storage unavailable (e.g. privacy mode): nothing to clear.
-  }
-}
-
-/** True when the token is expired, undecodable, or inside the refresh margin. */
-function needsRefresh(token: string): boolean {
-  const exp = decodeJWT(token)?.exp;
-  return typeof exp !== "number" || exp - REFRESH_MARGIN_SECONDS <= Date.now() / 1000;
-}
-
-/**
- * Runs `fn` while holding a cross-tab lock so only one tab refreshes at a
- * time; tabs that were waiting then adopt the new token from storage.
+ * Runs `fn` while holding a lock so only one refresh happens at a time, even
+ * if several components ask for one concurrently.
  */
 async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
@@ -112,60 +68,52 @@ async function withRefreshLock(fn: () => Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * Builds the minimal user record we can trust from the access token's own
+ * claims (#FE-166). The access token is kept in memory only, so this is the
+ * only user data available right after a silent restore; anything else
+ * (e.g. a linked wallet) is re-synced once the relevant screen loads.
+ */
+function userFromToken(token: string): AuthUser | null {
+  const claims = decodeJWT(token);
+  if (!claims || typeof claims.user_id !== "number" || typeof claims.username !== "string") {
+    return null;
+  }
+  return { user_id: claims.user_id, username: claims.username };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const accessTokenRef = useRef<string | null>(null);
+  const userRef = useRef<AuthUser | null>(null);
 
-  const applySession = useCallback((session: StoredSession | null) => {
-    accessTokenRef.current = session?.token ?? null;
-    setAccessToken(session?.token ?? null);
-    setUser(session?.user ?? null);
+  const applySession = useCallback((token: string | null, nextUser: AuthUser | null) => {
+    accessTokenRef.current = token;
+    userRef.current = nextUser;
+    setSessionAccessToken(token);
+    setAccessToken(token);
+    setUser(nextUser);
   }, []);
 
   const clearSession = useCallback(() => {
-    clearStoredSession();
-    applySession(null);
+    applySession(null, null);
   }, [applySession]);
 
-  // Restore the session on mount. An expired (or nearly expired) token keeps
-  // `isLoading` true until the immediate refresh below settles (#FE-91).
-  useEffect(() => {
-    const stored = readStoredSession();
-    if (stored && typeof decodeJWT(stored.token)?.exp !== "number") {
-      // A token we can't read can't be refreshed either; start logged out.
-      clearSession();
-      setIsLoading(false);
-      return;
-    }
-    applySession(stored);
-    if (!stored || !needsRefresh(stored.token)) setIsLoading(false);
-  }, [applySession, clearSession]);
-
   const refreshToken = useCallback(async () => {
-    const tokenBeforeLock = accessTokenRef.current;
     try {
       await withRefreshLock(async () => {
-        const stored = readStoredSession();
-        if (!stored) {
-          // Another tab logged out (or storage was cleared) while we waited.
-          applySession(null);
-          return;
-        }
-        if (stored.token !== tokenBeforeLock && !needsRefresh(stored.token)) {
-          // Another tab already refreshed: reuse its token instead of
-          // spending the refresh token a second time.
-          applySession(stored);
-          return;
+        const headers = new Headers({ "Content-Type": "application/json" });
+        if (accessTokenRef.current) {
+          headers.set("Authorization", `Bearer ${accessTokenRef.current}`);
         }
 
         const response = await fetch(endpoints.auth.refresh(), {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${stored.token}`,
-          },
+          headers,
+          // The refresh token itself lives in an httpOnly cookie; it is never
+          // exposed to JavaScript (#FE-166).
           credentials: "include",
         });
         if (!response.ok) {
@@ -173,8 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         const data = await response.json();
-        persistSession(data.access_token, stored.user);
-        applySession({ token: data.access_token, user: stored.user });
+        const nextUser = userRef.current ?? userFromToken(data.access_token);
+        applySession(data.access_token, nextUser);
       });
     } catch (error) {
       console.error("Token refresh error:", error);
@@ -183,6 +131,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
   }, [applySession, clearSession]);
+
+  // Restore the session on mount from the httpOnly refresh-token cookie only;
+  // the access token is never persisted client-side (#FE-166).
+  useEffect(() => {
+    void refreshToken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refresh REFRESH_MARGIN_SECONDS before expiry, or immediately if the token
   // is already expired or inside the margin (#FE-91).
@@ -197,17 +152,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, delay);
     return () => clearTimeout(timeout);
   }, [accessToken, refreshToken]);
-
-  // Mirror login/logout/refresh performed in other tabs (#FE-93). `storage`
-  // events only fire in tabs other than the one that wrote the value.
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== null && event.key !== TOKEN_KEY && event.key !== USER_KEY) return;
-      applySession(readStoredSession());
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [applySession]);
 
   const login = useCallback(async (username: string, password: string): Promise<AuthResponse> => {
     const response = await fetch(endpoints.auth.login(), {
@@ -230,8 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       username: data.username,
       wallet_address: data.wallet_address ?? null,
     };
-    persistSession(data.access_token, sessionUser);
-    applySession({ token: data.access_token, user: sessionUser });
+    applySession(data.access_token, sessionUser);
 
     return data;
   }, [applySession]);
@@ -257,8 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       username: data.username,
       wallet_address: data.wallet_address ?? null,
     };
-    persistSession(data.access_token, sessionUser);
-    applySession({ token: data.access_token, user: sessionUser });
+    applySession(data.access_token, sessionUser);
 
     return data;
   }, [applySession]);
@@ -281,11 +223,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setLinkedWallet = useCallback(
     (walletAddress: string | null) => {
-      const stored = readStoredSession();
-      if (!stored) return;
-      const next = { ...stored, user: { ...stored.user, wallet_address: walletAddress } };
-      persistSession(next.token, next.user);
-      applySession(next);
+      if (!userRef.current) return;
+      applySession(accessTokenRef.current, { ...userRef.current, wallet_address: walletAddress });
     },
     [applySession],
   );

@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "storybook:build": "npx --yes storybook build",
     "bindings:generate": "bash scripts/generate-contract-bindings.sh"
   },
   "dependencies": {

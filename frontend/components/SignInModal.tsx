@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/authContext";
+import { useFocusTrap } from "@/hook/useFocusTrap";
 import { endpoints } from "@/lib/api";
 
 /**
@@ -49,10 +50,11 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const close = () => {
+  const close = useCallback(() => {
     onOpenChange?.(false);
     onClose?.();
-  };
+  }, [onClose, onOpenChange]);
+  const trapRef = useFocusTrap({ active: visible, onEscape: close });
 
   // Reset transient state whenever the modal is reopened.
   useEffect(() => {
@@ -62,16 +64,6 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
       setPassword("");
       setMode((m) => (m === "forgot" ? "login" : m));
     }
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   if (!visible) return null;
@@ -117,6 +109,7 @@ export function SignInModal({ open, onOpenChange, isOpen, onClose }: SignInModal
       onClick={close}
     >
       <div
+        ref={trapRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sign-in-modal-title"

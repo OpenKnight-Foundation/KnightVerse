@@ -101,6 +101,7 @@ import { GameResultOverlay } from "@/components/GameResultOverlay";
 import { useBoardAnnouncer, type MoveAnnouncement } from "@/hook/useBoardAnnouncer";
 import { useFocusTrap } from "@/hook/useFocusTrap";
 import { MatchmakingModal } from "@/app/components/matchmaking/MatchmakingModal";
+import { SignInModal } from "@/components/SignInModal";
 import ChessboardComponent from "@/components/chess/ChessboardComponent";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,47 @@ describe("useBoardAnnouncer — announcement text", () => {
 // 3. useFocusTrap
 // ---------------------------------------------------------------------------
 
+describe("SignInModal — keyboard accessibility", () => {
+  function SignInHarness() {
+    const [open, setOpen] = React.useState(false);
+
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>Open sign-in</button>
+        <SignInModal open={open} onOpenChange={setOpen} />
+      </>
+    );
+  }
+
+  it("traps focus, closes on Escape, and restores focus to its trigger", async () => {
+    const user = userEvent.setup();
+    render(<SignInHarness />);
+
+    const trigger = screen.getByRole("button", { name: "Open sign-in" });
+    await user.click(trigger);
+
+    const dialog = screen.getByRole("dialog");
+    const username = screen.getByLabelText("Username");
+    await waitFor(() => expect(username).toHaveFocus());
+
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    cancel.focus();
+    await user.tab();
+    expect(username).toHaveFocus();
+
+    const results = await axe(dialog, axeOptions);
+    expect(results).toHaveNoViolations();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. useFocusTrap
+// ---------------------------------------------------------------------------
+
 describe("useFocusTrap", () => {
   function Modal({
     isOpen,
@@ -362,7 +404,7 @@ describe("useFocusTrap", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. GameResultOverlay — ARIA dialog and axe scan
+// 5. GameResultOverlay — ARIA dialog and axe scan
 // ---------------------------------------------------------------------------
 
 describe("GameResultOverlay — ARIA & accessibility", () => {

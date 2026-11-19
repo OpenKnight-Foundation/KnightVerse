@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'frontend/**'
+      - 'openapi.json'
       - '.github/workflows/frontend-check.yml'
   push:
     branches:
       - main
     paths:
       - 'frontend/**'
+      - 'openapi.json'
       - '.github/workflows/frontend-check.yml'
 
 jobs:
@@ -33,6 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: API spec path check
+        run: npm run api:check
 
       - name: Lint
         run: npm run lint

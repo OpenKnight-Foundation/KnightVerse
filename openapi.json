@@ -1,0 +1,377 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "KnightVerse API",
+    "version": "1.0.0",
+    "description": "Frontend-facing contract for KnightVerse /v1 endpoints."
+  },
+  "paths": {
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } } },
+        "responses": { "200": { "description": "Authenticated session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } } }
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "register",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } } },
+        "responses": { "200": { "description": "Authenticated session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } } }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": { "200": { "description": "Logged out" } }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "operationId": "refresh",
+        "responses": { "200": { "description": "Refreshed token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshResponse" } } } } }
+      }
+    },
+    "/v1/auth/ws-ticket": {
+      "post": {
+        "operationId": "requestWsTicket",
+        "responses": { "200": { "description": "Single-use socket ticket", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WsTicketResponse" } } } } }
+      }
+    },
+    "/v1/auth/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "responses": { "200": { "description": "Active sessions", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SessionInfo" } } } } } }
+      }
+    },
+    "/v1/auth/sessions/revoke-all": {
+      "post": {
+        "operationId": "revokeAllSessions",
+        "responses": { "200": { "description": "Sessions revoked" } }
+      }
+    },
+    "/v1/auth/sessions/{session_id}": {
+      "delete": {
+        "operationId": "revokeSession",
+        "parameters": [{ "name": "session_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Session revoked" } }
+      }
+    },
+    "/v1/auth/forgot-password": {
+      "post": {
+        "operationId": "forgotPassword",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ForgotPasswordRequest" } } } },
+        "responses": { "200": { "description": "Reset email accepted" } }
+      }
+    },
+    "/v1/auth/reset-password": {
+      "post": {
+        "operationId": "resetPassword",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" } } } },
+        "responses": { "200": { "description": "Password reset" } }
+      }
+    },
+    "/v1/matchmaking/join-casual": {
+      "post": { "operationId": "joinCasual", "responses": { "200": { "description": "Queued" } } }
+    },
+    "/v1/matchmaking/join-rated-free": {
+      "post": { "operationId": "joinRated", "responses": { "200": { "description": "Queued" } } }
+    },
+    "/v1/matchmaking/join-rated-staked": {
+      "post": { "operationId": "joinStaked", "responses": { "200": { "description": "Queued" } } }
+    },
+    "/v1/matchmaking/status/{request_id}": {
+      "get": { "operationId": "matchmakingStatus", "parameters": [{ "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Queue status" } } }
+    },
+    "/v1/matchmaking/match/{match_id}": {
+      "get": { "operationId": "matchmakingMatch", "parameters": [{ "name": "match_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Match details" } } }
+    },
+    "/v1/matchmaking/cancel": {
+      "post": { "operationId": "cancelMatchmaking", "responses": { "200": { "description": "Cancelled" } } }
+    },
+    "/v1/games": {
+      "get": { "operationId": "listGames", "responses": { "200": { "description": "Games" } } },
+      "post": { "operationId": "createGame", "responses": { "200": { "description": "Created game" } } }
+    },
+    "/v1/games/live": {
+      "get": { "operationId": "listLiveGames", "responses": { "200": { "description": "Live games" } } }
+    },
+    "/v1/games/import": {
+      "post": { "operationId": "importGame", "responses": { "200": { "description": "Imported game" } } }
+    },
+    "/v1/games/archive-pgn": {
+      "post": {
+        "operationId": "archivePgn",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PgnArchiveRequest" } } } },
+        "responses": { "200": { "description": "Archived", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PgnArchiveResponse" } } } } }
+      }
+    },
+    "/v1/games/{game_id}": {
+      "get": { "operationId": "getGame", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Game" } } },
+      "delete": { "operationId": "deleteGame", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Deleted" } } }
+    },
+    "/v1/games/{game_id}/analysis": {
+      "get": {
+        "operationId": "getGameAnalysis",
+        "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Evaluations", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GameAnalysisResponse" } } } } }
+      }
+    },
+    "/v1/games/{game_id}/pgn": {
+      "get": { "operationId": "getGamePgn", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "PGN" } } }
+    },
+    "/v1/games/{game_id}/move": {
+      "put": { "operationId": "makeMove", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Move accepted" } } }
+    },
+    "/v1/games/{game_id}/complete": {
+      "put": { "operationId": "completeGame", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Game completed" } } }
+    },
+    "/v1/games/{game_id}/join": {
+      "post": { "operationId": "joinGame", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Joined" } } }
+    },
+    "/v1/ws/game/{game_id}": {
+      "get": { "operationId": "gameSocket", "parameters": [{ "name": "game_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "101": { "description": "Socket upgrade" } } }
+    },
+    "/v1/players/online": {
+      "get": { "operationId": "playersOnline", "responses": { "200": { "description": "Online count" } } }
+    },
+    "/v1/players/me/export": {
+      "get": { "operationId": "exportPlayer", "responses": { "200": { "description": "Player export" } } }
+    },
+    "/v1/players/me/preferences": {
+      "get": { "operationId": "getPlayerPreferences", "responses": { "200": { "description": "Preferences" } } },
+      "put": { "operationId": "updatePlayerPreferences", "responses": { "200": { "description": "Preferences saved" } } }
+    },
+    "/v1/players/me/wallet": {
+      "get": { "operationId": "getLinkedWallet", "responses": { "200": { "description": "Linked wallet" } } }
+    },
+    "/v1/players/me/wallet/challenge": {
+      "post": { "operationId": "walletChallenge", "responses": { "200": { "description": "Signing challenge" } } }
+    },
+    "/v1/players/me/wallet/verify": {
+      "post": { "operationId": "walletVerify", "responses": { "200": { "description": "Wallet verified" } } }
+    },
+    "/v1/players/{username}": {
+      "get": { "operationId": "getPlayer", "parameters": [{ "name": "username", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Player profile" } } }
+    },
+    "/v1/players/{username}/games": {
+      "get": { "operationId": "getPlayerGames", "parameters": [{ "name": "username", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Recent games" } } }
+    },
+    "/v1/players/{player_id}/elo-history": {
+      "get": { "operationId": "getEloHistory", "parameters": [{ "name": "player_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Rating history" } } }
+    },
+    "/v1/tournaments": {
+      "get": { "operationId": "listTournaments", "responses": { "200": { "description": "Tournaments" } } },
+      "post": { "operationId": "createTournament", "responses": { "200": { "description": "Created tournament" } } }
+    },
+    "/v1/tournaments/{tournament_id}/register": {
+      "post": { "operationId": "registerForTournament", "parameters": [{ "name": "tournament_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Registered" } } }
+    },
+    "/v1/openings/explorer": {
+      "get": { "operationId": "exploreOpenings", "responses": { "200": { "description": "Opening statistics" } } }
+    },
+    "/v1/leaderboard": {
+      "get": { "operationId": "getLeaderboard", "responses": { "200": { "description": "Leaderboard" } } }
+    },
+    "/v1/notifications": {
+      "get": { "operationId": "listNotifications", "responses": { "200": { "description": "Notifications" } } }
+    },
+    "/v1/notifications/read-all": {
+      "post": { "operationId": "markAllNotificationsRead", "responses": { "200": { "description": "Marked read" } } }
+    },
+    "/v1/notifications/{notification_id}/read": {
+      "post": { "operationId": "markNotificationRead", "parameters": [{ "name": "notification_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Marked read" } } }
+    },
+    "/v1/ws/notifications": {
+      "get": { "operationId": "notificationsSocket", "responses": { "101": { "description": "Socket upgrade" } } }
+    },
+    "/v1/puzzles": {
+      "get": { "operationId": "listPuzzles", "responses": { "200": { "description": "Puzzles" } } }
+    },
+    "/v1/puzzles/submit": {
+      "post": { "operationId": "submitPuzzle", "responses": { "200": { "description": "Submission accepted" } } }
+    },
+    "/v1/repertoires/sync": {
+      "post": { "operationId": "syncRepertoire", "responses": { "200": { "description": "Synced" } } }
+    },
+    "/v1/season": {
+      "get": {
+        "operationId": "getSeason",
+        "responses": { "200": { "description": "Current season", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SeasonStatus" } } } } }
+      }
+    },
+    "/v1/season/standings": {
+      "get": {
+        "operationId": "getSeasonStandings",
+        "responses": { "200": { "description": "Live standings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SeasonStandings" } } } } }
+      }
+    },
+    "/v1/season/claimable": {
+      "get": {
+        "operationId": "getSeasonClaimable",
+        "responses": { "200": { "description": "Claimable prize with Merkle proof", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SeasonClaimable" } } } } }
+      }
+    },
+    "/v1/season/claim": {
+      "post": {
+        "operationId": "claimSeasonPrize",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SeasonClaimRequest" } } } },
+        "responses": { "200": { "description": "Claim accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SeasonClaimResponse" } } } } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": { "username": { "type": "string" }, "password": { "type": "string" } }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["username", "email", "password"],
+        "properties": { "username": { "type": "string" }, "email": { "type": "string" }, "password": { "type": "string" } }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "required": ["access_token", "refresh_token", "token_type", "expires_in", "refresh_token_expires_in", "user_id", "username"],
+        "properties": {
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "token_type": { "type": "string" },
+          "expires_in": { "type": "number" },
+          "refresh_token_expires_in": { "type": "number" },
+          "user_id": { "type": "number" },
+          "username": { "type": "string" },
+          "wallet_address": { "type": "string", "nullable": true }
+        }
+      },
+      "RefreshResponse": {
+        "type": "object",
+        "required": ["access_token"],
+        "properties": { "access_token": { "type": "string" } }
+      },
+      "WsTicketResponse": {
+        "type": "object",
+        "required": ["ticket"],
+        "properties": { "ticket": { "type": "string" } }
+      },
+      "SessionInfo": {
+        "type": "object",
+        "required": ["session_id", "created_at", "expires_at", "last_active_at"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "ip_address": { "type": "string" },
+          "user_agent": { "type": "string" },
+          "created_at": { "type": "string" },
+          "expires_at": { "type": "string" },
+          "last_active_at": { "type": "string" }
+        }
+      },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": { "email": { "type": "string" } }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": ["token", "password"],
+        "properties": { "token": { "type": "string" }, "password": { "type": "string" } }
+      },
+      "PgnArchiveRequest": {
+        "type": "object",
+        "required": ["game_id", "pgn_content"],
+        "properties": { "game_id": { "type": "string" }, "pgn_content": { "type": "string" } }
+      },
+      "PgnArchiveResponse": {
+        "type": "object",
+        "required": ["archive_result"],
+        "properties": {
+          "archive_result": {
+            "type": "object",
+            "required": ["game_id", "ipfs_cid", "arweave_tx_id", "pgn_hash", "archived_at"],
+            "properties": {
+              "game_id": { "type": "string" },
+              "ipfs_cid": { "type": "string", "nullable": true },
+              "arweave_tx_id": { "type": "string", "nullable": true },
+              "pgn_hash": { "type": "string" },
+              "archived_at": { "type": "string" }
+            }
+          }
+        }
+      },
+      "GameAnalysisResponse": {
+        "type": "object",
+        "properties": {
+          "evaluations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "ply": { "type": "number" }, "cp": { "type": "number", "nullable": true }, "mate": { "type": "number", "nullable": true } }
+            }
+          }
+        }
+      },
+      "SeasonStatus": {
+        "type": "object",
+        "required": ["season_id", "phase", "prize_pool", "currency"],
+        "properties": {
+          "season_id": { "type": "string" },
+          "name": { "type": "string" },
+          "phase": { "type": "string", "enum": ["active", "ended"] },
+          "prize_pool": { "type": "number" },
+          "currency": { "type": "string" },
+          "ends_at": { "type": "string" },
+          "claim_deadline": { "type": "string" }
+        }
+      },
+      "SeasonStandings": {
+        "type": "object",
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["rank", "player", "points"],
+              "properties": {
+                "rank": { "type": "number" },
+                "player": { "type": "string" },
+                "points": { "type": "number" },
+                "prize": { "type": "number", "nullable": true }
+              }
+            }
+          }
+        }
+      },
+      "SeasonClaimable": {
+        "type": "object",
+        "required": ["season_id", "amount", "currency", "proof"],
+        "properties": {
+          "season_id": { "type": "string" },
+          "amount": { "type": "number" },
+          "currency": { "type": "string" },
+          "proof": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "SeasonClaimRequest": {
+        "type": "object",
+        "required": ["season_id", "amount", "proof"],
+        "properties": {
+          "season_id": { "type": "string" },
+          "amount": { "type": "number" },
+          "proof": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "SeasonClaimResponse": {
+        "type": "object",
+        "required": ["claimed", "amount"],
+        "properties": {
+          "claimed": { "type": "boolean" },
+          "amount": { "type": "number" },
+          "transaction_hash": { "type": "string", "nullable": true }
+        }
+      }
+    }
+  }
+}

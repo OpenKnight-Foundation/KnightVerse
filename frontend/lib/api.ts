@@ -322,6 +322,13 @@ export const endpoints = {
     list: () => `${API_BASE}/v1/puzzles`,
     submit: () => `${API_BASE}/v1/puzzles/submit`,
   },
+
+  season: {
+    status: () => `${API_BASE}/v1/season`,
+    standings: () => `${API_BASE}/v1/season/standings`,
+    claimable: () => `${API_BASE}/v1/season/claimable`,
+    claim: () => `${API_BASE}/v1/season/claim`,
+  },
 } as const;
 
 /**

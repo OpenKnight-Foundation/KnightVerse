@@ -284,6 +284,27 @@ export const endpoints = {
       `${API_BASE}/v1/openings/explorer?fen=${encodeURIComponent(fen)}`,
   },
 
+  /** Leaderboard (BE-158) */
+  leaderboard: {
+    list: (params: { timeControl?: string; page?: number; pageSize?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.timeControl) q.set("time_control", params.timeControl);
+      if (params.page) q.set("page", String(params.page));
+      if (params.pageSize) q.set("page_size", String(params.pageSize));
+      const qs = q.toString();
+      return `${API_BASE}/v1/leaderboard${qs ? `?${qs}` : ""}`;
+    },
+  },
+
+  /** In-app notifications (BE-163) */
+  notifications: {
+    list: () => `${API_BASE}/v1/notifications`,
+    markRead: (id: string) =>
+      `${API_BASE}/v1/notifications/${encodeURIComponent(id)}/read`,
+    markAllRead: () => `${API_BASE}/v1/notifications/read-all`,
+    ws: () => `${WS_BASE}/v1/ws/notifications`,
+  },
+
   /** Puzzles (#FE-68) */
   puzzles: {
     list: () => `${API_BASE}/v1/puzzles`,

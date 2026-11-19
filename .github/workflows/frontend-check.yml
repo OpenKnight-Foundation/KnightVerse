@@ -43,6 +43,25 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check per-route first-load JS budget
+        run: |
+          node -e '
+            const fs = require("fs");
+            const budgets = JSON.parse(fs.readFileSync("bundle-budgets.json", "utf8"));
+            const manifest = JSON.parse(fs.readFileSync(".next/app-build-manifest.json", "utf8"));
+            let failed = false;
+            for (const [route, limitKb] of Object.entries(budgets)) {
+              const files = manifest.pages[route] || [];
+              const bytes = files
+                .filter((f) => f.endsWith(".js"))
+                .reduce((sum, f) => sum + fs.statSync(".next/" + f).size, 0);
+              const kb = bytes / 1024;
+              console.log(`${route}: ${kb.toFixed(1)} kB (budget ${limitKb} kB)`);
+              if (kb > limitKb) { console.error(`FAIL: ${route} exceeds budget`); failed = true; }
+            }
+            process.exit(failed ? 1 : 0);
+          '
+
   # CC-22 / #1438 — Playwright E2E against the production build
   e2e:
     name: Playwright E2E

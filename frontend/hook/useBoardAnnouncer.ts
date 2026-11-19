@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 export interface MoveAnnouncement {
   /** "w" for white, "b" for black */
@@ -44,46 +44,65 @@ function describeMove(announcement: MoveAnnouncement): string {
 }
 
 export interface UseBoardAnnouncerReturn {
-  /** The current announcement text to render in the aria-live region */
+  /** The current move announcement text to render in a polite aria-live region */
   announcement: string;
+  /** The current time alert to render in an assertive aria-live region */
+  timeAnnouncement: string;
   /** Announce a move that was just played */
   announceMove: (move: MoveAnnouncement) => void;
   /** Announce a time alert (e.g. "Less than 30 seconds remaining") */
   announceTimeAlert: (message: string) => void;
 }
 
-export function useBoardAnnouncer(): UseBoardAnnouncerReturn {
-  const [announcement, setAnnouncement] = useState("");
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const push = useCallback((msg: string) => {
+function createPusher(
+  setValue: (value: string) => void,
+  timeoutRef: { current: ReturnType<typeof setTimeout> | null },
+) {
+  return (message: string) => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
-    // Clear first so re-announcement of the same text still triggers screen readers
-    setAnnouncement("");
+    setValue("");
     timeoutRef.current = setTimeout(() => {
-      setAnnouncement(msg);
+      setValue(message);
       timeoutRef.current = null;
     }, 50);
+  };
+}
+
+export function useBoardAnnouncer(): UseBoardAnnouncerReturn {
+  const [announcement, setAnnouncement] = useState("");
+  const [timeAnnouncement, setTimeAnnouncement] = useState("");
+  const moveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pushMove = useCallback(createPusher(setAnnouncement, moveTimeoutRef), []);
+  const pushTime = useCallback(createPusher(setTimeAnnouncement, timeTimeoutRef), []);
+
+  useEffect(() => {
+    return () => {
+      if (moveTimeoutRef.current) clearTimeout(moveTimeoutRef.current);
+      if (timeTimeoutRef.current) clearTimeout(timeTimeoutRef.current);
+    };
   }, []);
 
   const announceMove = useCallback(
     (move: MoveAnnouncement) => {
-      push(describeMove(move));
+      pushMove(describeMove(move));
     },
-    [push],
+    [pushMove],
   );
 
   const announceTimeAlert = useCallback(
     (message: string) => {
-      push(`Time alert: ${message}`);
+      pushTime(`Time alert: ${message}`);
     },
-    [push],
+    [pushTime],
   );
 
   return {
     announcement,
+    timeAnnouncement,
     announceMove,
     announceTimeAlert,
   };

@@ -972,9 +972,9 @@ impl GameContract {
         // Auto settlement logic based on status flag
         if game_status == 1 {
             // Checkmate: submitting player wins
-            game.state = GameState::Completed;
             game.winner = Some(player.clone());
             Self::process_payout(&env, &game, &player)?;
+            game.state = GameState::Settled;
         } else if game_status == 2 {
             // Draw
             game.state = GameState::Drawn;

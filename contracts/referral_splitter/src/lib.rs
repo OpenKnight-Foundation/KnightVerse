@@ -27,6 +27,8 @@ pub enum DataKey {
     Earnings(Address),
     /// configurable commission in basis points (e.g. 1000 = 10%)
     CommissionBps,
+    /// only this address may settle wagers (e.g. game_contract)
+    SettlementCaller,
 }
 
 #[contracterror]
@@ -40,6 +42,18 @@ pub enum Error {
     SelfReferral = 4,
     InvalidAmount = 5,
     InvalidCommission = 6,
+    /// No settlement caller has been configured
+    NotInitialized = 7,
+    /// Caller is not the configured settlement caller
+    NotSettlementCaller = 8,
+}
+
+/// Read the admin without panicking with an opaque host error (#1567).
+fn read_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
 }
 
 #[contract]
@@ -62,6 +76,14 @@ impl ReferralSplitter {
             .set(&DataKey::CommissionBps, &commission_bps);
     }
 
+    /// Configure the single address allowed to settle wagers (#1554).
+    pub fn set_settlement_caller(env: Env, caller: Address) {
+        read_admin(&env).require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementCaller, &caller);
+    }
+
     /// Register a referee→referrer binding. Permanent once set; self-referral rejected.
     pub fn register_referral(env: Env, referee: Address, referrer: Address) {
         referee.require_auth();
@@ -82,6 +104,15 @@ impl ReferralSplitter {
     /// This is accounting only: the accrued balance is moved on-chain by
     /// [`ReferralSplitter::withdraw_earnings`].
     pub fn settle_wager(env: Env, referee: Address, amount: i128) -> i128 {
+        // #1554: only the admin-configured settlement contract can credit
+        // earnings; an arbitrary caller must not be able to inflate them.
+        let settlement_caller: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::SettlementCaller)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        settlement_caller.require_auth();
+
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }

@@ -11,6 +11,7 @@ members = [
     "title_badge",
     "arbiter_escrow",
     "yield_staking",
+    "upgrade_timelock",
 ]
 
 [profile.release]

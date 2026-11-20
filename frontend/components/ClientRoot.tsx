@@ -5,6 +5,7 @@ import { GameSidebar } from "@/components/GameSidebar";
 import { TransactionStatusIndicator } from "@/components/TransactionStatusIndicator";
 import { AuthButton } from "@/components/AuthButton";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { NotificationsProvider } from "@/context/NotificationsContext";
 import Image from "next/image";
 import clsx from "clsx";
@@ -54,6 +55,7 @@ export default function ClientRoot({
             <NotificationBell />
             <AuthButton />
           </div>
+          <NetworkMismatchBanner />
           {children}
         </div>
       </main>

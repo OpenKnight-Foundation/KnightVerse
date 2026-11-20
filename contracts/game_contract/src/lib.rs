@@ -949,7 +949,7 @@ impl GameContract {
         let chess_move = ChessMove {
             player: player.clone(),
             move_data: move_data.clone(),
-            timestamp: env.ledger().sequence() as u64,
+            timestamp: env.ledger().timestamp(),
         };
 
         let mut proof_payload = Bytes::new(&env);
@@ -965,7 +965,7 @@ impl GameContract {
 
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
-        game.last_move_at = env.ledger().sequence() as u64;
+        game.last_move_at = env.ledger().timestamp();
         game.last_activity_ts = env.ledger().timestamp();
         game.board_fen = new_board;
 
@@ -980,6 +980,12 @@ impl GameContract {
             game.state = GameState::Drawn;
             Self::process_draw_payout(&env, &game)?;
         }
+
+        // #1571: indexers and spectators can follow a game without polling.
+        env.events().publish(
+            (symbol_short!("move"), game_id),
+            (player.clone(), move_data.clone(), game.moves.len() - 1),
+        );
 
         games.set(game_id, game);
         env.storage().instance().set(&GAMES, &games);

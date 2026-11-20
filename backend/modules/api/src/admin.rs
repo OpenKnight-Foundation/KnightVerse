@@ -1,4 +1,4 @@
-//! Admin-only audit log endpoints (BE-91).
+//! Admin-only audit log endpoints (BE-91) and player report moderation queue (BE-186).
 //!
 //! `Claims` has no administrator flag today, so admins are configured
 //! out-of-band via the `ADMIN_USER_IDS` (comma-separated `user_id`s) and

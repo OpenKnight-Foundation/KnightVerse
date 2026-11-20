@@ -187,6 +187,10 @@ const PENDING_ADMIN_TIMESTAMP: Symbol = symbol_short!("PEND_TS"); // u64 - ledge
 /// Admin key rotation timelock duration (default: 17280 ledger sequences = 24 hours at 5s/ledger).
 const ADMIN_TIMELOCK_DURATION: u32 = 17280;
 
+// Contract upgrade timelock: admin must propose a WASM hash, then apply it after the delay.
+const PENDING_UPGRADE_HASH: Symbol = symbol_short!("PEND_UPG");
+const PENDING_UPGRADE_SEQ: Symbol = symbol_short!("PEND_UPS");
+
 // �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
 // Multi-sig fee proposal type (#535)
 // ────────────────────────────────────────────────────────────────────────────
@@ -372,21 +376,50 @@ impl GameContract {
             .set(&TOKEN_CONTRACT, &token_contract);
     }
 
-    /// Upgrade this contract's WASM. Restricted to the ADMIN_KEY holder.
+    /// Propose a contract WASM upgrade. Restricted to the contract admin address.
     ///
-    /// The caller must provide an ED25519 signature (from the backend signing
-    /// service) over `SHA256(wasm_hash)`.
-    pub fn upgrade(env: Env, wasm_hash: BytesN<32>, signature: BytesN<64>) {
-        let admin_pubkey =
-            Self::admin_public_key(&env).unwrap_or_else(|error| panic_with_error!(&env, error));
+    /// The proposal starts a timelock before [`Self::upgrade`] may apply it.
+    pub fn propose_upgrade(env: Env, admin: Address, wasm_hash: BytesN<32>) {
+        admin.require_auth();
+        Self::require_contract_admin(&env, &admin);
 
-        let payload: Bytes = wasm_hash.clone().into();
-        let digest_bytesn: BytesN<32> = env.crypto().sha256(&payload).into();
-        let digest_bytes: Bytes = digest_bytesn.into();
-        env.crypto()
-            .ed25519_verify(&admin_pubkey, &digest_bytes, &signature);
+        env.storage()
+            .instance()
+            .set(&PENDING_UPGRADE_HASH, &wasm_hash);
+        env.storage()
+            .instance()
+            .set(&PENDING_UPGRADE_SEQ, &env.ledger().sequence());
+    }
+
+    /// Apply a previously proposed WASM upgrade after the admin timelock elapses.
+    ///
+    /// Restricted to the contract admin address; the result-signing key has no
+    /// authority over contract code.
+    pub fn upgrade(env: Env, admin: Address, wasm_hash: BytesN<32>) {
+        admin.require_auth();
+        Self::require_contract_admin(&env, &admin);
+
+        let proposed: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&PENDING_UPGRADE_HASH)
+            .unwrap_or_else(|| panic!("No pending upgrade"));
+        if proposed != wasm_hash {
+            panic!("Pending upgrade hash mismatch");
+        }
+
+        let proposed_seq: u64 = env
+            .storage()
+            .instance()
+            .get(&PENDING_UPGRADE_SEQ)
+            .unwrap_or(0);
+        if env.ledger().sequence() < proposed_seq + ADMIN_TIMELOCK_DURATION as u64 {
+            panic!("Upgrade timelock active");
+        }
 
         env.deployer().update_current_contract_wasm(wasm_hash);
+        env.storage().instance().remove(&PENDING_UPGRADE_HASH);
+        env.storage().instance().remove(&PENDING_UPGRADE_SEQ);
     }
 
     /// Add a token address to the whitelist.
@@ -523,6 +556,17 @@ impl GameContract {
             return Err(ContractError::ContractPaused);
         }
         Ok(())
+    }
+
+    fn require_contract_admin(env: &Env, admin: &Address) {
+        let stored: Address = env
+            .storage()
+            .instance()
+            .get(&CONTRACT_ADMIN)
+            .unwrap_or_else(|| panic!("Not admin"));
+        if admin != &stored {
+            panic!("Not admin");
+        }
     }
 
     /// Internal helper — the backend's ED25519 public key stored by `initialize`.

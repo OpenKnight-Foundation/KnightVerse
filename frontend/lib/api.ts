@@ -7,6 +7,8 @@
  * `process.env` directly.
  */
 
+import { getSessionAccessToken } from "@/lib/sessionToken";
+
 /**
  * Returns `value` unless it is unset or empty.
  *
@@ -341,9 +343,7 @@ export const endpoints = {
  * WebSocket (which cannot set an Authorization header).
  */
 export async function requestWebSocketTicket(accessToken?: string | null): Promise<string> {
-  const token =
-    accessToken ??
-    (typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null);
+  const token = accessToken ?? getSessionAccessToken();
   if (!token) {
     throw new Error("Sign in before connecting to a game socket");
   }

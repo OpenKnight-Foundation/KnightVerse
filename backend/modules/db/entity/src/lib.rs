@@ -1,5 +1,6 @@
 pub mod admin_action;
 pub mod game;
+pub mod password_reset_token;
 pub mod player;
 pub mod tournament;
 pub mod tournament_participant;

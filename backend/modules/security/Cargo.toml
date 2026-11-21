@@ -21,3 +21,6 @@ redis = { version = "0.24", features = ["tokio-comp", "json"] }
 deadpool-redis = "0.14"
 db_entity = { path = "../db/entity" }
 
+[dev-dependencies]
+sea-orm = { version = "1.1.0", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros", "mock"] }
+

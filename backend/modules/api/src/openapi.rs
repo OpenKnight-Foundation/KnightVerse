@@ -1,4 +1,6 @@
-use crate::{ai, auth, chess960, games, lc0, pairings, players, tournaments};
+use crate::{
+    ai, auth, chess960, games, lc0, leaderboard, pairings, password_reset, players, tournaments,
+};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
 use utoipa::OpenApi;
@@ -45,6 +47,11 @@ impl Modify for SecurityAddon {
         // Authentication endpoints
         auth::login,
         auth::register,
+        password_reset::forgot_password,
+        password_reset::reset_password,
+
+        // Leaderboard (BE-158)
+        leaderboard::get_leaderboard,
 
         // Tournament pairing (BE-135)
         pairings::build_pairing_round,

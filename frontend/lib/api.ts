@@ -76,6 +76,10 @@ export const CONTRACT_AI_NFT = withDefault(
   process.env.NEXT_PUBLIC_CONTRACT_AI_NFT,
   "",
 );
+export const CONTRACT_TITLE_BADGE = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_TITLE_BADGE,
+  "",
+);
 
 // ── Retry / Backoff (#FE-75) ─────────────────────────────────────────────────
 

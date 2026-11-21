@@ -44,12 +44,14 @@ import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import { MoveHistory } from "@/components/chess/MoveHistory";
 import GameResultOverlay, { type GameResult } from "@/components/GameResultOverlay";
+import type { SeriesLength } from "@/lib/series";
 
 export default function Home() {
   const [game] = useState(new Chess());
   const [position, setPosition] = useState("start");
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [gameMode, setGameMode] = useState<"online" | "bot" | null>(null);
+  const seriesLengthRef = React.useRef<SeriesLength>(1);
   const router = useRouter();
 
   const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(
@@ -126,7 +128,7 @@ export default function Home() {
   // Kick off matchmaking → route to game
   useEffect(() => {
     if (matchmakingStatus === "match_found" && gameId) {
-      router.push(`/play/${gameId}`);
+      router.push(`/play/${gameId}?series=${seriesLengthRef.current}`);
     }
   }, [matchmakingStatus, gameId, router]);
 
@@ -339,9 +341,10 @@ export default function Home() {
     }
   };
 
-  const handleMatchmakingConfirm = (type: "Rated" | "Casual") => {
+  const handleMatchmakingConfirm = (type: "Rated" | "Casual", length: SeriesLength) => {
     setIsMatchmakingModalOpen(false);
-    joinMatchmaking(type, chessVariant);
+    seriesLengthRef.current = length;
+    joinMatchmaking(type, chessVariant, length);
   };
 
   const handleMatchmakingClose = () => {

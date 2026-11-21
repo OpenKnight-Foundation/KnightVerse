@@ -1,4 +1,4 @@
-pub use sea_orm_migration::prelude::*;
+pub use sea-orm-migration::prelude::*;
 
 mod m20250123_000001_create_users_table;
 mod m20250324_add_elo_rating_to_player;
@@ -16,6 +16,7 @@ mod m20261021_000001_add_player_preferences;
 mod m20261022_000001_align_game_enums;
 mod m20261022_000002_drop_game_player_fks;
 mod m20261022_000003_create_tournaments;
+mod m20261023_000001_create_friendships_table;
 
 pub struct Migrator;
 
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261022_000001_align_game_enums::Migration),
             Box::new(m20261022_000002_drop_game_player_fks::Migration),
             Box::new(m20261022_000003_create_tournaments::Migration),
+            Box::new(m20261023_000001_create_friendships_table::Migration),
         ]
     }
 }

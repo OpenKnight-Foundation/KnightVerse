@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ChessVariant } from "@/lib/chessVariants";
+import type { SeriesLength } from "@/lib/series";
 
 import { endpoints } from "@/lib/api";
 import { useAuth } from "@/context/authContext";
@@ -43,6 +44,7 @@ interface UseMatchmakingReturn {
   joinMatchmaking: (
     matchType?: "Rated" | "Casual",
     timeControl?: ChessVariant,
+    seriesLength?: SeriesLength,
   ) => Promise<void>;
   cancelMatchmaking: () => void;
 }
@@ -137,7 +139,11 @@ export function useMatchmaking(): UseMatchmakingReturn {
   );
 
   const joinMatchmaking = useCallback(
-    async (matchType: "Rated" | "Casual" = "Casual", timeControl: ChessVariant = "standard") => {
+    async (
+      matchType: "Rated" | "Casual" = "Casual",
+      timeControl: ChessVariant = "standard",
+      seriesLength: SeriesLength = 1,
+    ) => {
       stopPolling();
       const search = ++searchRef.current;
       setError(null);
@@ -161,6 +167,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
             invite_address: null,
             ...(matchType === "Rated" ? { max_elo_diff: null } : {}),
             time_control: timeControl,
+            series_length: seriesLength,
           }),
         });
         if (!res.ok) throw new Error(`Matchmaking failed: ${res.status}`);

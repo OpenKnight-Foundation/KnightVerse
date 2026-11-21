@@ -1,0 +1,25 @@
+{
+  "shell": {
+    "appName": "Chess",
+    "nav": {
+      "play": "Play",
+      "settings": "Settings"
+    }
+  },
+  "play": {
+    "title": "Play",
+    "subtitle": "Start a game and test your skills.",
+    "newGame": "New game",
+    "yourTurn": "Your turn",
+    "opponentTurn": "Opponent's turn",
+    "checkmate": "Checkmate",
+    "draw": "Draw",
+    "resign": "Resign"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your game appearance and preferences.",
+    "language": "Language",
+    "languageDescription": "Choose the language used across the interface."
+  }
+}

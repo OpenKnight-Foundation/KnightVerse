@@ -11,9 +11,9 @@ pub struct Model {
     pub id: Uuid,
     /// Who performed the action (player UUID of the moderator/admin).
     pub actor_id: Uuid,
-    /// Machine-readable action kind, e.g. `ban`, `mute`, `resolve_dispute`.
+    /// Machine-readable action kind, e.g. `ban`, `mute`, `resolve_dispute`, `assign_report`, `resolve_report`.
     pub action_type: String,
-    /// The subject of the action (player, game or dispute id), when applicable.
+    /// The subject of the action (player, game, dispute or report id), when applicable.
     pub target_id: Option<Uuid>,
     /// Human-readable justification supplied by the moderator.
     #[sea_orm(column_type = "Text")]

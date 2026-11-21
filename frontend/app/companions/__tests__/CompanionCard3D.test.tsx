@@ -39,4 +39,48 @@ describe('CompanionCard3D Component', () => {
     fireEvent.click(screen.getByText('Rent Agent'));
     expect(handleRent).toHaveBeenCalledWith('999');
   });
+
+  it('disables mint and rent buttons when disabled prop is true and does not trigger callbacks', () => {
+    const handleMint = vi.fn();
+    const handleRent = vi.fn();
+
+    render(
+      <CompanionCard3D
+        companion={mockCompanion}
+        onMint={handleMint}
+        onRent={handleRent}
+        disabled={true}
+        rentLabel="Rent (Coming Soon)"
+      />
+    );
+
+    const rentBtn = screen.getByRole('button', { name: /Rent \(Coming Soon\)/i });
+    const mintBtn = screen.getByRole('button', { name: /Mint \(100 XLM\)/i });
+
+    expect(rentBtn).toBeDisabled();
+    expect(mintBtn).toBeDisabled();
+
+    fireEvent.click(rentBtn);
+    fireEvent.click(mintBtn);
+
+    expect(handleRent).not.toHaveBeenCalled();
+    expect(handleMint).not.toHaveBeenCalled();
+  });
+
+  it('renders minting in-progress state correctly', () => {
+    const handleMint = vi.fn();
+    const handleRent = vi.fn();
+
+    render(
+      <CompanionCard3D
+        companion={mockCompanion}
+        onMint={handleMint}
+        onRent={handleRent}
+        isMinting={true}
+      />
+    );
+
+    const mintBtn = screen.getByRole('button', { name: /Minting\.\.\./i });
+    expect(mintBtn).toBeDisabled();
+  });
 });

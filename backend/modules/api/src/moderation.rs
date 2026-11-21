@@ -44,6 +44,13 @@ pub const POINTS_MASKED: u32 = 1;
 pub const POINTS_BLOCKED: u32 = 2;
 /// What a violating word is replaced with.
 pub const MASK: &str = "***";
+
+/// Lower-case form of a rejected/masked report reason, used by the
+/// moderation queue (BE-186). Reports are stored with the reason folded so
+/// triage can group them consistently.
+pub fn normalize_report_reason(reason: &str) -> String {
+    reason.trim().to_ascii_lowercase()
+}
 /// Sweep the offender table once it grows past this many entries.
 const OFFENDER_SWEEP_THRESHOLD: usize = 1024;
 

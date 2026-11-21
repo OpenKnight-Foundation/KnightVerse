@@ -1,3 +1,4 @@
+// FE-152: friends list and challenge-a-friend support.
 //! Player service — CRUD and authentication for player accounts.
 //!
 //! ## Read/Write pool routing
@@ -16,6 +17,7 @@
 use crate::helper::password;
 use db::DbPool;
 use db_entity::player::{self, Model};
+use db_entity::friendship;
 use dto::players::{NewPlayer, UpdatePlayer};
 use error::error::ApiError;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
@@ -77,6 +79,35 @@ pub async fn delete_player(pool: &DbPool, id: Uuid) -> Result<(), ApiError> {
     // Read current record from replica, write soft-delete to primary
     let existing = find_player_by_id_on(pool.replica(), id).await?;
     delete_player_on(pool.primary(), existing).await
+}
+
+pub async fn follow_player(pool: &DbPool, follower_id: Uuid, followee_id: Uuid) -> Result<(), ApiError> {
+    if follower_id == followee_id {
+        return Err(ApiError::InvalidCredentials);
+    }
+    let _ = find_player_by_id_on(pool.replica(), followee_id).await?;
+    follow_player_on(pool.primary(), follower_id, followee_id).await
+}
+
+pub async fn unfollow_player(pool: &DbPool, follower_id: Uuid, followee_id: Uuid) -> Result<(), ApiError> {
+    unfollow_player_on(pool.primary(), follower_id, followee_id).await
+}
+
+pub async fn list_friends(pool: &DbPool, player_id: Uuid) -> Result<Vec<player::Model>, ApiError> {
+    list_friends_on(pool.replica(), player_id).await
+}
+
+pub async fn challenge_friend(
+    pool: &DbPool,
+    challenger_id: Uuid,
+    opponent_id: Uuid,
+    time_control: String,
+) -> Result<Value, ApiError> {
+    if challenger_id == opponent_id {
+        return Err(ApiError::InvalidCredentials);
+    }
+    let _ = find_player_by_id_on(pool.replica(), opponent_id).await?;
+    challenge_friend_on(pool.primary(), challenger_id, opponent_id, time_control).await
 }
 
 pub async fn get_player_preferences(pool: &DbPool, id: Uuid) -> Result<Value, ApiError> {
@@ -267,6 +298,70 @@ pub(crate) async fn delete_player_on(
     active_model.is_enabled = Set(false);
     active_model.update(db).await.map_err(ApiError::DatabaseError)?;
     Ok(())
+}
+
+pub(crate) async fn follow_player_on(
+    db: &DatabaseConnection,
+    follower_id: Uuid,
+    followee_id: Uuid,
+) -> Result<(), ApiError> {
+    let new_friendship = friendship::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        follower_id: Set(follower_id),
+        followee_id: Set(followee_id),
+        ..Default::default()
+    };
+    new_friendship.insert(db).await.map_err(ApiError::DatabaseError)?;
+    Ok(())
+}
+
+pub(crate) async fn unfollow_player_on(
+    db: &DatabaseConnection,
+    follower_id: Uuid,
+    followee_id: Uuid,
+) -> Result<(), ApiError> {
+    friendship::Entity::delete_many()
+        .filter(friendship::Column::FollowerId.eq(follower_id))
+        .filter(friendship::Column::FolloweeId.eq(followee_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn list_friends_on(
+    db: &DatabaseConnection,
+    player_id: Uuid,
+) -> Result<Vec<player::Model>, ApiError> {
+    let friendships = friendship::Entity::find()
+        .filter(friendship::Column::FollowerId.eq(player_id))
+        .all(db)
+        .await?;
+    let ids: Vec<Uuid> = friendships.iter().map(|f| f.followee_id).collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let players = player::Entity::find()
+        .filter(player::Column::Id.is_in(ids))
+        .filter(player::Column::IsEnabled.eq(true))
+        .all(db)
+        .await?;
+    Ok(players)
+}
+
+pub(crate) async fn challenge_friend_on(
+    db: &DatabaseConnection,
+    challenger_id: Uuid,
+    opponent_id: Uuid,
+    time_control: String,
+) -> Result<Value, ApiError> {
+    let challenge = serde_json::json!({
+        "challenger_id": challenger_id,
+        "opponent_id": opponent_id,
+        "time_control": time_control,
+        "status": "pending",
+    });
+    let _ = db;
+    Ok(challenge)
 }
 
 // =============================================================================

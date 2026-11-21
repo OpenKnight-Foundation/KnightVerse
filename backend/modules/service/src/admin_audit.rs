@@ -41,6 +41,8 @@ pub enum AdminActionType {
     Unmute,
     ResolveDispute,
     FlagCheating,
+    AssignReport,
+    ResolveReport,
 }
 
 impl AdminActionType {

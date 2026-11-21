@@ -1,0 +1,25 @@
+{
+  "shell": {
+    "appName": "Ajedrez",
+    "nav": {
+      "play": "Jugar",
+      "settings": "Ajustes"
+    }
+  },
+  "play": {
+    "title": "Jugar",
+    "subtitle": "Inicia una partida y pon a prueba tus habilidades.",
+    "newGame": "Nueva partida",
+    "yourTurn": "Tu turno",
+    "opponentTurn": "Turno del oponente",
+    "checkmate": "Jaque mate",
+    "draw": "Tablas",
+    "resign": "Rendirse"
+  },
+  "settings": {
+    "title": "Ajustes",
+    "subtitle": "Gestiona la apariencia y las preferencias de tu juego.",
+    "language": "Idioma",
+    "languageDescription": "Elige el idioma usado en toda la interfaz."
+  }
+}

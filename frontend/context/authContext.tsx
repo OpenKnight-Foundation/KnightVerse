@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { endpoints, authFetch } from "@/lib/api";
+import { apiClient, apiPaths } from "@/lib/api/generated";
 import { setSessionAccessToken } from "@/lib/sessionToken";
 
 interface AuthUser {
@@ -154,21 +155,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken, refreshToken]);
 
   const login = useCallback(async (username: string, password: string): Promise<AuthResponse> => {
-    const response = await fetch(endpoints.auth.login(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ username, password }),
-      credentials: "include", // Include cookies for refresh token
+    const data: AuthResponse = await apiClient.login({
+      body: { username, password },
+      credentials: "include",
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Login failed");
-    }
-
-    const data: AuthResponse = await response.json();
     const sessionUser = {
       user_id: data.user_id,
       username: data.username,
@@ -180,21 +170,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applySession]);
 
   const register = useCallback(async (username: string, email: string, password: string): Promise<AuthResponse> => {
-    const response = await fetch(endpoints.auth.register(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ username, email, password }),
+    const data: AuthResponse = await apiClient.register({
+      body: { username, email, password },
       credentials: "include",
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Registration failed");
-    }
-
-    const data: AuthResponse = await response.json();
     const sessionUser = {
       user_id: data.user_id,
       username: data.username,
@@ -207,11 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(endpoints.auth.logout(), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessTokenRef.current}`,
-        },
+      await apiClient.logout({
+        token: accessTokenRef.current,
         credentials: "include",
       });
     } catch (error) {
@@ -231,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const getSessions = useCallback(async (): Promise<SessionInfo[]> => {
     const response = await authFetch(
-      endpoints.auth.sessions(),
+      apiPaths["/v1/auth/sessions"],
       {},
       { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
     );
@@ -245,7 +221,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const revokeSession = useCallback(async (sessionId: string) => {
     const response = await authFetch(
-      endpoints.auth.revokeSession(sessionId),
+      apiPaths["/v1/auth/sessions/{session_id}"].replace(
+        "{session_id}",
+        encodeURIComponent(sessionId),
+      ),
       { method: "DELETE" },
       { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
     );
@@ -257,7 +236,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const revokeAllSessions = useCallback(async () => {
     const response = await authFetch(
-      endpoints.auth.revokeAllSessions(),
+      apiPaths["/v1/auth/sessions/revoke-all"],
       { method: "POST" },
       { getToken: () => accessTokenRef.current, refresh: refreshToken, logout },
     );

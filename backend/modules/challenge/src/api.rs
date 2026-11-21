@@ -1,36 +1,41 @@
+
 use crate::puzzle_validation::{
     ChessMove, Puzzle, PuzzleRewardToken, PuzzleSubmission, PuzzleValidationResult,
     PuzzleValidationService,
 };
-use actix_web::{web, Error, HttpMessage, HttpResponse, Result};
+use actix_web::{web, Error, HttpMessage, HttpRequest, HttpResponse, Result};
 use security::jwt::Claims;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// API request/response types
+/// Request payload for submitting a puzzle solution.
 #[derive(Debug, Deserialize)]
 pub struct SubmitSolutionRequest {
     pub puzzle_id: Uuid,
     pub moves: Vec<ChessMove>,
 }
 
+/// Response returned after submitting a puzzle solution.
 #[derive(Debug, Serialize)]
 pub struct SubmitSolutionResponse {
     pub success: bool,
     pub result: PuzzleValidationResult,
 }
 
+/// Response containing the available puzzles.
 #[derive(Debug, Serialize)]
 pub struct PuzzleListResponse {
     pub puzzles: Vec<Puzzle>,
 }
 
+/// Request payload for verifying a reward token.
 #[derive(Debug, Deserialize)]
 pub struct VerifyTokenRequest {
     pub token: String,
 }
 
+/// Response returned after reward token verification.
 #[derive(Debug, Serialize)]
 pub struct VerifyTokenResponse {
     pub success: bool,
@@ -38,54 +43,58 @@ pub struct VerifyTokenResponse {
     pub error: Option<String>,
 }
 
-/// Submit puzzle solution
+/// Extract authenticated user claims from the request.
+///
+/// Returns an unauthorized error when JWT claims are unavailable.
+fn extract_claims(req: &HttpRequest) -> Result<Claims, Error> {
+    req.extensions()
+        .get::<Claims>()
+        .cloned()
+        .ok_or_else(|| {
+            actix_web::error::ErrorUnauthorized("User not authenticated")
+        })
+}
+
+/// Submit and validate a user's puzzle solution.
+///
+/// The authenticated user's identity is extracted from JWT claims
+/// and attached to the puzzle submission.
 pub async fn submit_solution(
-    req: actix_web::HttpRequest,
+    req: HttpRequest,
     puzzle_service: web::Data<Arc<PuzzleValidationService>>,
     solution_request: web::Json<SubmitSolutionRequest>,
 ) -> Result<HttpResponse, Error> {
-    // Extract user info from JWT claims
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| {
-            actix_web::error::ErrorUnauthorized(
-                "User not authenticated",
-            )
-        })?
-        .clone();
+    let claims = extract_claims(&req)?;
 
-    let user_id = claims.user_id;
-    let username = claims.username;
-
-    // Create puzzle submission
     let submission = PuzzleSubmission {
         puzzle_id: solution_request.puzzle_id,
         moves: solution_request.moves.clone(),
-        user_id,
-        username,
+        user_id: claims.user_id,
+        username: claims.username,
     };
 
-    // Validate the solution
     match puzzle_service.validate_puzzle_solution(submission) {
         Ok(result) => Ok(HttpResponse::Ok().json(SubmitSolutionResponse {
             success: true,
             result,
         })),
-        Err(e) => Ok(HttpResponse::BadRequest().json(SubmitSolutionResponse {
-            success: false,
-            result: PuzzleValidationResult {
+
+        Err(error) => Ok(HttpResponse::BadRequest().json(
+            SubmitSolutionResponse {
                 success: false,
-                correct: false,
-                message: format!("Validation error: {}", e),
-                reward_token: None,
-                reward_amount: None,
+                result: PuzzleValidationResult {
+                    success: false,
+                    correct: false,
+                    message: format!("Validation error: {error}"),
+                    reward_token: None,
+                    reward_amount: None,
+                },
             },
-        })),
+        )),
     }
 }
 
-/// Get list of available puzzles
+/// Retrieve all available puzzles.
 pub async fn get_puzzles(
     puzzle_service: web::Data<Arc<PuzzleValidationService>>,
 ) -> Result<HttpResponse, Error> {
@@ -96,7 +105,9 @@ pub async fn get_puzzles(
     }))
 }
 
-/// Get specific puzzle by ID
+/// Retrieve a puzzle using its unique identifier.
+///
+/// Returns 404 when the requested puzzle does not exist.
 pub async fn get_puzzle_by_id(
     puzzle_service: web::Data<Arc<PuzzleValidationService>>,
     path: web::Path<Uuid>,
@@ -105,13 +116,16 @@ pub async fn get_puzzle_by_id(
 
     match puzzle_service.get_puzzle_by_id(&puzzle_id) {
         Ok(puzzle) => Ok(HttpResponse::Ok().json(puzzle)),
-        Err(e) => Ok(HttpResponse::NotFound().json(serde_json::json!({
-            "error": format!("Puzzle not found: {}", e)
+
+        Err(error) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": format!("Puzzle not found: {error}")
         }))),
     }
 }
 
-/// Verify reward token
+/// Verify a puzzle reward token.
+///
+/// Returns the verified reward token when valid.
 pub async fn verify_reward_token(
     puzzle_service: web::Data<Arc<PuzzleValidationService>>,
     token_request: web::Json<VerifyTokenRequest>,
@@ -122,15 +136,16 @@ pub async fn verify_reward_token(
             reward_token: Some(reward_token),
             error: None,
         })),
-        Err(e) => Ok(HttpResponse::BadRequest().json(VerifyTokenResponse {
+
+        Err(error) => Ok(HttpResponse::BadRequest().json(VerifyTokenResponse {
             success: false,
             reward_token: None,
-            error: Some(format!("Token verification failed: {}", e)),
+            error: Some(format!("Token verification failed: {error}")),
         })),
     }
 }
 
-/// Configure puzzle routes
+/// Register all puzzle-related API routes.
 pub fn configure_puzzle_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/v1/puzzles")

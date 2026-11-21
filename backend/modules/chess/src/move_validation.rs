@@ -84,7 +84,8 @@ fn play_uci(position: &Chess, uci: &str) -> Result<Chess, MoveValidationError> {
         .to_move(position)
         .map_err(|e| MoveValidationError::IllegalMove(e.to_string()))?;
     position
-        .play(mv)
+        .clone()
+        .play(&mv)
         .map_err(|e| MoveValidationError::IllegalMove(e.to_string()))
 }
 

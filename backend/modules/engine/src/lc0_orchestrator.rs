@@ -133,15 +133,20 @@ impl Lc0Orchestrator {
 
         engine.set_position(fen).await?;
         let result = engine.go(GoParams {
-            depth: Some(depth),
+            depth: Some(depth.into()),
             ..Default::default()
         }).await?;
         let _ = engine.quit().await;
 
         Ok(Lc0Analysis {
-            best_move: result.best_move,
+            best_move: result.best_move.ok_or_else(|| {
+                EngineError::InvalidResponse("engine reported no legal move".into())
+            })?,
             evaluation: result.evaluation,
-            depth: result.depth.or(Some(depth)),
+            depth: result
+                .depth
+                .and_then(|d| u8::try_from(d).ok())
+                .or(Some(depth)),
             principal_variation: result.principal_variation,
         })
     }

@@ -87,7 +87,7 @@ pub async fn test_redis_connection(pool: &Pool) -> Result<(), String> {
         .map_err(|e| format!("Failed to get Redis connection: {}", e))?;
 
     redis::cmd("PING")
-        .query_async::<_, String>(&mut conn)
+        .query_async::<String>(&mut conn)
         .await
         .map_err(|e| format!("Redis PING failed: {}", e))?;
 

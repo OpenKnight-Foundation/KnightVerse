@@ -187,7 +187,8 @@ describe("useBoardAnnouncer — announcement text", () => {
    * string and provides buttons to trigger each announcement type.
    */
   function AnnounceHarness() {
-    const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
+    const { announcement, timeAnnouncement, announceMove, announceTimeAlert } =
+      useBoardAnnouncer();
 
     const normalMove: MoveAnnouncement = {
       color: "w",
@@ -225,6 +226,14 @@ describe("useBoardAnnouncer — announcement text", () => {
           data-testid="live-region"
         >
           {announcement}
+        </div>
+        <div
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+          data-testid="time-live-region"
+        >
+          {timeAnnouncement}
         </div>
         <button onClick={() => announceMove(normalMove)} data-testid="btn-normal">
           normal
@@ -273,11 +282,16 @@ describe("useBoardAnnouncer — announcement text", () => {
     expect(screen.getByTestId("live-region")).toHaveTextContent(/captur/i);
   });
 
-  it("announces a time alert", () => {
+  it("announces a time alert in a separate assertive region", () => {
     render(<AnnounceHarness />);
+    const polite = screen.getByTestId("live-region");
+    const assertive = screen.getByTestId("time-live-region");
+    expect(polite).toHaveAttribute("aria-live", "polite");
+    expect(assertive).toHaveAttribute("aria-live", "assertive");
     fireEvent.click(screen.getByTestId("btn-time"));
     act(() => vi.runAllTimers());
-    expect(screen.getByTestId("live-region")).toHaveTextContent(/30 seconds/i);
+    expect(assertive).toHaveTextContent(/30 seconds/i);
+    expect(polite).toBeEmptyDOMElement();
   });
 });
 
@@ -467,7 +481,7 @@ describe("MatchmakingModal — ARIA & accessibility", () => {
         <MatchmakingModal isOpen={true} onClose={vi.fn()} onConfirm={onConfirm} />,
       ).getByRole("button", { name: /rated match/i }),
     );
-    expect(onConfirm).toHaveBeenCalledWith("Rated");
+    expect(onConfirm).toHaveBeenCalledWith("Rated", 1);
   });
 
   it("passes automated axe scan", async () => {

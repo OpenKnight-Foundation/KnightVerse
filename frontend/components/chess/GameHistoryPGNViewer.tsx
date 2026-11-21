@@ -227,6 +227,12 @@ function PlaybackButton({
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface GameHistoryPGNViewerProps {
+  orientation?: "white" | "black";
+  enableKeyboardNavigation?: boolean;
+  onControlsChange?: (controls: {
+    stepBack: () => void;
+    stepForward: () => void;
+  }) => void;
   /**
    * The PGN of the completed game to replay. Required.
    *
@@ -253,7 +259,12 @@ interface GameHistoryPGNViewerProps {
  *   <GameHistoryPGNViewer pgn={game.pgn} />   // real PGN from the API
  *   <GameHistoryPGNViewer pgn={MOCK_PGN} />   // test/storybook fixture
  */
-export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
+export function GameHistoryPGNViewer({
+  pgn,
+  orientation = "white",
+  enableKeyboardNavigation = true,
+  onControlsChange,
+}: GameHistoryPGNViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [parsed, setParsed] = useState<ReturnType<typeof parsePGN>>(null);
   const [parseError, setParseError] = useState(false);
@@ -287,9 +298,16 @@ export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
   const goForward   = useCallback(() => setCurrentIndex((i) => Math.min(totalPositions - 1, i + 1)), [totalPositions]);
   const goToEnd     = useCallback(() => setCurrentIndex(totalPositions - 1), [totalPositions]);
 
+  useEffect(() => {
+    onControlsChange?.({ stepBack: goBack, stepForward: goForward });
+  }, [goBack, goForward, onControlsChange]);
+
   // Keyboard navigation
   useEffect(() => {
+    if (!enableKeyboardNavigation) return;
     const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.key === "ArrowLeft")  { e.preventDefault(); goBack(); }
       if (e.key === "ArrowRight") { e.preventDefault(); goForward(); }
       if (e.key === "Home")       { e.preventDefault(); goToStart(); }
@@ -297,7 +315,7 @@ export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [goBack, goForward, goToStart, goToEnd]);
+  }, [goBack, goForward, goToStart, goToEnd, enableKeyboardNavigation]);
 
   if (parseError) {
     return (
@@ -389,6 +407,7 @@ export function GameHistoryPGNViewer({ pgn }: GameHistoryPGNViewerProps) {
             <ChessboardComponent
               position={currentFen}
               onDrop={() => false}
+              orientation={orientation}
             />
           </div>
 

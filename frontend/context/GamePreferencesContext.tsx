@@ -32,6 +32,7 @@ export interface GamePreferences {
    * explicit appearance setting so only one implementation is live by default.
    */
   boardRenderer: BoardRenderer;
+  keyboardShortcutsEnabled: boolean;
 }
 
 export const DEFAULT_PREFERENCES: GamePreferences = {
@@ -47,6 +48,7 @@ export const DEFAULT_PREFERENCES: GamePreferences = {
   ttsVolume: 80,
   ttsRate: 1,
   boardRenderer: "2d",
+  keyboardShortcutsEnabled: true,
 };
 
 const STORAGE_KEY = "knightverse_game_preferences";

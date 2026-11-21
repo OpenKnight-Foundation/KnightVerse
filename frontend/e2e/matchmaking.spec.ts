@@ -74,7 +74,7 @@ test.describe("Online matchmaking", () => {
     await page.getByRole("button", { name: /play online/i }).click();
     await page.getByRole("button", { name: /casual match/i }).click();
 
-    await expect(page).toHaveURL(new RegExp(`/play/${MATCH_ID}$`), { timeout: 60_000 });
+    await expect(page).toHaveURL(new RegExp(`/play/${MATCH_ID}(\\?series=\\d+)?$`), { timeout: 60_000 });
 
     expect(calls.joins).toHaveLength(1);
     expect(calls.joins[0].url).toMatch(/\/v1\/matchmaking\/join-casual$/);
@@ -89,7 +89,7 @@ test.describe("Online matchmaking", () => {
     await page.getByRole("button", { name: /play online/i }).click();
     await page.getByRole("button", { name: /rated match/i }).click();
 
-    await expect(page).toHaveURL(new RegExp(`/play/${MATCH_ID}$`), { timeout: 60_000 });
+    await expect(page).toHaveURL(new RegExp(`/play/${MATCH_ID}(\\?series=\\d+)?$`), { timeout: 60_000 });
     expect(calls.joins[0].url).toMatch(/\/v1\/matchmaking\/join-rated-free$/);
   });
 });

@@ -71,6 +71,11 @@
   body {
     font-family: "Rowdies", 'Trebuchet MS', sans-serif;
     font-display: swap;
+    /* Tailwind v4 does not load tailwind.config.ts, so `bg-background` and
+       `text-foreground` on <body> generate nothing; set the theme colours
+       here so the page (and contrast checks) sit on the real background. */
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
 }
 

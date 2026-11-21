@@ -2,7 +2,10 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
+use crate::auth::{
+    issue_ws_ticket, login, logout, logout_all, refresh, register, resend_verification,
+    verify_email,
+};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -76,7 +79,7 @@ async fn check_redis(
     let probe = async {
         let mut conn = pool.get().await.map_err(|e| e.to_string())?;
         redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -386,6 +389,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
+                    .service(crate::wallet_link::wallet_get)
                     .service(crate::wallet_link::wallet_unlink)
                     .service(add_player)
                     .service(find_player_by_id)
@@ -431,6 +435,8 @@ pub async fn main() -> std::io::Result<()> {
                     .wrap(auth_redis_limiter.clone())
                     .service(login)
                     .service(register)
+                    .service(verify_email)
+                    .service(resend_verification)
                     .service(refresh)
                     .service(issue_ws_ticket)
                     .service(logout)
@@ -516,8 +522,6 @@ pub async fn main() -> std::io::Result<()> {
             )
             // WebSocket routes
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
-            // Matchmaking routes
-            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
             .service(
                 web::scope("/v1/ai")
@@ -533,12 +537,22 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Matchmaking routes (registered after other /v1 scopes to avoid shadowing)
+            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // Engine-pool saturation is exactly what an operator needs to see
             // during an incident, so this one route stays outside the auth
             // gate and the limiters.
             .route("/health/engine", web::get().to(ai_health))
-            // NFT routes (placeholder — not yet implemented)
-            // .service(web::scope("/v1").configure(configure_nft_routes))
+            // BE-154: NFT routes, mounted under /v1/nft behind JWT auth.
+            .service(
+                web::scope("/v1")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .configure(st_core::endpoint::configure),
+            )
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")

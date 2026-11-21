@@ -80,6 +80,8 @@ pub enum DataKey {
     WalletYield,
     /// Reentrancy guard flag.
     Entered,
+    /// Emergency pause flag (#1568).
+    Paused,
 }
 
 /// Errors surfaced through the generated `try_*` client methods.
@@ -109,6 +111,21 @@ pub enum ContractError {
     ArithmeticOverflow = 14,
     /// The pool's underlying token does not match the contract's fixed token.
     TokenMismatch = 15,
+    /// State-changing calls are blocked while the contract is paused.
+    ContractPaused = 16,
+}
+
+/// #1568: read-only views and escrow claims stay available while paused.
+fn check_not_paused(env: &Env) -> Result<(), ContractError> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(ContractError::ContractPaused);
+    }
+    Ok(())
 }
 
 #[contract]
@@ -127,7 +144,58 @@ impl YieldStakingContract {
         env.storage().instance().set(&DataKey::PoolCounter, &0u64);
         env.storage().instance().set(&DataKey::WalletYield, &0i128);
         env.storage().instance().set(&DataKey::Entered, &false);
+        env.storage().instance().set(&DataKey::Paused, &false);
         Ok(())
+    }
+
+    /// Emergency pause / unpause (#1568).
+    pub fn pause(env: Env, caller: Address) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_admin(&env, &caller)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    pub fn unpause(env: Env, caller: Address) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_admin(&env, &caller)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// #1562: paged view instead of returning an unbounded map in one read.
+    pub fn get_positions_page(
+        env: Env,
+        organizer: Address,
+        start: u64,
+        limit: u32,
+    ) -> Vec<(u64, PoolState)> {
+        let limit = if limit > 50 { 50 } else { limit };
+        let by_organizer: Map<Address, Map<u64, PoolState>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Organizers)
+            .unwrap_or_else(|| Map::new(&env));
+        let positions = by_organizer
+            .get(organizer)
+            .unwrap_or_else(|| Map::new(&env));
+        let mut out = Vec::new(&env);
+        for (id, state) in positions.iter() {
+            if out.len() >= limit {
+                break;
+            }
+            if id >= start {
+                out.push_back((id, state));
+            }
+        }
+        out
     }
 
     pub fn admin(env: Env) -> Result<Address, ContractError> {
@@ -158,6 +226,7 @@ impl YieldStakingContract {
     /// point prize funds at an arbitrary "pool" that was never reviewed.
     pub fn whitelist_pool(env: Env, caller: Address, pool: Address) -> Result<(), ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let mut whitelist: Map<Address, bool> = Self::whitelist(&env);
@@ -178,6 +247,7 @@ impl YieldStakingContract {
     /// unaffected — they continue to harvest and settle normally.
     pub fn unwhitelist_pool(env: Env, caller: Address, pool: Address) -> Result<(), ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let mut whitelist: Map<Address, bool> = Self::whitelist(&env);
@@ -221,6 +291,7 @@ impl YieldStakingContract {
         amount: i128,
     ) -> Result<u64, ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_not_entered(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -280,6 +351,7 @@ impl YieldStakingContract {
         amount: i128,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_not_entered(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -336,6 +408,7 @@ impl YieldStakingContract {
         allow: bool,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let (organizer, mut state) = Self::load_position(&env, pool_id)?;
@@ -385,6 +458,7 @@ impl YieldStakingContract {
     /// earning. Returns the amount harvested by this call.
     pub fn harvest_yield(env: Env, caller: Address, pool_id: u64) -> Result<i128, ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_entered(&env)?;
 
@@ -476,6 +550,7 @@ impl YieldStakingContract {
         percentages: Vec<i128>,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_entered(&env)?;
         Self::validate_distribution(&winners, &percentages)?;
@@ -868,3 +943,46 @@ mod pool_interface {
     }
 }
 pub use pool_interface::*;
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl YieldStakingContract {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

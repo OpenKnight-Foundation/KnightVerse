@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/authContext";
-import { endpoints } from "@/lib/api";
+import { apiClient, ApiError } from "@/lib/api/generated";
 
 /**
  * Sign-in / register modal wired to the auth API (#FE-96).
@@ -26,14 +26,15 @@ type Mode = "login" | "register" | "forgot";
  * whether or not the account exists, so the UI never reveals that.
  */
 export async function requestPasswordReset(email: string): Promise<void> {
-  const res = await fetch(endpoints.auth.forgotPassword(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  if (res.status === 429) throw new Error("Too many requests — please try again later.");
-  if (!res.ok && res.status >= 500) {
-    throw new Error("Could not send the reset email. Please try again.");
+  try {
+    await apiClient.forgotPassword({ body: { email } });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 429) {
+      throw new Error("Too many requests — please try again later.");
+    }
+    if (!(error instanceof ApiError) || error.status >= 500) {
+      throw new Error("Could not send the reset email. Please try again.");
+    }
   }
 }
 

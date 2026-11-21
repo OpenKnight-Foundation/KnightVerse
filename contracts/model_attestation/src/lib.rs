@@ -14,14 +14,26 @@ pub enum DataKey {
     Admin,
     /// model_id → ModelRecord
     Model(String),
+    /// addresses allowed to attest on behalf of the organiser
+    Attester(Address),
+}
+
+/// Algorithm used to produce the stored checkpoint hash (#1557).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HashAlgorithm {
+    Sha256,
+    Blake3,
 }
 
 /// A stored model checkpoint record.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ModelRecord {
-    /// Hex-encoded SHA-256 or Blake3 hash of the model weights
+    /// Canonical lower-case hex SHA-256 or Blake3 hash of the model weights
     pub hash: String,
+    /// Algorithm that produced `hash`
+    pub algorithm: HashAlgorithm,
     /// Tournament or version identifier
     pub tournament_id: String,
     /// Ledger timestamp at submission
@@ -38,6 +50,39 @@ pub enum Error {
     /// Model ID already attested — records are immutable
     AlreadyAttested = 3,
     ModelNotFound = 4,
+    /// Submitter is neither the admin nor an approved attester
+    NotAttester = 5,
+    /// Hash is not a 32-byte hex digest
+    InvalidHash = 6,
+}
+
+/// Reject malformed digests and store one canonical encoding (#1557).
+fn normalize_hash(env: &Env, hash: &String) -> String {
+    if hash.len() != 64 {
+        panic_with_error!(env, Error::InvalidHash);
+    }
+    let mut buf = [0u8; 64];
+    hash.copy_into_slice(&mut buf);
+    for b in buf.iter_mut() {
+        if b.is_ascii_uppercase() && *b <= b'F' {
+            *b += b'a' - b'A';
+        } else if !b.is_ascii_hexdigit() {
+            panic_with_error!(env, Error::InvalidHash);
+        }
+    }
+    String::from_bytes(env, &buf)
+}
+
+fn require_admin(env: &Env, caller: &Address) {
+    caller.require_auth();
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(env, Error::NotAdmin));
+    if caller != &admin {
+        panic_with_error!(env, Error::NotAdmin);
+    }
 }
 
 #[contract]
@@ -54,6 +99,14 @@ impl ModelAttestation {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
+    /// Approve or revoke an attester (#1556).
+    pub fn set_attester(env: Env, admin: Address, attester: Address, approved: bool) {
+        require_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Attester(attester), &approved);
+    }
+
     /// Submit a model weight hash for a given model_id. Immutable once stored.
     pub fn attest(
         env: Env,
@@ -61,14 +114,33 @@ impl ModelAttestation {
         model_id: String,
         hash: String,
         tournament_id: String,
+        algorithm: HashAlgorithm,
     ) {
         submitter.require_auth();
+        // #1556: immutable records must not be squat-able by arbitrary callers.
+        let is_admin: bool = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Admin)
+            .map(|admin| admin == submitter)
+            .unwrap_or(false);
+        let approved: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Attester(submitter.clone()))
+            .unwrap_or(false);
+        if !is_admin && !approved {
+            panic_with_error!(&env, Error::NotAttester);
+        }
+
+        let hash = normalize_hash(&env, &hash);
         let key = DataKey::Model(model_id.clone());
         if env.storage().persistent().has(&key) {
             panic_with_error!(&env, Error::AlreadyAttested);
         }
         let record = ModelRecord {
             hash: hash.clone(),
+            algorithm,
             tournament_id: tournament_id.clone(),
             submitted_at: env.ledger().timestamp(),
             submitted_by: submitter,
@@ -95,8 +167,51 @@ impl ModelAttestation {
             .persistent()
             .get::<_, ModelRecord>(&DataKey::Model(model_id))
         {
-            Some(record) => record.hash == hash,
+            Some(record) => record.hash == normalize_hash(&env, &hash),
             None => false,
         }
     }
 }
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl ModelAttestation {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

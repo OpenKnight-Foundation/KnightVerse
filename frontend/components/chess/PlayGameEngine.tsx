@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useParams, useRouter } from "next/navigation";
@@ -9,7 +9,16 @@ import { FaUser, FaClock } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
-import type { GameResult } from "@/components/GameResultOverlay";
+import type { GameResult, SeriesSummary } from "@/components/GameResultOverlay";
+import {
+  initialSeries,
+  recordSeriesGame,
+  seriesMultiplier,
+  seriesOutcome,
+  seriesPayout,
+  type SeriesLength,
+  type SeriesResult,
+} from "@/lib/series";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -22,13 +31,23 @@ import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
 import { ReconnectionBanner } from "@/components/ReconnectionBanner";
 import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
+import { useGameShortcuts } from "@/hook/useGameShortcuts";
+import { ShortcutsHelpDialog } from "@/components/ShortcutsHelpDialog";
+import { GameChatPanel } from "@/components/GameChatPanel";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
   {
     ssr: false,
     loading: () => (
-      <div className="w-full max-w-[560px] min-w-[320px] aspect-square rounded-md border-2 border-gray-700/50 p-1">
+      <div className="aspect-square w-full max-w-[560px] rounded-md border-2 border-gray-700/50 p-1">
         <div className="grid grid-cols-8 grid-rows-8 gap-0 w-full h-full">
           {Array.from({ length: 64 }).map((_, i) => (
             <div
@@ -73,6 +92,9 @@ export default function PlayGameEngine({
   fen,
   initialMinutes = 10,
   playerColor = "white",
+  seriesLength: seriesLengthProp = 1,
+  stake = null,
+  payout = null,
 }: {
   fen?: string;
   /** Time control in minutes for each side (FE-116 / #1357). */
@@ -83,7 +105,11 @@ export default function PlayGameEngine({
    * so the board is oriented correctly and only their pieces can move.
    */
   playerColor?: "white" | "black";
+  seriesLength?: SeriesLength;
+  stake?: number | null;
+  payout?: number | null;
 }) {
+  const seriesLength = seriesLengthProp;
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;
@@ -98,11 +124,13 @@ export default function PlayGameEngine({
   const [resignation, setResignation] = useState<"self" | "opponent" | null>(null);
   const [isCheatPanelExpanded, setIsCheatPanelExpanded] = useState(false);
   const [isMoveHistoryOpen, setIsMoveHistoryOpen] = useState(false);
+  const [isControlsOpen, setIsControlsOpen] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
     playerColor,
   );
   const isMobile = useIsMobile();
-  const { announcement, announceMove, announceTimeAlert } = useBoardAnnouncer();
+  const { announcement, timeAnnouncement, announceMove, announceTimeAlert } =
+    useBoardAnnouncer();
   const { preferences, setPreference } = useGamePreferences();
   const { speak: speakOpponentMove } = useSpeechSynthesis();
 
@@ -112,7 +140,19 @@ export default function PlayGameEngine({
 
   const [pendingOffer, setPendingOffer] = useState<PendingOffer | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [resignConfirmOpen, setResignConfirmOpen] = useState(false);
+  const [reviewPly, setReviewPly] = useState<number | null>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   const handledActionIdRef = useRef(0);
+  const [series, setSeries] = useState(() => initialSeries(seriesLength));
+  const seriesRecordedRef = useRef(false);
+
+  useEffect(() => {
+    setSeries(initialSeries(seriesLength));
+    seriesRecordedRef.current = false;
+  }, [seriesLength]);
 
   const {
     status: socketStatus,
@@ -305,6 +345,38 @@ export default function PlayGameEngine({
     ((playerColor === "white" && game.turn() === "w") ||
       (playerColor === "black" && game.turn() === "b"));
 
+  const isReviewing = reviewPly !== null;
+
+  useEffect(() => {
+    setReviewPly(null);
+  }, [moveHistory.length]);
+
+  const displayPosition = useMemo(() => {
+    if (reviewPly === null) return position;
+    const replay = new Chess(fen);
+    for (let i = 0; i < reviewPly; i++) {
+      try {
+        if (!replay.move(moveHistory[i])) break;
+      } catch {
+        break;
+      }
+    }
+    return replay.fen();
+  }, [fen, moveHistory, position, reviewPly]);
+
+  const stepBack = useCallback(() => {
+    setReviewPly((prev) =>
+      prev === null ? Math.max(0, moveHistory.length - 1) : Math.max(0, prev - 1),
+    );
+  }, [moveHistory.length]);
+
+  const stepForward = useCallback(() => {
+    setReviewPly((prev) => {
+      if (prev === null) return null;
+      return prev >= moveHistory.length ? null : prev + 1;
+    });
+  }, [moveHistory.length]);
+
   const handleMove = useCallback(
     ({
       sourceSquare,
@@ -313,7 +385,7 @@ export default function PlayGameEngine({
       sourceSquare: string;
       targetSquare: string;
     }) => {
-      if (!isMyTurn || gameStatus !== "playing") return false;
+      if (!isMyTurn || isReviewing || gameStatus !== "playing") return false;
 
       try {
         const fenBeforeMyMove = game.fen();
@@ -357,6 +429,7 @@ export default function PlayGameEngine({
     },
     [
       isMyTurn,
+      isReviewing,
       game,
       gameStatus,
       sendMove,
@@ -369,7 +442,7 @@ export default function PlayGameEngine({
 
   const handleSanMove = useCallback(
     (san: string): boolean => {
-      if (!isMyTurn || gameStatus !== "playing") return false;
+      if (!isMyTurn || isReviewing || gameStatus !== "playing") return false;
       try {
         const fenBeforeMyMove = game.fen();
         const move = game.move(san);
@@ -407,6 +480,7 @@ export default function PlayGameEngine({
     },
     [
       isMyTurn,
+      isReviewing,
       game,
       gameStatus,
       sendMove,
@@ -417,26 +491,43 @@ export default function PlayGameEngine({
     ],
   );
 
-  // Time alert announcements
-  useEffect(() => {
-    if (whiteTime === 30 && playerColor === "white") {
-      announceTimeAlert("30 seconds remaining for White");
-    } else if (whiteTime === 10 && playerColor === "white") {
-      announceTimeAlert("10 seconds remaining for White");
-    } else if (whiteTime === 0 && playerColor === "white") {
-      announceTimeAlert("Time is up for White!");
-    }
-  }, [whiteTime, playerColor, announceTimeAlert]);
+  const timeAlertsRef = useRef({ gameId, announced: new Set<string>() });
 
   useEffect(() => {
-    if (blackTime === 30 && playerColor === "black") {
-      announceTimeAlert("30 seconds remaining for Black");
-    } else if (blackTime === 10 && playerColor === "black") {
-      announceTimeAlert("10 seconds remaining for Black");
-    } else if (blackTime === 0 && playerColor === "black") {
-      announceTimeAlert("Time is up for Black!");
+    if (timeAlertsRef.current.gameId !== gameId) {
+      timeAlertsRef.current = { gameId, announced: new Set<string>() };
     }
-  }, [blackTime, playerColor, announceTimeAlert]);
+    if (gameStatus !== "playing") return;
+
+    const myTime = playerColor === "white" ? whiteTime : blackTime;
+    const colorName = playerColor === "white" ? "White" : "Black";
+    const thresholds = [
+      {
+        key: `${gameId}:${playerColor}:30`,
+        limit: 30,
+        message: `30 seconds remaining for ${colorName}`,
+      },
+      {
+        key: `${gameId}:${playerColor}:10`,
+        limit: 10,
+        message: `10 seconds remaining for ${colorName}`,
+      },
+      {
+        key: `${gameId}:${playerColor}:0`,
+        limit: 0,
+        message: `Time is up for ${colorName}!`,
+      },
+    ];
+    const next = thresholds.find(
+      (threshold) =>
+        myTime <= threshold.limit &&
+        !timeAlertsRef.current.announced.has(threshold.key),
+    );
+    if (next) {
+      timeAlertsRef.current.announced.add(next.key);
+      announceTimeAlert(next.message);
+    }
+  }, [gameId, whiteTime, blackTime, playerColor, gameStatus, announceTimeAlert]);
 
   const handleResign = useCallback(() => {
     // FE-117 (#1358): tell the server (and therefore the opponent) so the game
@@ -448,6 +539,33 @@ export default function PlayGameEngine({
     setPendingOffer(null);
     resetCheatDetection();
   }, [sendResign, resetCheatDetection]);
+
+  const requestResign = useCallback(() => {
+    if (gameStatus === "playing") setResignConfirmOpen(true);
+  }, [gameStatus]);
+
+  const openChat = useCallback(() => {
+    setChatOpen(true);
+    requestAnimationFrame(() => chatInputRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!resignConfirmOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResignConfirmOpen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [resignConfirmOpen]);
+
+  useGameShortcuts({
+    flipBoard: handleFlipBoard,
+    stepBack,
+    stepForward,
+    openChat,
+    resign: requestResign,
+    help: () => setHelpOpen((prev) => !prev),
+  });
 
   // ── BE-170: draw / abort / takeback / rematch ─────────────────────────────
   const myColorCode = playerColor === "white" ? "w" : "b";
@@ -596,7 +714,10 @@ export default function PlayGameEngine({
       case "rematch_accept":
         setPendingOffer(null);
         if (ev.newGameId) {
-          router.push(`/play/${encodeURIComponent(ev.newGameId)}`);
+          const params = new URLSearchParams({ series: String(seriesLength) });
+          if (stake !== null) params.set("stake", String(stake));
+          if (payout !== null) params.set("payout", String(payout));
+          router.push(`/play/${encodeURIComponent(ev.newGameId)}?${params.toString()}`);
         } else {
           flashNotice("Rematch accepted — waiting for the new game…");
         }
@@ -621,6 +742,9 @@ export default function PlayGameEngine({
     rollbackTo,
     flashNotice,
     router,
+    seriesLength,
+    stake,
+    payout,
   ]);
 
   // A move by either side voids an outstanding draw offer from the mover.
@@ -671,6 +795,67 @@ export default function PlayGameEngine({
     overlayResult =
       resignation === "self" ? "loss_by_resignation" : "win_by_resignation";
   }
+
+  const gameSeriesResult: SeriesResult | null = (() => {
+    if (!overlayResult || overlayResult === "aborted") return null;
+    if (overlayResult === "white_wins") return playerColor === "white" ? "win" : "loss";
+    if (overlayResult === "black_wins") return playerColor === "black" ? "win" : "loss";
+    if (overlayResult === "loss_on_time" || overlayResult === "loss_by_resignation") return "loss";
+    if (overlayResult === "win_on_time" || overlayResult === "win_by_resignation") return "win";
+    return "draw";
+  })();
+
+  const displaySeries =
+    gameSeriesResult && !seriesRecordedRef.current
+      ? recordSeriesGame(series, gameSeriesResult)
+      : series;
+  const seriesFinalOutcome = seriesOutcome(displaySeries);
+  const computedPayout = seriesPayout(stake, seriesLength, seriesFinalOutcome);
+  const payoutLabel =
+    seriesFinalOutcome === null
+      ? null
+      : seriesFinalOutcome === "win"
+        ? payout !== null
+          ? `${payout.toFixed(4)} XLM`
+          : computedPayout !== null
+            ? `${computedPayout.toFixed(4)} XLM`
+            : `${seriesMultiplier(seriesLength)}× stake`
+        : "No payout";
+
+  const seriesSummary: SeriesSummary | undefined = overlayResult
+    ? {
+        label: `Bo${series.length}`,
+        score: `${displaySeries.playerWins}–${displaySeries.opponentWins}${
+          displaySeries.draws > 0 ? ` (${displaySeries.draws} drawn)` : ""
+        }`,
+        gameNumber: displaySeries.gameNumber,
+        length: displaySeries.length,
+        outcome: seriesFinalOutcome,
+        payout: payoutLabel,
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (!gameSeriesResult || seriesRecordedRef.current) return;
+    seriesRecordedRef.current = true;
+    setSeries((prev) => recordSeriesGame(prev, gameSeriesResult));
+  }, [gameSeriesResult]);
+
+  const handleNextGame = useCallback(() => {
+    game.reset();
+    setPosition(game.fen());
+    setMoveHistory([]);
+    const seconds = Math.max(0, initialMinutes) * 60;
+    setWhiteTime(seconds);
+    setBlackTime(seconds);
+    setGameStatus("playing");
+    setFlaggedColor(null);
+    setResignation(null);
+    setPendingOffer(null);
+    setActionNotice(null);
+    resetCheatDetection();
+    seriesRecordedRef.current = false;
+  }, [game, initialMinutes, resetCheatDetection]);
 
   const offerLabel: Record<OfferKind, string> = {
     draw: "a draw",
@@ -774,6 +959,146 @@ export default function PlayGameEngine({
     </div>
   );
 
+  const gameStatusPanel = (
+    <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4 animate-fade-in">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-300">Game Status</h3>
+        <ConnectionStatusIndicator
+          status={socketStatus}
+          className="hidden lg:flex"
+        />
+      </div>
+
+      {gameStatus !== "playing" && (
+        <div
+          className="p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 mb-3 animate-scale-in"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p className="text-sm font-bold text-yellow-400">
+            {gameStatus === "checkmate" && "Checkmate!"}
+            {gameStatus === "stalemate" && "Stalemate!"}
+            {gameStatus === "draw" && "Draw!"}
+            {gameStatus === "draw_agreed" && "Draw agreed."}
+            {gameStatus === "aborted" && "Game aborted."}
+            {gameStatus === "timeout" &&
+              (flaggedColor === playerColor
+                ? "Time's up — you lost on time."
+                : "Opponent flagged — you win on time!")}
+            {gameStatus === "resigned" &&
+              (resignation === "self"
+                ? "Resigned!"
+                : "Opponent resigned — you win!")}
+          </p>
+        </div>
+      )}
+
+      {game.isCheck() && gameStatus === "playing" && (
+        <div
+          className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 mb-3 animate-scale-in"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p className="text-sm font-bold text-red-400">Check!</p>
+        </div>
+      )}
+
+      <div className="text-xs text-gray-500 flex justify-between gap-2">
+        <span>Game ID: {gameId?.slice(0, 12)}...</span>
+        {serverClock && (
+          <span title="Clock is server-authoritative, corrected for latency">
+            Server clock · {latencyMs}ms
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
+  const moveHistoryPanel = (
+    <div
+      className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4"
+      role="region"
+      aria-label="Move history"
+    >
+      <button
+        className="flex items-center justify-between w-full text-left"
+        onClick={() => isMobile && setIsMoveHistoryOpen((prev) => !prev)}
+        aria-expanded={isMobile ? isMoveHistoryOpen : true}
+      >
+        <h3 className="text-sm font-semibold text-gray-300">Moves</h3>
+        <span className="text-gray-500 text-xs lg:hidden">
+          {isMoveHistoryOpen ? "▲" : "▼"}
+        </span>
+      </button>
+      <div
+        className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}
+      >
+        {movePairs.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">
+            No moves yet.{" "}
+            {isMyTurn ? "Your turn to move!" : "Waiting for opponent..."}
+          </p>
+        ) : (
+          movePairs.map((pair, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-2 py-1 px-2 rounded hover:bg-gray-700/30 text-sm"
+            >
+              <span className="text-gray-500 w-6 text-right text-xs">
+                {i + 1}.
+              </span>
+              <span className="text-white font-mono text-xs w-16">
+                {pair[0]}
+              </span>
+              <span className="text-gray-400 font-mono text-xs w-16">
+                {pair[1] ?? ""}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const boardControlButtons = (
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        onClick={handleFlipBoard}
+        aria-label="Flip board orientation"
+        className="py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
+      >
+        Flip Board
+      </button>
+      <button
+        onClick={requestResign}
+        disabled={gameStatus !== "playing"}
+        aria-label="Resign game"
+        className="py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Resign
+      </button>
+    </div>
+  );
+
+  const renderMoveEntryControls = (idPrefix: string, enableGlobalShortcut: boolean) => (
+    <div className="space-y-3">
+      <VoiceMoveInput
+        onSubmitMove={handleSanMove}
+        isGameActive={gameStatus === "playing"}
+        isMyTurn={isMyTurn}
+        enabled={preferences.voiceMoveEnabled}
+      />
+      <KeyboardMoveInput
+        onSubmitMove={handleSanMove}
+        isGameActive={gameStatus === "playing"}
+        isMyTurn={isMyTurn}
+        suggestions={game.moves()}
+        idPrefix={idPrefix}
+        enableGlobalShortcut={enableGlobalShortcut}
+      />
+    </div>
+  );
+
   const rematchControls = (
     <div className="space-y-2">
       {incomingOffer}
@@ -797,7 +1122,7 @@ export default function PlayGameEngine({
 
   return (
     <div
-      className="min-h-screen p-4 md:p-8"
+      className="min-h-screen p-2 sm:p-4 md:p-8"
       role="region"
       aria-label="Online Chess Game"
     >
@@ -833,12 +1158,12 @@ export default function PlayGameEngine({
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
           <div
-            className="w-full max-w-[600px] min-w-0 px-2 sm:px-0"
+            className="mx-auto w-full max-w-[600px] min-w-0 lg:mx-0"
             role="region"
             aria-label="Chess board"
           >
             <div
-              className="flex items-center justify-between mb-3 px-1"
+              className="sticky top-0 z-20 -mx-2 mb-3 lg:static flex items-center justify-between border-b border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
               role="status"
               aria-label="Opponent info"
             >
@@ -861,7 +1186,7 @@ export default function PlayGameEngine({
               </div>
             </div>
 
-            <div className="w-full min-w-[320px]">
+            <div className="w-full min-w-0">
               <AICompanionHUD
                 evaluation={null}
                 isVictory={gameStatus === "checkmate" && game.turn() === "w"}
@@ -878,7 +1203,7 @@ export default function PlayGameEngine({
               <ErrorBoundary componentName="Chessboard">
                 {preferences.boardRenderer === "3d" ? (
                   <ChessboardWebGL3D
-                    fen={position === "start" ? game.fen() : position}
+                    fen={displayPosition === "start" ? game.fen() : displayPosition}
                     interactive
                     onMove={(from, to) =>
                       handleMove({ sourceSquare: from, targetSquare: to })
@@ -886,10 +1211,12 @@ export default function PlayGameEngine({
                   />
                 ) : (
                   <ChessboardComponent
-                    position={position}
+                    position={displayPosition}
                     onDrop={handleMove}
                     orientation={boardOrientation}
                     blindfoldMode={preferences.blindfoldMode}
+                    isMyTurn={isMyTurn && !isReviewing}
+                    premovesEnabled={!isReviewing && socketStatus === "connected"}
                   />
                 )}
               </ErrorBoundary>
@@ -902,8 +1229,52 @@ export default function PlayGameEngine({
               />
             </div>
 
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={stepBack}
+                aria-label="Step one move back"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={stepForward}
+                aria-label="Step one move forward"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ›
+              </button>
+              {isReviewing && (
+                <button
+                  type="button"
+                  onClick={() => setReviewPly(null)}
+                  className="rounded-lg bg-blue-600/20 px-3 py-2 text-xs text-blue-300 hover:bg-blue-600/30"
+                >
+                  Back to live
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={openChat}
+                aria-label="Open game chat"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                aria-label="Keyboard shortcuts help"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ?
+              </button>
+            </div>
+
             <div
-              className="flex items-center justify-between mt-3 px-1"
+              className="sticky bottom-0 z-20 -mx-2 mt-3 lg:static flex items-center justify-between border-t border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
               role="status"
               aria-label="Your info"
             >
@@ -929,37 +1300,50 @@ export default function PlayGameEngine({
               </div>
             </div>
 
-            <div className="mt-3 space-y-3">
-              <VoiceMoveInput
-                onSubmitMove={handleSanMove}
-                isGameActive={gameStatus === "playing"}
-                isMyTurn={isMyTurn}
-                enabled={preferences.voiceMoveEnabled}
-              />
-              <KeyboardMoveInput
-                onSubmitMove={handleSanMove}
-                isGameActive={gameStatus === "playing"}
-                isMyTurn={isMyTurn}
-                suggestions={game.moves()}
-              />
+            <div className="mt-3 hidden space-y-3 lg:block">
+              {renderMoveEntryControls("desktop-keyboard-move", true)}
             </div>
 
-            <div className="flex items-center gap-2 mt-3 lg:hidden">
-              <button
-                onClick={handleFlipBoard}
-                aria-label="Flip board orientation"
-                className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
-              >
-                Flip Board
-              </button>
-              <button
-                onClick={handleResign}
-                disabled={gameStatus !== "playing"}
-                aria-label="Resign game"
-                className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Resign
-              </button>
+            <div className="mt-3 flex items-center gap-2 lg:hidden">
+              <Sheet open={isControlsOpen} onOpenChange={setIsControlsOpen}>
+                <SheetTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Open game controls"
+                    className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
+                  >
+                    Game Controls
+                  </button>
+                </SheetTrigger>
+                <SheetContent
+                  side="bottom"
+                  className="max-h-[85vh] overflow-y-auto border-gray-700 bg-gray-900 px-0 pb-6"
+                >
+                  <SheetHeader className="px-4">
+                    <SheetTitle className="text-white">Game Controls</SheetTitle>
+                  </SheetHeader>
+                  <div className="space-y-3 px-4">
+                    {renderMoveEntryControls("mobile-keyboard-move", false)}
+                    {gameStatusPanel}
+                    {gameActionsPanel}
+                    {moveHistoryPanel}
+                    <CheatDetectionPanel
+                      opponentAnalysis={opponentAnalysis}
+                      playerAnalysis={playerAnalysis}
+                      isActive={isCheatDetectionActive}
+                      isExpanded={isCheatPanelExpanded}
+                      onToggle={() =>
+                        setIsCheatPanelExpanded((prev: boolean) => !prev)
+                      }
+                    />
+                    {boardControlButtons}
+                    <ConnectionStatusIndicator
+                      status={socketStatus}
+                      className="justify-center"
+                    />
+                  </div>
+                </SheetContent>
+              </Sheet>
               <ConnectionStatusIndicator
                 status={socketStatus}
                 className="shrink-0"
@@ -968,115 +1352,54 @@ export default function PlayGameEngine({
           </div>
 
           <div
-            className="w-full lg:w-80 space-y-4"
+            className="hidden w-full space-y-4 lg:block lg:w-80"
             role="complementary"
             aria-label="Game controls"
           >
-            <div className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4 animate-fade-in">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-300">
-                  Game Status
+            {gameStatusPanel}
+
+            <div
+              className="rounded-xl border border-teal-500/30 bg-teal-500/10 p-4"
+              role="status"
+              aria-label="Series score"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-teal-300">
+                  Series · Bo{series.length}
                 </h3>
-                <ConnectionStatusIndicator
-                  status={socketStatus}
-                  className="hidden lg:flex"
-                />
+                <span className="text-xs text-gray-400">
+                  {seriesFinalOutcome
+                    ? "Final"
+                    : `Game ${displaySeries.gameNumber} of ${displaySeries.length}`}
+                </span>
               </div>
-
-              {gameStatus !== "playing" && (
-                <div
-                  className="p-3 rounded-lg bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 mb-3 animate-scale-in"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  <p className="text-sm font-bold text-yellow-400">
-                    {gameStatus === "checkmate" && "Checkmate!"}
-                    {gameStatus === "stalemate" && "Stalemate!"}
-                    {gameStatus === "draw" && "Draw!"}
-                    {gameStatus === "draw_agreed" && "Draw agreed."}
-                    {gameStatus === "aborted" && "Game aborted."}
-                    {gameStatus === "timeout" &&
-                      (flaggedColor === playerColor
-                        ? "Time's up — you lost on time."
-                        : "Opponent flagged — you win on time!")}
-                    {gameStatus === "resigned" &&
-                      (resignation === "self"
-                        ? "Resigned!"
-                        : "Opponent resigned — you win!")}
-                  </p>
-                </div>
+              <p className="mt-3 text-lg font-bold text-white">
+                You {displaySeries.playerWins} — {displaySeries.opponentWins} Opponent
+              </p>
+              {displaySeries.draws > 0 && (
+                <p className="mt-1 text-xs text-gray-400">
+                  {displaySeries.draws} drawn
+                </p>
               )}
-
-              {game.isCheck() && gameStatus === "playing" && (
-                <div
-                  className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 mb-3 animate-scale-in"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  <p className="text-sm font-bold text-red-400">Check!</p>
-                </div>
+              {seriesFinalOutcome && (
+                <p className="mt-2 text-sm font-semibold text-emerald-300">
+                  {seriesFinalOutcome === "win"
+                    ? "Series won"
+                    : seriesFinalOutcome === "loss"
+                      ? "Series lost"
+                      : "Series drawn"}
+                  {payoutLabel ? ` · Payout ${payoutLabel}` : ""}
+                </p>
               )}
-
-              <div className="text-xs text-gray-500 flex justify-between gap-2">
-                <span>Game ID: {gameId?.slice(0, 12)}...</span>
-                {serverClock && (
-                  <span title="Clock is server-authoritative, corrected for latency">
-                    Server clock · {latencyMs}ms
-                  </span>
-                )}
-              </div>
+              {!seriesFinalOutcome && overlayResult && (
+                <p className="mt-2 text-xs text-teal-200">
+                  Next game: Game {displaySeries.gameNumber} of {displaySeries.length}
+                </p>
+              )}
             </div>
 
             {gameActionsPanel}
-
-            <div
-              className="rounded-xl border border-gray-700/50 bg-gray-800/40 p-4"
-              role="region"
-              aria-label="Move history"
-            >
-              <button
-                className="flex items-center justify-between w-full text-left"
-                onClick={() =>
-                  isMobile && setIsMoveHistoryOpen((prev) => !prev)
-                }
-                aria-expanded={isMobile ? isMoveHistoryOpen : true}
-              >
-                <h3 className="text-sm font-semibold text-gray-300">Moves</h3>
-                <span className="text-gray-500 text-xs lg:hidden">
-                  {isMoveHistoryOpen ? "▲" : "▼"}
-                </span>
-              </button>
-              <div
-                className={`max-h-64 overflow-y-auto space-y-0.5 mt-3 ${isMobile && !isMoveHistoryOpen ? "hidden" : ""}`}
-              >
-                {movePairs.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">
-                    No moves yet.{" "}
-                    {isMyTurn
-                      ? "Your turn to move!"
-                      : "Waiting for opponent..."}
-                  </p>
-                ) : (
-                  movePairs.map((pair, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 py-1 px-2 rounded hover:bg-gray-700/30 text-sm"
-                    >
-                      <span className="text-gray-500 w-6 text-right text-xs">
-                        {i + 1}.
-                      </span>
-                      <span className="text-white font-mono text-xs w-16">
-                        {pair[0]}
-                      </span>
-                      <span className="text-gray-400 font-mono text-xs w-16">
-                        {pair[1] ?? ""}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
+            {moveHistoryPanel}
             <CheatDetectionPanel
               opponentAnalysis={opponentAnalysis}
               playerAnalysis={playerAnalysis}
@@ -1084,47 +1407,88 @@ export default function PlayGameEngine({
               isExpanded={isCheatPanelExpanded}
               onToggle={() => setIsCheatPanelExpanded((prev: boolean) => !prev)}
             />
-
-            <div className="hidden lg:flex gap-2">
-              <button
-                onClick={handleFlipBoard}
-                aria-label="Flip board orientation"
-                className="flex-1 py-2.5 rounded-xl bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 text-gray-300 text-sm font-medium transition-all duration-300"
-              >
-                Flip Board
-              </button>
-              <button
-                onClick={handleResign}
-                disabled={gameStatus !== "playing"}
-                aria-label="Resign game"
-                className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Resign
-              </button>
-            </div>
-
+            {boardControlButtons}
           </div>
         </div>
       </div>
 
-      {/* ARIA live announcer for screen readers */}
       <div
         role="status"
-        aria-live="assertive"
+        aria-live="polite"
         aria-atomic="true"
+        aria-label="Chess move announcements"
         className="sr-only"
       >
         {announcement}
+      </div>
+      <div
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        aria-label="Chess time alerts"
+        className="sr-only"
+      >
+        {timeAnnouncement}
       </div>
 
       {overlayResult && (
         <GameResultOverlay
           result={overlayResult}
-          onPlayAgain={() => router.push("/")}
+          onPlayAgain={() => {
+            if (seriesSummary && !seriesFinalOutcome) handleNextGame();
+            else router.push("/");
+          }}
           onPlayOnline={() => router.push("/")}
           onReview={handleReview}
           extraActions={rematchControls}
+          series={seriesSummary}
         />
+      )}
+
+      <ShortcutsHelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+      />
+      <GameChatPanel
+        ref={chatInputRef}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
+      {resignConfirmOpen && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="resign-confirm-title"
+        >
+          <div className="w-full max-w-sm rounded-xl border border-red-500/40 bg-gray-900 p-5 text-white shadow-2xl">
+            <h2 id="resign-confirm-title" className="text-lg font-bold text-red-300">
+              Resign this game?
+            </h2>
+            <p className="mt-2 text-sm text-gray-400">
+              Your opponent will be declared the winner.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResignConfirmOpen(false)}
+                className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResignConfirmOpen(false);
+                  handleResign();
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold hover:bg-red-500"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -94,7 +94,7 @@ impl Engine for ProcessEngine {
                 match parse_uci_line(&line) {
                     Some(UciMessage::BestMove { best_move, .. }) => {
                         let mut result = EngineResult {
-                            best_move,
+                            best_move: Some(best_move).filter(|m| m != "(none)"),
                             evaluation: None,
                             depth: None,
                             principal_variation: Vec::new(),
@@ -106,7 +106,7 @@ impl Engine for ProcessEngine {
                             pv,
                         }) = last_info.clone()
                         {
-                            result.depth = depth;
+                            result.depth = depth.map(u16::from);
                             result.evaluation = score_cp.map(|cp| cp as f32 / 100.0);
                             result.principal_variation = pv;
                         }
@@ -141,7 +141,7 @@ impl Engine for ProcessEngine {
                     match parse_uci_line(&line) {
                         Some(UciMessage::BestMove { best_move, .. }) => {
                             let mut result = EngineResult {
-                                best_move,
+                                best_move: Some(best_move).filter(|m| m != "(none)"),
                                 evaluation: None,
                                 depth: None,
                                 principal_variation: Vec::new(),
@@ -153,7 +153,7 @@ impl Engine for ProcessEngine {
                                 pv,
                             }) = last_info
                             {
-                                result.depth = depth;
+                                result.depth = depth.map(u16::from);
                                 result.evaluation = score_cp.map(|cp| cp as f32 / 100.0);
                                 result.principal_variation = pv;
                             }

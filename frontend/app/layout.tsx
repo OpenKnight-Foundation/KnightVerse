@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { I18nProvider } from "@/i18n/provider";
 import ClientRoot from "@/components/ClientRoot";
 import { AppProvider } from "@/context/walletContext";
 import { MatchmakingProvider } from "@/context/matchmakingContext";
@@ -31,6 +32,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        <I18nProvider>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <AuthProvider>
             <AppProvider>
@@ -52,6 +54,7 @@ export default function RootLayout({
             </AppProvider>
           </AuthProvider>
         </ThemeProvider>
+        </I18nProvider>
       </body>
     </html>
   );

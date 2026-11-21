@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 import { useAuth } from "@/context/authContext";
 import { useEloStats } from "@/hook/useEloStats";
+import { useOnChainTitle } from "@/hook/useOnChainTitle";
 import { endpoints } from "@/lib/api";
 import { truncateAddress } from "@/lib/utils";
 
@@ -39,6 +40,7 @@ export default function ProfilePage() {
 
   // The backend keys players by UUID / wallet address, not `user_id`.
   const playerId = user?.wallet_address ?? user?.username ?? null;
+  const { title: onChainTitle } = useOnChainTitle(user?.wallet_address);
 
   // Profile is sign-in only: bounce anonymous visitors back to the landing
   // page instead of rendering an empty shell.
@@ -120,7 +122,17 @@ export default function ProfilePage() {
           <div className="mx-auto max-w-5xl space-y-6">
             <header className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-bold text-white">{user?.username}</h1>
+                <h1 className="flex flex-wrap items-center gap-2 text-3xl font-bold text-white">
+                  {user?.username}
+                  {onChainTitle && (
+                    <span
+                      className="rounded-md border border-amber-500/40 bg-amber-500/20 px-2 py-0.5 align-middle text-sm font-bold uppercase text-amber-300"
+                      title="On-chain title badge"
+                    >
+                      {onChainTitle.title}
+                    </span>
+                  )}
+                </h1>
                 <p className="mt-1 text-sm text-gray-400">
                   Player #{user?.user_id} ·{" "}
                   {user?.wallet_address

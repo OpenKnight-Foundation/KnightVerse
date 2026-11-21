@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use base64::{Engine as _, engine::general_purpose};
 use sha2::{Sha256, Digest};
-use sea_orm::{DatabaseConnection, EntityTrait, ActiveModelTrait, Set};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ActiveModelTrait, DbErr, QueryFilter, Set};
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -195,6 +195,22 @@ pub enum ArchiveError {
     
     #[error("Invalid archive network: {0}")]
     InvalidNetwork(String),
+
+    #[error("No archive job found for game {0}")]
+    NotFound(Uuid),
+}
+
+fn status_from_str(status: &str) -> ArchiveProcessStatus {
+    match status {
+        "pending" => ArchiveProcessStatus::Pending,
+        "processing" => ArchiveProcessStatus::Processing,
+        "uploading" => ArchiveProcessStatus::Uploading,
+        "confirming" => ArchiveProcessStatus::Confirming,
+        "completed" => ArchiveProcessStatus::Completed,
+        "failed" => ArchiveProcessStatus::Failed,
+        "retrying" => ArchiveProcessStatus::Retrying,
+        _ => ArchiveProcessStatus::Pending,
+    }
 }
 
 pub struct PGNArchiver {
@@ -255,6 +271,19 @@ impl PGNArchiver {
                     failed_at: Utc::now(),
                 };
                 self.push_to_dlq(job);
+                self.record_status(request.game_id, "failed", 0.0, Some(&e.to_string()))
+                    .await;
+
+                use db_entity::failed_archive_job;
+                let active = failed_archive_job::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    game_id: Set(request.game_id),
+                    failure_reason: Set(e.to_string()),
+                    retry_count: Set(1),
+                    failed_at: Set(Utc::now().into()),
+                };
+                let _ = active.insert(&self.db).await;
+
                 Err(e)
             }
         }
@@ -558,8 +587,8 @@ impl PGNArchiver {
     }
 
     async fn save_archive_record(&self, result: &ArchiveResult) -> Result<(), ArchiveError> {
-        // This would save to the database using the db_entity module
-        // For now, we'll just log the result
+        self.record_status(result.game_id, "completed", 100.0, None)
+            .await;
         log::info!("Saved archive record for game {}: {:?}", result.game_id, result.archive_urls);
         Ok(())
     }
@@ -670,16 +699,88 @@ impl PGNArchiver {
     }
 
     pub async fn get_archive_status(&self, game_id: Uuid) -> Result<ArchiveStatus, ArchiveError> {
-        // This would fetch from the database
-        // For now, return a placeholder
-        Ok(ArchiveStatus {
-            game_id,
-            status: ArchiveProcessStatus::Completed,
-            progress: 100.0,
-            error_message: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        })
+        use db_entity::{archive_job, failed_archive_job};
+
+        if let Some(job) = archive_job::Entity::find()
+            .filter(archive_job::Column::GameId.eq(game_id))
+            .one(&self.db)
+            .await
+            .map_err(|e| ArchiveError::DatabaseError(e.to_string()))?
+        {
+            let status = status_from_str(&job.status);
+            return Ok(ArchiveStatus {
+                game_id,
+                status,
+                progress: job.progress,
+                error_message: job.error_message,
+                created_at: job.created_at.with_timezone(&Utc),
+                updated_at: job.updated_at.with_timezone(&Utc),
+            });
+        }
+
+        if let Some(failed) = failed_archive_job::Entity::find()
+            .filter(failed_archive_job::Column::GameId.eq(game_id))
+            .one(&self.db)
+            .await
+            .map_err(|e| ArchiveError::DatabaseError(e.to_string()))?
+        {
+            return Ok(ArchiveStatus {
+                game_id,
+                status: ArchiveProcessStatus::Failed,
+                progress: 0.0,
+                error_message: Some(failed.failure_reason),
+                created_at: failed.failed_at.with_timezone(&Utc),
+                updated_at: failed.failed_at.with_timezone(&Utc),
+            });
+        }
+
+        Err(ArchiveError::NotFound(game_id))
+    }
+
+    /// Upsert the persisted status record for a game.
+    async fn record_status(
+        &self,
+        game_id: Uuid,
+        status: &str,
+        progress: f64,
+        error_message: Option<&str>,
+    ) {
+        use db_entity::archive_job;
+        let now: chrono::DateTime<Utc> = Utc::now();
+
+        let existing = archive_job::Entity::find()
+            .filter(archive_job::Column::GameId.eq(game_id))
+            .one(&self.db)
+            .await
+            .ok()
+            .flatten();
+
+        let outcome: Result<(), DbErr> = match existing {
+            Some(job) => {
+                let mut active: archive_job::ActiveModel = job.into();
+                active.status = Set(status.to_string());
+                active.progress = Set(progress);
+                active.error_message = Set(error_message.map(str::to_string));
+                active.updated_at = Set(now.into());
+                active.update(&self.db).await.map(|_| ())
+            }
+            None => {
+                let active = archive_job::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    game_id: Set(game_id),
+                    status: Set(status.to_string()),
+                    progress: Set(progress),
+                    error_message: Set(error_message.map(str::to_string)),
+                    created_at: Set(now.into()),
+                    updated_at: Set(now.into()),
+                };
+                active.insert(&self.db).await.map(|_| ())
+            }
+        };
+
+        if let Err(e) = outcome {
+            log::warn!("Failed to persist archive status for game {}: {}", game_id, e);
+        }
     }
 
     pub async fn list_archived_games(&self, limit: u64, offset: u64) -> Result<Vec<ArchiveResult>, ArchiveError> {
@@ -794,5 +895,12 @@ mod tests {
         
         assert!(ipfs_cost > 0.0);
         assert!(arweave_cost > 0.0);
+    }
+
+    #[test]
+    fn test_status_mapping_pending_failed_completed() {
+        assert!(matches!(status_from_str("pending"), ArchiveProcessStatus::Pending));
+        assert!(matches!(status_from_str("failed"), ArchiveProcessStatus::Failed));
+        assert!(matches!(status_from_str("completed"), ArchiveProcessStatus::Completed));
     }
 }

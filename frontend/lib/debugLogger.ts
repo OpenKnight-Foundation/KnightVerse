@@ -5,10 +5,6 @@
  * `console.log` directly, which shipped verbose traces (including full move
  * payloads) to production browsers. Application code now routes those traces
  * through this helper, which compiles down to a no-op in production builds.
- *
- * `console.warn` / `console.error` are deliberately *not* routed here: they
- * report real problems and stay in production. The `no-console` ESLint rule in
- * `eslint.config.mjs` enforces exactly that split.
  */
 
 /**

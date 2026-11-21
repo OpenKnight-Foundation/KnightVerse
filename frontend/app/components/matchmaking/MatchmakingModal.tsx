@@ -4,11 +4,12 @@
 import React from "react";
 import { FaTrophy, FaGamepad } from "react-icons/fa";
 import { useFocusTrap } from "@/hook/useFocusTrap";
+import { SERIES_OPTIONS, type SeriesLength } from "@/lib/series";
 
 interface MatchmakingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (type: "Rated" | "Casual") => void;
+  onConfirm: (type: "Rated" | "Casual", seriesLength: SeriesLength) => void;
 }
 
 /**
@@ -36,6 +37,7 @@ export function MatchmakingModal({
   // Keep keyboard focus inside the open modal and delegate Escape handling
   // to the reusable focus-trap hook.
   const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
+  const [seriesLength, setSeriesLength] = React.useState<SeriesLength>(1);
 
   // Do not render the modal or its overlay when it is closed.
   if (!isOpen) return null;
@@ -63,12 +65,35 @@ export function MatchmakingModal({
           Choose your competitive level
         </p>
 
+        <div className="mb-6" role="radiogroup" aria-label="Series length">
+          <p className="mb-2 text-sm font-semibold text-gray-300">Series length</p>
+          <div className="grid grid-cols-3 gap-2">
+            {SERIES_OPTIONS.map((option) => (
+              <button
+                key={option.length}
+                type="button"
+                role="radio"
+                aria-checked={seriesLength === option.length}
+                onClick={() => setSeriesLength(option.length)}
+                className={`rounded-xl border p-3 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 ${
+                  seriesLength === option.length
+                    ? "border-teal-400 bg-teal-500/15 text-teal-300"
+                    : "border-gray-700 bg-gray-800/50 text-gray-400 hover:text-white"
+                }`}
+              >
+                <span className="block text-sm font-bold">{option.label}</span>
+                <span className="mt-1 block text-xs">{option.payoutMultiplier}× payout</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Present the available matchmaking modes as a labeled group. */}
         <div className="grid gap-4" role="group" aria-label="Match type options">
           {/* Rated matches affect the player's ELO rating. */}
           <button
             type="button"
-            onClick={() => onConfirm("Rated")}
+            onClick={() => onConfirm("Rated", seriesLength)}
             className="group relative flex items-center gap-6 rounded-2xl border border-teal-500/20 bg-gradient-to-br from-teal-500/10 to-blue-500/10 p-5 text-left transition-all duration-300 hover:border-teal-400/50 hover:bg-teal-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
           >
             <div
@@ -91,7 +116,7 @@ export function MatchmakingModal({
           {/* Casual matches provide practice without ELO rating changes. */}
           <button
             type="button"
-            onClick={() => onConfirm("Casual")}
+            onClick={() => onConfirm("Casual", seriesLength)}
             className="group relative flex items-center gap-6 rounded-2xl border border-gray-700/50 bg-gradient-to-br from-gray-800/50 to-gray-700/50 p-5 text-left transition-all duration-300 hover:border-blue-400/50 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <div

@@ -165,3 +165,69 @@ pub struct WalletVerifyRequest {
 pub struct WalletLinkResponse {
     pub wallet_address: Option<String>,
 }
+
+/// A player's public profile as seen by other players (FE-144 / FE-152).
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PublicPlayer {
+    pub id: Uuid,
+    pub username: String,
+    pub biography: Option<String>,
+    pub country: Option<String>,
+    pub flair: Option<String>,
+    pub real_name: String,
+    pub location: Option<String>,
+    pub fide_rating: Option<i32>,
+    pub social_links: Option<Vec<String>>,
+    /// Whether the requesting player currently follows this player.
+    pub is_following: bool,
+    /// Whether this player is currently online.
+    pub is_online: bool,
+}
+
+impl From<Model> for PublicPlayer {
+    fn from(value: Model) -> Self {
+        Self {
+            id: value.id,
+            username: value.username,
+            biography: Some(value.biography),
+            country: Some(value.country),
+            flair: Some(value.flair),
+            real_name: value.real_name,
+            location: value.location,
+            fide_rating: value.fide_rating,
+            social_links: value.social_links,
+            is_following: false,
+            is_online: false,
+        }
+    }
+}
+
+/// An entry in the friends panel (FE-152).
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FriendSummary {
+    pub id: Uuid,
+    pub username: String,
+    pub flair: Option<String>,
+    pub country: Option<String>,
+    pub is_online: bool,
+}
+
+/// `POST /v1/players/{id}/challenge` body (FE-152).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct ChallengeFriendRequest {
+    /// Time control in seconds (e.g. 60, 180, 300, 600).
+    #[validate(range(min = 10, max = 10800, message = "Time control must be between 10 and 10800 seconds"))]
+    pub time_control: u32,
+    /// Optional increment in seconds.
+    pub increment: Option<u32>,
+    /// Optional color preference: "white", "black", or "random".
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ChallengeFriendResponse {
+    pub challenge_id: Uuid,
+    pub opponent_id: Uuid,
+    pub time_control: u32,
+    pub increment: Option<u32>,
+}

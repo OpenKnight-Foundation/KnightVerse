@@ -8,6 +8,8 @@ the WASM in [`contracts/`](../../contracts) with
 |---|---|---|
 | `game_contract/` | `contracts/game_contract` | Puzzle-reward claims (`/puzzles`) |
 | `yield_staking/` | `contracts/yield_staking` | Staking (`/stake`) |
+| `title_badge/` | `contracts/title_badge` | On-chain player titles (`/profile`, `/player/[username]`) |
+| `ai_nft/` | `contracts/ai_nft` | AI NFT gallery and transfers (`/collection`) |
 
 ## Do not edit by hand
 
@@ -46,6 +48,8 @@ Contracts are optional deployment config, read at call time from:
 | `NEXT_PUBLIC_GAME_CONTRACT_ID` | Deployed game contract (puzzle rewards) |
 | `NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID` | Deployed yield-staking contract |
 | `NEXT_PUBLIC_YIELD_STAKING_POOL_ADDRESS` | Whitelisted pool the stake goes into |
+| `NEXT_PUBLIC_CONTRACT_TITLE_BADGE` | Deployed title-badge registry |
+| `NEXT_PUBLIC_CONTRACT_AI_NFT` | Deployed AI NFT contract |
 
 When they are unset the app keeps its pre-contract behaviour: `/stake` pays the
 staking escrow account and puzzle rewards stay a local simulation.

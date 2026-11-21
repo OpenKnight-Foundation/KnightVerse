@@ -1,5 +1,5 @@
 use db_entity::game::ResultSide;
-use shakmaty::{fen::Fen, uci::Uci, CastlingMode, Chess, EnPassantMode, Position};
+use shakmaty::{fen::Fen, uci::Uci, CastlingMode, Chess, EnPassantMode, FromSetup, Position};
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone)]
@@ -69,16 +69,16 @@ pub fn apply_uci_to_fen(
 }
 
 fn parse_position(fen: &str) -> Result<Chess, MoveValidationError> {
-    let fen: Fen = fen
-        .parse()
+    let fen = fen
+        .parse::<Fen>()
         .map_err(|e| MoveValidationError::InvalidPosition(e.to_string()))?;
     Chess::from_setup(fen.into_setup(), CastlingMode::Standard)
         .map_err(|e| MoveValidationError::InvalidPosition(e.to_string()))
 }
 
 fn play_uci(position: &Chess, uci: &str) -> Result<Chess, MoveValidationError> {
-    let uci: Uci = uci
-        .parse()
+    let uci = uci
+        .parse::<Uci>()
         .map_err(|e| MoveValidationError::InvalidMove(e.to_string()))?;
     let mv = uci
         .to_move(position)

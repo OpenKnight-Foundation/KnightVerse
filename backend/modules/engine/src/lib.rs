@@ -1,3 +1,4 @@
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -9,40 +10,81 @@ pub mod uci;
 
 pub use lc0_orchestrator::{Lc0Analysis, Lc0Orchestrator};
 
-#[derive(Error, Debug)]
+/// Errors that can occur during chess engine operations.
+#[derive(Debug, Error)]
 pub enum EngineError {
-    #[error("IO error: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Engine process not running")]
+
+    #[error("Engine process is not running")]
     NotRunning,
-    #[error("Engine timeout")]
+
+    #[error("Engine operation timed out")]
     Timeout,
-    #[error("Parse error: {0}")]
+
+    #[error("Failed to parse engine response: {0}")]
     ParseError(String),
-    #[error("Unknown error: {0}")]
+
+    #[error("Engine returned an invalid response: {0}")]
+    InvalidResponse(String),
+
+    #[error("Engine operation failed: {0}")]
     Unknown(String),
 }
 
+/// Parameters controlling an engine search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GoParams {
-    pub depth: Option<u8>,
-    pub time_limit_ms: Option<u32>,
+    /// Maximum search depth in plies.
+    pub depth: Option<u16>,
+
+    /// Maximum search duration in milliseconds.
+    pub time_limit_ms: Option<u64>,
+
+    /// Restrict search to the specified UCI moves.
     pub search_moves: Option<Vec<String>>,
 }
 
+/// Result returned after an engine search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineResult {
-    pub best_move: String,
+    /// Best move found. None when no legal move exists.
+    pub best_move: Option<String>,
+
+    /// Position evaluation in pawns.
+    /// Positive values favor the side to move.
     pub evaluation: Option<f32>,
-    pub depth: Option<u8>,
+
+    /// Search depth reached, in plies.
+    pub depth: Option<u16>,
+
+    /// Principal variation (best continuation).
+    #[serde(default)]
     pub principal_variation: Vec<String>,
 }
 
+/// Common interface for chess engine implementations.
 #[async_trait]
 pub trait Engine: Send + Sync {
-    async fn go(&mut self, params: GoParams) -> Result<EngineResult, EngineError>;
+    /// Starts a search using the supplied parameters.
+    async fn go(
+        &mut self,
+        params: GoParams,
+    ) -> Result<EngineResult, EngineError>;
+
+    /// Stops the current search.
     async fn stop(&mut self) -> Result<(), EngineError>;
-    async fn set_position(&mut self, fen: &str) -> Result<(), EngineError>;
+
+    /// Sets the current board position using FEN notation.
+    async fn set_position(
+        &mut self,
+        fen: &str,
+    ) -> Result<(), EngineError>;
+
+    /// Checks whether the engine is ready to receive commands.
     async fn is_ready(&mut self) -> Result<bool, EngineError>;
+
+    /// Terminates the engine process gracefully.
     async fn quit(&mut self) -> Result<(), EngineError>;
 }

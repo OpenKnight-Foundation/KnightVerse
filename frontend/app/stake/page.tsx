@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import StakingDepositModal from "@/components/StakingDepositModal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAppContext } from "@/context/walletContext";
@@ -12,6 +12,16 @@ import {
   toTokenAmount,
 } from "@/contracts/client";
 import { NETWORK_PASSPHRASE } from "@/lib/api";
+import {
+  formatUsd,
+  getDailyUsage,
+  getResponsiblePlaySettings,
+  getSelfExclusionState,
+  recordWager,
+  remainingDailyLimit,
+  type DailyUsage,
+  type ResponsiblePlaySettings,
+} from "@/lib/responsiblePlay";
 import {
   TOKEN_ISSUERS,
   type StellarNetwork,
@@ -68,6 +78,28 @@ export default function StakePage() {
 
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [settings, setSettings] = useState<ResponsiblePlaySettings | null>(null);
+  const [usage, setUsage] = useState<DailyUsage | null>(null);
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    setSettings(getResponsiblePlaySettings());
+    setUsage(getDailyUsage());
+    setNow(Date.now());
+    const id = window.setInterval(() => {
+      setSettings(getResponsiblePlaySettings());
+      setUsage(getDailyUsage());
+      setNow(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const exclusion = settings && now ? getSelfExclusionState(settings, new Date(now)) : null;
+  const remaining = settings && usage ? remainingDailyLimit(settings, usage) : null;
+
+  useEffect(() => {
+    if (exclusion?.active) setOpen(false);
+  }, [exclusion?.active]);
 
   /**
    * Processes a staking deposit after the user confirms the amount and token.
@@ -79,7 +111,16 @@ export default function StakePage() {
    * @param deposit - The selected token, entered amount, and total deposit.
    * @throws Error if the wallet is mismatched or no staking target is configured.
    */
-  const handleConfirm = async ({ token, total }: { token: SupportedToken; amount: number; total: number }) => {
+  const handleConfirm = async ({ token, total, usdValue }: { token: SupportedToken; amount: number; total: number; usdValue: number }) => {
+    if (getSelfExclusionState(getResponsiblePlaySettings()).active) {
+      throw new Error("Self-exclusion is active. Staking is blocked.");
+    }
+    const currentSettings = getResponsiblePlaySettings();
+    const currentUsage = getDailyUsage();
+    if (usdValue > remainingDailyLimit(currentSettings, currentUsage)) {
+      throw new Error(`This stake exceeds your remaining daily limit of ${formatUsd(remainingDailyLimit(currentSettings, currentUsage))}.`);
+    }
+
     // Stakes must come from the wallet linked to the account (#FE-97).
     if (isMismatched) throw new Error(`Switch Freighter to your linked wallet (${linkedWallet}) to stake.`);
 
@@ -97,12 +138,14 @@ export default function StakePage() {
         signer: { address, sign: signTransaction },
       });
       setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${hash ? ` (tx ${hash})` : ""}`);
+      setUsage(recordWager(usdValue));
       return;
     }
 
     if (!STAKING_ESCROW_ADDRESS) throw new Error("Staking escrow is not configured.");
     const result = await sendPayment(STAKING_ESCROW_ADDRESS, total.toFixed(7), assetForToken(token));
     setConfirmation(`Stake confirmed: ${total.toFixed(4)} ${token}${result?.hash ? ` (tx ${result.hash})` : ""}`);
+    setUsage(recordWager(usdValue));
   };
 
   return (
@@ -131,6 +174,26 @@ export default function StakePage() {
           </Alert>
         )}
 
+        {exclusion?.active && (
+          <Alert variant="warning" className="mb-6 text-sm text-red-200">
+            <AlertDescription>
+              Self-exclusion is active until {new Date(exclusion.endsAt ?? Date.now()).toLocaleString()}.
+              Staking is blocked. Manage this in{" "}
+              <a href="/settings" className="underline">
+                Settings
+              </a>
+              .
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {remaining !== null && (
+          <p className="mb-6 text-sm text-gray-400" role="status">
+            Daily limit: {formatUsd(remaining)} remaining of {formatUsd(settings?.dailyLimitUsd ?? 0)}
+            {usage ? ` · ${formatUsd(usage.wageredUsd)} used today` : ""}
+          </p>
+        )}
+
         {/* Show transaction feedback after a successful payment request. */}
         {confirmation && (
           <div
@@ -142,7 +205,15 @@ export default function StakePage() {
         )}
 
         {/* Allow connected users to initiate staking or prompt others to connect. */}
-        {address ? (
+        {exclusion?.active ? (
+          <button
+            type="button"
+            disabled
+            className="cursor-not-allowed rounded-xl bg-gray-700/50 px-6 py-3 text-sm font-bold text-gray-400"
+          >
+            Staking blocked by self-exclusion
+          </button>
+        ) : address ? (
           <button
             type="button"
             onClick={() => {
@@ -169,6 +240,7 @@ export default function StakePage() {
         open={open}
         address={address}
         network={network}
+        remainingUsd={remaining}
         onClose={() => setOpen(false)}
         onConfirm={handleConfirm}
       />

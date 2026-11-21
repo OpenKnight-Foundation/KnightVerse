@@ -481,7 +481,7 @@ describe("MatchmakingModal — ARIA & accessibility", () => {
         <MatchmakingModal isOpen={true} onClose={vi.fn()} onConfirm={onConfirm} />,
       ).getByRole("button", { name: /rated match/i }),
     );
-    expect(onConfirm).toHaveBeenCalledWith("Rated");
+    expect(onConfirm).toHaveBeenCalledWith("Rated", 1);
   });
 
   it("passes automated axe scan", async () => {

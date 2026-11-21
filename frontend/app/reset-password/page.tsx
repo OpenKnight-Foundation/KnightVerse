@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { endpoints } from "@/lib/api";
+import { apiClient, ApiError } from "@/lib/api/generated";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -34,18 +34,16 @@ function ResetPasswordForm() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(endpoints.auth.resetPassword(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password }),
-      });
-      if (res.status === 400 || res.status === 401 || res.status === 410) {
-        throw new Error("This reset link is invalid or has expired. Request a new one.");
-      }
-      if (!res.ok) throw new Error(`Could not reset password (${res.status}).`);
+      await apiClient.resetPassword({ body: { token, password } });
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reset password.");
+      if (err instanceof ApiError && (err.status === 400 || err.status === 401 || err.status === 410)) {
+        setError("This reset link is invalid or has expired. Request a new one.");
+      } else if (err instanceof ApiError) {
+        setError(`Could not reset password (${err.status}).`);
+      } else {
+        setError("Could not reset password.");
+      }
     } finally {
       setSubmitting(false);
     }

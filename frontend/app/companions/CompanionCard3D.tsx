@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 
 export interface AICompanion {
   id: string;
@@ -15,22 +16,37 @@ export interface AICompanion {
   priceXLM: number;
 }
 
-interface CompanionCard3DProps {
+export interface CompanionCard3DProps {
   companion: AICompanion;
   onMint: (companionId: string) => void;
   onRent: (companionId: string) => void;
+  disabled?: boolean;
+  isMintDisabled?: boolean;
+  isRentDisabled?: boolean;
+  mintLabel?: string;
+  rentLabel?: string;
+  isMinting?: boolean;
 }
 
 export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
   companion,
   onMint,
   onRent,
+  disabled = false,
+  isMintDisabled,
+  isRentDisabled,
+  mintLabel,
+  rentLabel,
+  isMinting = false,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
   const [glareStyle, setGlareStyle] = useState({ x: 50, y: 50, opacity: 0 });
   const rafId = useRef<number | null>(null);
+
+  const rentDisabled = disabled || (isRentDisabled ?? false);
+  const mintDisabled = disabled || (isMintDisabled ?? false) || isMinting;
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cardRef.current) return;
@@ -132,16 +148,38 @@ export const CompanionCard3D: React.FC<CompanionCard3DProps> = ({
 
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => onRent(companion.id)}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600/50 transition-colors"
+            type="button"
+            disabled={rentDisabled}
+            aria-disabled={rentDisabled}
+            onClick={() => {
+              if (!rentDisabled) onRent(companion.id);
+            }}
+            className={cn(
+              "w-full py-2.5 px-4 rounded-xl font-semibold text-sm border transition-colors",
+              rentDisabled
+                ? "bg-slate-900/60 text-slate-500 border-slate-800/80 cursor-not-allowed hover:bg-slate-900/60"
+                : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600/50"
+            )}
           >
-            Rent Agent
+            {rentLabel ?? (rentDisabled ? "Rent (Coming Soon)" : "Rent Agent")}
           </button>
           <button
-            onClick={() => onMint(companion.id)}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-colors"
+            type="button"
+            disabled={mintDisabled}
+            aria-disabled={mintDisabled}
+            onClick={() => {
+              if (!mintDisabled) onMint(companion.id);
+            }}
+            className={cn(
+              "w-full py-2.5 px-4 rounded-xl font-semibold text-sm transition-colors",
+              mintDisabled
+                ? "bg-indigo-950/40 text-indigo-300/40 border border-indigo-900/30 cursor-not-allowed shadow-none hover:bg-indigo-950/40"
+                : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 border border-transparent"
+            )}
           >
-            Mint ({companion.priceXLM} XLM)
+            {isMinting
+              ? "Minting..."
+              : (mintLabel ?? `Mint (${companion.priceXLM} XLM)`)}
           </button>
         </div>
       </div>

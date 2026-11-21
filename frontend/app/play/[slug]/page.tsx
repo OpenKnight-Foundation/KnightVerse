@@ -4,6 +4,7 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
+import { parseSeriesLength } from "@/lib/series";
 
 /**
  * Play Online Page
@@ -108,11 +109,20 @@ export default function PlayOnlinePage() {
   const playerColor =
     searchParams.get("color") === "black" ? "black" : "white";
 
+  const seriesLength = parseSeriesLength(searchParams.get("series"));
+  const stakeValue = Number(searchParams.get("stake"));
+  const stake = Number.isFinite(stakeValue) && stakeValue > 0 ? stakeValue : null;
+  const payoutValue = Number(searchParams.get("payout"));
+  const payout = Number.isFinite(payoutValue) && payoutValue > 0 ? payoutValue : null;
+
   return (
     <PlayGameEngine
       fen={fen}
       initialMinutes={initialMinutes}
       playerColor={playerColor}
+      seriesLength={seriesLength}
+      stake={stake}
+      payout={payout}
     />
   );
 }

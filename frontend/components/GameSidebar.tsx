@@ -25,7 +25,7 @@ import {
   CompanionsIcon,
   UserIcon,
 } from "@/components/icons"
-import { ImageIcon, Trophy } from "lucide-react"
+import { ImageIcon, Medal, Trophy } from "lucide-react"
 
 interface SidebarProps {
   collapsed: boolean;
@@ -143,6 +143,13 @@ export function GameSidebar({
             href="/leaderboard"
             collapsed={collapsed && !isHovered}
             active={pathname.startsWith("/leaderboard")}
+          />
+          <SidebarItem
+            icon={<Medal className="h-5 w-5" aria-hidden="true" />}
+            label="Season"
+            href="/season"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/season")}
           />
           <SidebarItem
             icon={<PuzzleIcon />}
@@ -343,6 +350,7 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
         <MobileSidebarItem icon={<WatchIcon />} label="Watch" href="/watch" active={pathname === "/watch"} />
         <MobileSidebarItem icon={<TournamentIcon />} label="Tournaments" href="/tournament" active={pathname.startsWith("/tournament")} />
         <MobileSidebarItem icon={<Trophy className="h-5 w-5" aria-hidden="true" />} label="Leaderboard" href="/leaderboard" active={pathname.startsWith("/leaderboard")} />
+        <MobileSidebarItem icon={<Medal className="h-5 w-5" aria-hidden="true" />} label="Season" href="/season" active={pathname.startsWith("/season")} />
         <MobileSidebarItem icon={<PuzzleIcon />} label="Puzzles" href="/puzzles" active={pathname.startsWith("/puzzles")} />
         <MobileSidebarItem icon={<CompanionsIcon />} label="Companions" href="/companions" active={pathname.startsWith("/companions")} />
         <MobileSidebarItem icon={<GuildIcon />} label="Guilds" href="/guilds" active={pathname.startsWith("/guilds")} />

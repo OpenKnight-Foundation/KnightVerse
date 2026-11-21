@@ -321,10 +321,22 @@ export const endpoints = {
     ws: () => `${WS_BASE}/v1/ws/notifications`,
   },
 
+  /** Guilds (#FE-108 / #1349) */
+  guilds: {
+    detail: (id: string) => `${API_BASE}/v1/guilds/${encodeURIComponent(id)}`,
+  },
+
   /** Puzzles (#FE-68) */
   puzzles: {
     list: () => `${API_BASE}/v1/puzzles`,
     submit: () => `${API_BASE}/v1/puzzles/submit`,
+  },
+
+  season: {
+    status: () => `${API_BASE}/v1/season`,
+    standings: () => `${API_BASE}/v1/season/standings`,
+    claimable: () => `${API_BASE}/v1/season/claimable`,
+    claim: () => `${API_BASE}/v1/season/claim`,
   },
 } as const;
 

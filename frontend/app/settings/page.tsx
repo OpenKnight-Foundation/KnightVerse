@@ -4,12 +4,16 @@ import React from 'react';
 import AppearanceSettings from '@/components/AppearanceSettings';
 import SoundSettings from '@/components/SoundSettings';
 import GamePreferencesSettings from '@/components/GamePreferencesSettings';
+import ResponsiblePlaySettings from '@/components/ResponsiblePlaySettings';
 import LinkedWalletSettings from '@/components/LinkedWalletSettings';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import { GameSidebar } from '@/components/GameSidebar';
 import { Header } from '@/components/Header';
+import { useI18n } from '@/i18n/I18nProvider';
 
 export default function SettingsPage() {
   const [collapsed, setCollapsed] = React.useState(false);
+  const { t } = useI18n();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -25,10 +29,12 @@ export default function SettingsPage() {
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-4xl mx-auto space-y-8">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
-              <p className="text-gray-400">Manage your game appearance and preferences.</p>
+              <h1 className="text-3xl font-bold text-white mb-2">{t("settings.title")}</h1>
+              <p className="text-gray-400">{t("settings.subtitle")}</p>
             </div>
             
+            <ResponsiblePlaySettings />
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <AppearanceSettings />
               <SoundSettings />
@@ -37,6 +43,10 @@ export default function SettingsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <GamePreferencesSettings />
               <LinkedWalletSettings />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <LanguageSelector />
             </div>
           </div>
         </main>

@@ -10,7 +10,7 @@
  */
 
 import { Chess } from "chess.js";
-import { endpoints } from "./api";
+import { apiClient } from "./api/generated";
 import type { EvaluatedPly, MoveQuality } from "@/components/chess/CentipawnAdvantageChart";
 import type { MoveClass } from "@/components/chess/GameReviewSummary";
 
@@ -168,12 +168,11 @@ async function fetchServerEvals(
   signal?: AbortSignal,
 ): Promise<PositionEval[] | null> {
   try {
-    const res = await fetch(endpoints.games.analysis(gameId), {
+    const body = await apiClient.getGameAnalysis({
+      game_id: gameId,
       headers: { Accept: "application/json" },
       signal,
     });
-    if (!res.ok) return null;
-    const body = (await res.json()) as unknown;
     const list = Array.isArray(body)
       ? body
       : Array.isArray((body as { evaluations?: unknown })?.evaluations)

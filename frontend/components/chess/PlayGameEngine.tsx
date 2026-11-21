@@ -9,7 +9,16 @@ import { FaUser, FaClock } from "react-icons/fa";
 import { Web3StatusBar } from "@/components/Web3StatusBar";
 import { useCheatDetection } from "@/hook/useCheatDetection";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
-import type { GameResult } from "@/components/GameResultOverlay";
+import type { GameResult, SeriesSummary } from "@/components/GameResultOverlay";
+import {
+  initialSeries,
+  recordSeriesGame,
+  seriesMultiplier,
+  seriesOutcome,
+  seriesPayout,
+  type SeriesLength,
+  type SeriesResult,
+} from "@/lib/series";
 import { CheatDetectionPanel } from "@/components/chess/CheatDetectionPanel";
 import { useIsMobile } from "@/hook/use-mobile";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -80,6 +89,9 @@ export default function PlayGameEngine({
   fen,
   initialMinutes = 10,
   playerColor = "white",
+  seriesLength: seriesLengthProp = 1,
+  stake = null,
+  payout = null,
 }: {
   fen?: string;
   /** Time control in minutes for each side (FE-116 / #1357). */
@@ -90,7 +102,11 @@ export default function PlayGameEngine({
    * so the board is oriented correctly and only their pieces can move.
    */
   playerColor?: "white" | "black";
+  seriesLength?: SeriesLength;
+  stake?: number | null;
+  payout?: number | null;
 }) {
+  const seriesLength = seriesLengthProp;
   const params = useParams();
   const router = useRouter();
   const gameId = params.slug as string;
@@ -122,6 +138,13 @@ export default function PlayGameEngine({
   const [pendingOffer, setPendingOffer] = useState<PendingOffer | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const handledActionIdRef = useRef(0);
+  const [series, setSeries] = useState(() => initialSeries(seriesLength));
+  const seriesRecordedRef = useRef(false);
+
+  useEffect(() => {
+    setSeries(initialSeries(seriesLength));
+    seriesRecordedRef.current = false;
+  }, [seriesLength]);
 
   const {
     status: socketStatus,
@@ -622,7 +645,10 @@ export default function PlayGameEngine({
       case "rematch_accept":
         setPendingOffer(null);
         if (ev.newGameId) {
-          router.push(`/play/${encodeURIComponent(ev.newGameId)}`);
+          const params = new URLSearchParams({ series: String(seriesLength) });
+          if (stake !== null) params.set("stake", String(stake));
+          if (payout !== null) params.set("payout", String(payout));
+          router.push(`/play/${encodeURIComponent(ev.newGameId)}?${params.toString()}`);
         } else {
           flashNotice("Rematch accepted — waiting for the new game…");
         }
@@ -647,6 +673,9 @@ export default function PlayGameEngine({
     rollbackTo,
     flashNotice,
     router,
+    seriesLength,
+    stake,
+    payout,
   ]);
 
   // A move by either side voids an outstanding draw offer from the mover.
@@ -697,6 +726,67 @@ export default function PlayGameEngine({
     overlayResult =
       resignation === "self" ? "loss_by_resignation" : "win_by_resignation";
   }
+
+  const gameSeriesResult: SeriesResult | null = (() => {
+    if (!overlayResult || overlayResult === "aborted") return null;
+    if (overlayResult === "white_wins") return playerColor === "white" ? "win" : "loss";
+    if (overlayResult === "black_wins") return playerColor === "black" ? "win" : "loss";
+    if (overlayResult === "loss_on_time" || overlayResult === "loss_by_resignation") return "loss";
+    if (overlayResult === "win_on_time" || overlayResult === "win_by_resignation") return "win";
+    return "draw";
+  })();
+
+  const displaySeries =
+    gameSeriesResult && !seriesRecordedRef.current
+      ? recordSeriesGame(series, gameSeriesResult)
+      : series;
+  const seriesFinalOutcome = seriesOutcome(displaySeries);
+  const computedPayout = seriesPayout(stake, seriesLength, seriesFinalOutcome);
+  const payoutLabel =
+    seriesFinalOutcome === null
+      ? null
+      : seriesFinalOutcome === "win"
+        ? payout !== null
+          ? `${payout.toFixed(4)} XLM`
+          : computedPayout !== null
+            ? `${computedPayout.toFixed(4)} XLM`
+            : `${seriesMultiplier(seriesLength)}× stake`
+        : "No payout";
+
+  const seriesSummary: SeriesSummary | undefined = overlayResult
+    ? {
+        label: `Bo${series.length}`,
+        score: `${displaySeries.playerWins}–${displaySeries.opponentWins}${
+          displaySeries.draws > 0 ? ` (${displaySeries.draws} drawn)` : ""
+        }`,
+        gameNumber: displaySeries.gameNumber,
+        length: displaySeries.length,
+        outcome: seriesFinalOutcome,
+        payout: payoutLabel,
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (!gameSeriesResult || seriesRecordedRef.current) return;
+    seriesRecordedRef.current = true;
+    setSeries((prev) => recordSeriesGame(prev, gameSeriesResult));
+  }, [gameSeriesResult]);
+
+  const handleNextGame = useCallback(() => {
+    game.reset();
+    setPosition(game.fen());
+    setMoveHistory([]);
+    const seconds = Math.max(0, initialMinutes) * 60;
+    setWhiteTime(seconds);
+    setBlackTime(seconds);
+    setGameStatus("playing");
+    setFlaggedColor(null);
+    setResignation(null);
+    setPendingOffer(null);
+    setActionNotice(null);
+    resetCheatDetection();
+    seriesRecordedRef.current = false;
+  }, [game, initialMinutes, resetCheatDetection]);
 
   const offerLabel: Record<OfferKind, string> = {
     draw: "a draw",
@@ -1152,6 +1242,47 @@ export default function PlayGameEngine({
             aria-label="Game controls"
           >
             {gameStatusPanel}
+
+            <div
+              className="rounded-xl border border-teal-500/30 bg-teal-500/10 p-4"
+              role="status"
+              aria-label="Series score"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-teal-300">
+                  Series · Bo{series.length}
+                </h3>
+                <span className="text-xs text-gray-400">
+                  {seriesFinalOutcome
+                    ? "Final"
+                    : `Game ${displaySeries.gameNumber} of ${displaySeries.length}`}
+                </span>
+              </div>
+              <p className="mt-3 text-lg font-bold text-white">
+                You {displaySeries.playerWins} — {displaySeries.opponentWins} Opponent
+              </p>
+              {displaySeries.draws > 0 && (
+                <p className="mt-1 text-xs text-gray-400">
+                  {displaySeries.draws} drawn
+                </p>
+              )}
+              {seriesFinalOutcome && (
+                <p className="mt-2 text-sm font-semibold text-emerald-300">
+                  {seriesFinalOutcome === "win"
+                    ? "Series won"
+                    : seriesFinalOutcome === "loss"
+                      ? "Series lost"
+                      : "Series drawn"}
+                  {payoutLabel ? ` · Payout ${payoutLabel}` : ""}
+                </p>
+              )}
+              {!seriesFinalOutcome && overlayResult && (
+                <p className="mt-2 text-xs text-teal-200">
+                  Next game: Game {displaySeries.gameNumber} of {displaySeries.length}
+                </p>
+              )}
+            </div>
+
             {gameActionsPanel}
             {moveHistoryPanel}
             <CheatDetectionPanel
@@ -1188,10 +1319,14 @@ export default function PlayGameEngine({
       {overlayResult && (
         <GameResultOverlay
           result={overlayResult}
-          onPlayAgain={() => router.push("/")}
+          onPlayAgain={() => {
+            if (seriesSummary && !seriesFinalOutcome) handleNextGame();
+            else router.push("/");
+          }}
           onPlayOnline={() => router.push("/")}
           onReview={handleReview}
           extraActions={rematchControls}
+          series={seriesSummary}
         />
       )}
     </div>

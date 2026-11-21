@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "common",
     "game_contract",
     "emergency_circuit_breaker",
     "ai_nft",
@@ -11,6 +12,7 @@ members = [
     "title_badge",
     "arbiter_escrow",
     "yield_staking",
+    "upgrade_timelock",
 ]
 
 [profile.release]

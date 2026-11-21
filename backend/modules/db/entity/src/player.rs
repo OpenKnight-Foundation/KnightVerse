@@ -21,8 +21,14 @@ pub struct Model {
     pub location: Option<String>,
     pub fide_rating: Option<i32>,
     pub elo_rating: i32,
+    /// Glicko-2 rating per time control, stored as JSON: `{ "rapid": { "rating", "rd", "volatility" }, ... }`.
+    #[sea_orm(column_type = "JsonBinary")]
+    pub glicko_ratings: Json,
     pub social_links: Option<Vec<String>>,
     pub is_enabled: bool,
+    /// Timestamp at which the player verified their email address. `None`
+    /// until the verification link is followed (BE-160).
+    pub email_verified_at: Option<DateTimeWithTimeZone>,
     /// Stellar account (G…) linked via the wallet-link challenge (FE-97).
     #[sea_orm(unique)]
     pub wallet_address: Option<String>,

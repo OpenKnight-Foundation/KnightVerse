@@ -2,6 +2,7 @@ pub mod bitboard;
 pub mod chess960;
 pub mod fen_validator;
 pub mod mandatory_draw;
+pub mod move_validation;
 pub mod pgn;
 pub mod pgn_validator;
 pub mod rating;
@@ -12,6 +13,9 @@ pub use chess960::{Chess960Generator, Chess960Library, Chess960Position, Library
 pub use fen_validator::{validate_fen_legality, FenValidationError};
 pub use mandatory_draw::{
     check_mandatory_draw_conditions, update_position_tracker, MandatoryDrawResult, PositionTracker,
+};
+pub use move_validation::{
+    apply_and_validate_uci_move, apply_uci_to_fen, MoveValidationError,
 };
 pub use pgn::{
     export_pgn, export_pgn_validated, parse_pgn, validate_game, ExportHeaders,

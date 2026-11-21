@@ -8,6 +8,7 @@ import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/authContext";
 import { useEloStats } from "@/hook/useEloStats";
+import { useOnChainTitle } from "@/hook/useOnChainTitle";
 import { truncateAddress } from "@/lib/utils";
 import {
   PlayerNotFoundError,
@@ -41,6 +42,7 @@ export default function PlayerPage() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const { title: onChainTitle } = useOnChainTitle(profile?.walletAddress);
 
   useEffect(() => {
     if (!username) return;
@@ -109,6 +111,13 @@ export default function PlayerPage() {
     );
   }
 
+  const visibleOnChainTitle =
+    onChainTitle &&
+    !profile.titles.some(
+      (title) => title.toLowerCase() === onChainTitle.title.toLowerCase(),
+    )
+      ? onChainTitle
+      : null;
   const ratingEntries = Object.entries(profile.ratings);
 
   return (
@@ -126,6 +135,14 @@ export default function PlayerPage() {
               </span>
             ))}
             <h1 className="text-3xl font-bold text-white">{profile.username}</h1>
+            {visibleOnChainTitle && (
+              <span
+                className="rounded bg-amber-500/20 px-2 py-0.5 text-xs font-bold uppercase text-amber-300 border border-amber-500/40"
+                title="On-chain title badge"
+              >
+                {visibleOnChainTitle.title}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm text-gray-400">
             {profile.joinedAt && `Joined ${new Date(profile.joinedAt).toLocaleDateString()}`}

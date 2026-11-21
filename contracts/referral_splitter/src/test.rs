@@ -38,6 +38,8 @@ fn setup() -> TestContext {
     let referee_b = Address::generate(&env);
 
     client.initialize(&admin, &1_000u32);
+    // settle_wager only accepts the configured settlement contract (#1554).
+    client.set_settlement_caller(&Address::generate(&env));
 
     let token_admin_addr = Address::generate(&env);
     let token_contract = env.register_stellar_asset_contract_v2(token_admin_addr.clone());

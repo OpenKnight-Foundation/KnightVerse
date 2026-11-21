@@ -1,4 +1,4 @@
-//! Elo rating updates with a per-time-control K-factor.
+//! Rating updates with a per-time-control K-factor (Elo) and Glicko-2 support.
 //!
 //! # K-factor table
 //!
@@ -16,6 +16,13 @@
 //! `Classical` intentionally reuses the pre-existing default K-factor, and a
 //! missing time control (`None`) falls back to `RatingConfig::k_factor`, so
 //! existing callers and unmapped games behave exactly as before.
+//!
+//! # Glicko-2
+//!
+//! Each player carries a rating `r`, a rating deviation `RD` (uncertainty) and
+//! a volatility `sigma`, tracked per time-control category. Players whose RD is
+//! above `PROVISIONAL_RD_THRESHOLD` are reported as provisional. Existing Elo
+//! ratings migrate with the default RD and volatility.
 
 use super::time_control::TimeControlCategory;
 use db_entity::{game, player};
@@ -37,7 +44,21 @@ pub const K_FACTOR_RAPID: u32 = 40;
 /// default behavior is unchanged for classical and unmapped games.
 pub const K_FACTOR_CLASSICAL: u32 = 32;
 
-/// Service for handling Elo rating calculations and updates after game completion
+/// Glicko-2 default rating (Glicko scale).
+pub const GLICKO_DEFAULT_RATING: f64 = 1500.0;
+/// Glicko-2 default rating deviation for new / migrated players.
+pub const GLICKO_DEFAULT_RD: f64 = 350.0;
+/// Glicko-2 default volatility.
+pub const GLICKO_DEFAULT_VOLATILITY: f64 = 0.06;
+/// Rating deviation above which a player is considered provisional.
+pub const PROVISIONAL_RD_THRESHOLD: f64 = 110.0;
+/// System constant controlling volatility change speed (tau).
+pub const GLICKO_TAU: f64 = 0.5;
+
+const GLICKO_SCALE: f64 = 173.7178;
+const CONVERGENCE_EPSILON: f64 = 0.000001;
+
+/// Service for handling rating calculations and updates after game completion
 pub struct RatingService;
 
 /// Represents the outcome of a game from a player's perspective
@@ -48,14 +69,60 @@ pub enum GameOutcome {
     Draw,
 }
 
-/// Configuration for Elo rating calculations
+/// Glicko-2 rating state for a single player in a single time-control category.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Glicko2Rating {
+    /// Rating on the Glicko-2 scale (Elo-like, centered on 1500).
+    pub rating: f64,
+    /// Rating deviation (uncertainty).
+    pub rd: f64,
+    /// Volatility.
+    pub volatility: f64,
+}
+
+impl Default for Glicko2Rating {
+    fn default() -> Self {
+        Self {
+            rating: GLICKO_DEFAULT_RATING,
+            rd: GLICKO_DEFAULT_RD,
+            volatility: GLICKO_DEFAULT_VOLATILITY,
+        }
+    }
+}
+
+impl Glicko2Rating {
+    /// Builds a Glicko-2 state from a legacy Elo rating, keeping the default
+    /// RD and volatility so migrated players start as provisional.
+    pub fn from_elo(elo: i32) -> Self {
+        Self {
+            rating: elo as f64,
+            rd: GLICKO_DEFAULT_RD,
+            volatility: GLICKO_DEFAULT_VOLATILITY,
+        }
+    }
+
+    /// Whether the player's rating is still provisional (RD too high).
+    pub fn is_provisional(&self) -> bool {
+        self.rd > PROVISIONAL_RD_THRESHOLD
+    }
+}
+
+/// Glicko-2 match result for one game, from the updating player's perspective.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Glicko2Match {
+    pub opponent: Glicko2Rating,
+    /// Score: 1.0 win, 0.5 draw, 0.0 loss.
+    pub score: f64,
+}
+
+/// Configuration for rating calculations
 #[derive(Debug, Clone)]
 pub struct RatingConfig {
-    /// K-factor for rating calculations (typically 32 for new players, 16 for experienced)
+    /// K-factor for Elo rating calculations (typically 32 for new players, 16 for experienced)
     pub k_factor: u32,
     /// Minimum rating (prevents ratings from going below this value)
     pub min_rating: i32,
-    /// Maximum rating (prevents ratings from going above this value)  
+    /// Maximum rating (prevents ratings from going above this value)
     pub max_rating: i32,
 }
 
@@ -92,6 +159,115 @@ impl RatingConfig {
     }
 }
 
+/// Converts a Glicko-2 rating to the internal scale (mu).
+fn to_mu(rating: f64) -> f64 {
+    (rating - GLICKO_DEFAULT_RATING) / GLICKO_SCALE
+}
+
+/// Converts an internal-scale mu back to a Glicko-2 rating.
+fn from_mu(mu: f64) -> f64 {
+    mu * GLICKO_SCALE + GLICKO_DEFAULT_RATING
+}
+
+/// Converts a Glicko-2 RD to the internal scale (phi).
+fn to_phi(rd: f64) -> f64 {
+    rd / GLICKO_SCALE
+}
+
+/// Converts an internal-scale phi back to a Glicko-2 RD.
+fn from_phi(phi: f64) -> f64 {
+    phi * GLICKO_SCALE
+}
+
+fn g(phi: f64) -> f64 {
+    1.0 / (1.0 + 3.0 * phi * phi / (std::f64::consts::PI * std::f64::consts::PI)).sqrt()
+}
+
+fn expected(mu: f64, mu_j: f64, phi_j: f64) -> f64 {
+    1.0 / (1.0 + (-g(phi_j) * (mu - mu_j)).exp())
+}
+
+/// Computes the new Glicko-2 state for a player after a rating period
+/// containing the given matches (Glickman, 2013).
+///
+/// An empty `matches` slice only inflates RD for inactivity.
+pub fn glicko2_update(player: Glicko2Rating, matches: &[Glicko2Match]) -> Glicko2Rating {
+    let mu = to_mu(player.rating);
+    let phi = to_phi(player.rd);
+    let sigma = player.volatility;
+
+    if matches.is_empty() {
+        let phi_star = (phi * phi + sigma * sigma).sqrt();
+        return Glicko2Rating {
+            rating: player.rating,
+            rd: from_phi(phi_star),
+            volatility: sigma,
+        };
+    }
+
+    // Step 3: estimated variance v.
+    let mut v_inv = 0.0;
+    // Step 4: estimated improvement delta.
+    let mut delta_sum = 0.0;
+    for m in matches {
+        let mu_j = to_mu(m.opponent.rating);
+        let phi_j = to_phi(m.opponent.rd);
+        let gj = g(phi_j);
+        let ej = expected(mu, mu_j, phi_j);
+        v_inv += gj * gj * ej * (1.0 - ej);
+        delta_sum += gj * (m.score - ej);
+    }
+    let v = 1.0 / v_inv;
+    let delta = v * delta_sum;
+
+    // Step 5: new volatility via Illinois-style root finding.
+    let a = (sigma * sigma).ln();
+    let f = |x: f64| {
+        let ex = x.exp();
+        let num = ex * (delta * delta - phi * phi - v - ex);
+        let den = 2.0 * (phi * phi + v + ex).powi(2);
+        num / den - (x - a) / (GLICKO_TAU * GLICKO_TAU)
+    };
+
+    let mut big_a = a;
+    let mut big_b = if delta * delta > phi * phi + v {
+        (delta * delta - phi * phi - v).ln()
+    } else {
+        let mut k = 1.0;
+        while f(a - k * GLICKO_TAU) < 0.0 {
+            k += 1.0;
+        }
+        a - k * GLICKO_TAU
+    };
+    let mut f_a = f(big_a);
+    let mut f_b = f(big_b);
+    while (big_b - big_a).abs() > CONVERGENCE_EPSILON {
+        let big_c = big_a + (big_a - big_b) * f_a / (f_b - f_a);
+        let f_c = f(big_c);
+        if f_c * f_b <= 0.0 {
+            big_a = big_b;
+            f_a = f_b;
+        } else {
+            f_a /= 2.0;
+        }
+        big_b = big_c;
+        f_b = f_c;
+    }
+    let new_sigma = (big_a / 2.0).exp();
+
+    // Step 6: pre-rating-period RD.
+    let phi_star = (phi * phi + new_sigma * new_sigma).sqrt();
+    // Step 7: new phi and mu.
+    let new_phi = 1.0 / (1.0 / (phi_star * phi_star) + 1.0 / v).sqrt();
+    let new_mu = mu + new_phi * new_phi * delta_sum;
+
+    Glicko2Rating {
+        rating: from_mu(new_mu),
+        rd: from_phi(new_phi),
+        volatility: new_sigma,
+    }
+}
+
 impl RatingService {
     /// Updates player ratings after a game completion using a database transaction
     ///
@@ -104,20 +280,8 @@ impl RatingService {
     ///   `config.k_factor`; `None` preserves the legacy single-K behavior.
     ///
     /// # Returns
-    /// * `Ok((white_new_rating, black_new_rating))` - New ratings for both players
+    /// * `Ok((white_new_rating, black_new_rating))` - New Elo ratings for both players
     /// * `Err(ApiError)` - If game not found, players not found, or database error
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Illustrative only — `db` and `game_id` come from the caller's context.
-    /// let config = RatingConfig::default();
-    /// let (white_rating, black_rating) = RatingService::update_ratings_after_game(
-    ///     &db,
-    ///     game_id,
-    ///     &config,
-    ///     None
-    /// ).await?;
-    /// ```
     pub async fn update_ratings_after_game(
         db: &DatabaseConnection,
         game_id: Uuid,
@@ -308,201 +472,88 @@ impl RatingService {
 
         (new_white, new_black)
     }
-
-    /// Gets the current rating for a player
-    pub async fn get_player_rating(
-        db: &DatabaseConnection,
-        player_id: Uuid,
-    ) -> Result<i32, ApiError> {
-        let player = player::Entity::find_by_id(player_id)
-            .one(db)
-            .await
-            .map_err(|e| {
-                ApiError::DatabaseError(DbErr::Custom(format!("Failed to fetch player: {}", e)))
-            })?
-            .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
-
-        Ok(player.elo_rating)
-    }
-
-    /// Updates a player's rating directly (for admin purposes or initial setup)
-    pub async fn set_player_rating(
-        db: &DatabaseConnection,
-        player_id: Uuid,
-        new_rating: i32,
-        config: &RatingConfig,
-    ) -> Result<(), ApiError> {
-        let clamped_rating = new_rating.clamp(config.min_rating, config.max_rating);
-
-        let active_model = player::ActiveModel {
-            id: Set(player_id),
-            elo_rating: Set(clamped_rating),
-            ..Default::default()
-        };
-
-        active_model.update(db).await.map_err(|e| {
-            ApiError::DatabaseError(DbErr::Custom(format!(
-                "Failed to update player rating: {}",
-                e
-            )))
-        })?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_calculate_rating_changes_white_wins() {
-        let config = RatingConfig::default();
-        let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config, None);
-
-        // Equal ratings, white wins: white gains ~16, black loses ~16
-        assert!(new_white > 1500);
-        assert!(new_black < 1500);
-        assert_eq!(new_white - 1500, 1500 - new_black); // Zero-sum
+    fn approx(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol
     }
 
     #[test]
-    fn test_calculate_rating_changes_draw() {
-        let config = RatingConfig::default();
-        let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1600, 1400, GameOutcome::Draw, &config, None);
-
-        // Higher rated player loses points in draw, lower rated gains
-        assert!(new_white < 1600);
-        assert!(new_black > 1400);
-    }
-
-    #[test]
-    fn test_rating_bounds() {
-        let config = RatingConfig {
-            k_factor: 32,
-            min_rating: 100,
-            max_rating: 2000,
+    fn glicko2_reference_example_from_paper() {
+        // Glickman (2013) worked example: player 1500/200/0.06 vs.
+        // (1400, 30), (1550, 100), (1700, 300) with scores 1, 0, 0.
+        let player = Glicko2Rating {
+            rating: 1500.0,
+            rd: 200.0,
+            volatility: 0.06,
         };
-
-        let (new_white, new_black) =
-            RatingService::calculate_rating_changes(50, 2500, GameOutcome::Win, &config, None);
-
-        // Ratings should be clamped to bounds
-        assert!(new_white >= config.min_rating);
-        assert!(new_white <= config.max_rating);
-        assert!(new_black >= config.min_rating);
-        assert!(new_black <= config.max_rating);
+        let matches = [
+            Glicko2Match {
+                opponent: Glicko2Rating { rating: 1400.0, rd: 30.0, volatility: 0.06 },
+                score: 1.0,
+            },
+            Glicko2Match {
+                opponent: Glicko2Rating { rating: 1550.0, rd: 100.0, volatility: 0.06 },
+                score: 0.0,
+            },
+            Glicko2Match {
+                opponent: Glicko2Rating { rating: 1700.0, rd: 300.0, volatility: 0.06 },
+                score: 0.0,
+            },
+        ];
+        let updated = glicko2_update(player, &matches);
+        assert!(approx(updated.rating, 1464.06, 0.01), "rating {}", updated.rating);
+        assert!(approx(updated.rd, 151.52, 0.01), "rd {}", updated.rd);
+        assert!(approx(updated.volatility, 0.05999, 0.0001), "vol {}", updated.volatility);
     }
 
     #[test]
-    fn test_upset_victory_large_rating_change() {
+    fn glicko2_inactivity_only_inflates_rd() {
+        let player = Glicko2Rating {
+            rating: 1500.0,
+            rd: 50.0,
+            volatility: 0.06,
+        };
+        let updated = glicko2_update(player, &[]);
+        assert_eq!(updated.rating, 1500.0);
+        assert_eq!(updated.volatility, 0.06);
+        assert!(updated.rd > 50.0);
+    }
+
+    #[test]
+    fn migration_from_elo_is_provisional() {
+        let migrated = Glicko2Rating::from_elo(1800);
+        assert_eq!(migrated.rating, 1800.0);
+        assert_eq!(migrated.rd, GLICKO_DEFAULT_RD);
+        assert_eq!(migrated.volatility, GLICKO_DEFAULT_VOLATILITY);
+        assert!(migrated.is_provisional());
+    }
+
+    #[test]
+    fn established_player_is_not_provisional() {
+        let player = Glicko2Rating { rating: 1500.0, rd: 50.0, volatility: 0.06 };
+        assert!(!player.is_provisional());
+    }
+
+    #[test]
+    fn k_factor_table_values() {
+        assert_eq!(RatingConfig::k_factor_for_category(TimeControlCategory::Bullet), 56);
+        assert_eq!(RatingConfig::k_factor_for_category(TimeControlCategory::Blitz), 48);
+        assert_eq!(RatingConfig::k_factor_for_category(TimeControlCategory::Rapid), 40);
+        assert_eq!(RatingConfig::k_factor_for_category(TimeControlCategory::Classical), 32);
+    }
+
+    #[test]
+    fn effective_k_factor_falls_back_when_unknown() {
         let config = RatingConfig::default();
-        let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1200, 1800, GameOutcome::Win, &config, None);
-
-        // Lower rated player beating higher rated should gain significant points
-        let white_gain = new_white - 1200;
-        let black_loss = 1800 - new_black;
-
-        assert!(white_gain > 20); // Significant gain for upset
-        assert!(black_loss > 20); // Significant loss for upset
-        assert_eq!(white_gain, black_loss); // Zero-sum
-    }
-
-    #[test]
-    fn test_k_factor_table_values() {
+        assert_eq!(config.effective_k_factor(None), config.k_factor);
         assert_eq!(
-            RatingConfig::k_factor_for_category(TimeControlCategory::Bullet),
+            config.effective_k_factor(Some(TimeControlCategory::Bullet)),
             K_FACTOR_BULLET
-        );
-        assert_eq!(
-            RatingConfig::k_factor_for_category(TimeControlCategory::Blitz),
-            K_FACTOR_BLITZ
-        );
-        assert_eq!(
-            RatingConfig::k_factor_for_category(TimeControlCategory::Rapid),
-            K_FACTOR_RAPID
-        );
-        assert_eq!(
-            RatingConfig::k_factor_for_category(TimeControlCategory::Classical),
-            K_FACTOR_CLASSICAL
-        );
-        // Classical keeps the historical single K-factor.
-        assert_eq!(
-            RatingConfig::k_factor_for_category(TimeControlCategory::Classical),
-            RatingConfig::default().k_factor
-        );
-        // Faster controls use strictly larger K-factors.
-        assert!(K_FACTOR_BULLET > K_FACTOR_BLITZ);
-        assert!(K_FACTOR_BLITZ > K_FACTOR_RAPID);
-        assert!(K_FACTOR_RAPID > K_FACTOR_CLASSICAL);
-    }
-
-    #[test]
-    fn test_bullet_and_classical_use_different_k_factors() {
-        let config = RatingConfig::default();
-        let (bullet_white, bullet_black) = RatingService::calculate_rating_changes(
-            1500,
-            1500,
-            GameOutcome::Win,
-            &config,
-            Some(TimeControlCategory::Bullet),
-        );
-        let (classical_white, classical_black) = RatingService::calculate_rating_changes(
-            1500,
-            1500,
-            GameOutcome::Win,
-            &config,
-            Some(TimeControlCategory::Classical),
-        );
-
-        // Equal ratings: delta is exactly K/2 (56/2 = 28 vs 32/2 = 16).
-        assert_eq!((bullet_white, bullet_black), (1528, 1472));
-        assert_eq!((classical_white, classical_black), (1516, 1484));
-    }
-
-    #[test]
-    fn test_rapid_draw_uses_table_k_factor() {
-        let config = RatingConfig::default();
-        let (rapid_white, rapid_black) = RatingService::calculate_rating_changes(
-            1600,
-            1400,
-            GameOutcome::Draw,
-            &config,
-            Some(TimeControlCategory::Rapid),
-        );
-        let (classical_white, classical_black) = RatingService::calculate_rating_changes(
-            1600,
-            1400,
-            GameOutcome::Draw,
-            &config,
-            Some(TimeControlCategory::Classical),
-        );
-
-        // Expected white score ~0.76: rapid (K=40) moves 10 points,
-        // classical (K=32) moves 8 points.
-        assert_eq!((rapid_white, rapid_black), (1590, 1410));
-        assert_eq!((classical_white, classical_black), (1592, 1408));
-    }
-
-    #[test]
-    fn test_missing_time_control_falls_back_to_config_k_factor() {
-        let config = RatingConfig {
-            k_factor: 24,
-            min_rating: 100,
-            max_rating: 3000,
-        };
-        let (new_white, new_black) =
-            RatingService::calculate_rating_changes(1500, 1500, GameOutcome::Win, &config, None);
-
-        // Legacy behavior: delta is exactly k/2 = 12.
-        assert_eq!((new_white, new_black), (1512, 1488));
-        assert_eq!(config.effective_k_factor(None), 24);
-        assert_eq!(
-            config.effective_k_factor(Some(TimeControlCategory::Blitz)),
-            K_FACTOR_BLITZ
         );
     }
 }

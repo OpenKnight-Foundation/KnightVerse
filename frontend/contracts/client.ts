@@ -19,6 +19,10 @@ import { NETWORK_PASSPHRASE, SOROBAN_RPC } from "@/lib/api";
 import {
   GameContractClient,
   YieldStakingClient,
+  TitleBadgeClient,
+  AiNftClient,
+  displayNameForMetadata,
+  type ContractMethodInvoker,
   type PuzzleRewardProof,
 } from "./index";
 
@@ -223,6 +227,160 @@ export async function stakeInPool(params: {
   const tx = await client.stake({ caller, pool, amount });
   const sent = await tx.signAndSend();
   return { hash: hashOf(sent) };
+}
+
+export function getTitleBadgeContractId(): string | undefined {
+  return process.env.NEXT_PUBLIC_CONTRACT_TITLE_BADGE?.trim() || undefined;
+}
+
+export function getAiNftContractId(): string | undefined {
+  return process.env.NEXT_PUBLIC_CONTRACT_AI_NFT?.trim() || undefined;
+}
+
+export interface OnChainTitle {
+  title: string;
+  grantedAt: bigint;
+}
+
+const TITLE_BADGE_CACHE_TTL_MS = 5 * 60 * 1000;
+const titleBadgeCache = new Map<
+  string,
+  { value: OnChainTitle | null; expiresAt: number }
+>();
+
+export function clearTitleBadgeCache(owner?: string): void {
+  if (!owner) {
+    titleBadgeCache.clear();
+    return;
+  }
+  const suffix = `:${owner.toLowerCase()}`;
+  for (const key of titleBadgeCache.keys()) {
+    if (key.endsWith(suffix)) titleBadgeCache.delete(key);
+  }
+}
+
+function isMissingTitleError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /BadgeNotFound|AlreadyRevoked|revoked|not found|no badge/i.test(message);
+}
+
+export async function fetchOnChainTitle(params: {
+  owner: string;
+  invoke: ContractMethodInvoker;
+  contractId?: string;
+  forceRefresh?: boolean;
+}): Promise<OnChainTitle | null> {
+  const contractId = params.contractId ?? getTitleBadgeContractId();
+  if (!contractId || !params.owner) return null;
+
+  const key = `${contractId}:${params.owner.toLowerCase()}`;
+  const cached = titleBadgeCache.get(key);
+  if (!params.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  try {
+    const badge = await new TitleBadgeClient(params.invoke).get(params.owner);
+    const value =
+      badge && badge.active && badge.title.trim()
+        ? { title: badge.title.trim(), grantedAt: badge.granted_at }
+        : null;
+    titleBadgeCache.set(key, {
+      value,
+      expiresAt: Date.now() + TITLE_BADGE_CACHE_TTL_MS,
+    });
+    return value;
+  } catch (error) {
+    if (!isMissingTitleError(error)) throw error;
+    titleBadgeCache.set(key, {
+      value: null,
+      expiresAt: Date.now() + TITLE_BADGE_CACHE_TTL_MS,
+    });
+    return null;
+  }
+}
+
+export interface AiNftCollectionItem {
+  tokenId: bigint;
+  nftId: bigint;
+  owner: string;
+  metadataHash: string;
+  personalityTraits: string;
+  createdAt: bigint;
+  minter: string;
+  displayName: string;
+}
+
+const AI_NFT_CACHE_TTL_MS = 30 * 1000;
+const aiNftCache = new Map<
+  string,
+  { items: AiNftCollectionItem[]; expiresAt: number }
+>();
+
+export function clearAiNftCache(owner?: string): void {
+  if (!owner) {
+    aiNftCache.clear();
+    return;
+  }
+  const suffix = `:${owner.toLowerCase()}`;
+  for (const key of aiNftCache.keys()) {
+    if (key.endsWith(suffix)) aiNftCache.delete(key);
+  }
+}
+
+export async function fetchOwnedAiNfts(params: {
+  owner: string;
+  invoke: ContractMethodInvoker;
+  contractId?: string;
+  forceRefresh?: boolean;
+}): Promise<AiNftCollectionItem[]> {
+  const contractId = params.contractId ?? getAiNftContractId();
+  if (!contractId || !params.owner) return [];
+
+  const key = `${contractId}:${params.owner.toLowerCase()}`;
+  const cached = aiNftCache.get(key);
+  if (!params.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.items;
+  }
+
+  const client = new AiNftClient(params.invoke);
+  const tokenIds = await client.tokensOf(params.owner);
+  const settled = await Promise.all(
+    tokenIds.map(async (tokenId) => {
+      const metadata = await client.metadata(tokenId);
+      if (!metadata) return null;
+      const item: AiNftCollectionItem = {
+        tokenId,
+        nftId: metadata.nft_id,
+        owner: metadata.owner,
+        metadataHash: metadata.metadata_hash,
+        personalityTraits: metadata.personality_traits,
+        createdAt: metadata.created_at,
+        minter: metadata.minter,
+        displayName: displayNameForMetadata(metadata),
+      };
+      return item;
+    }),
+  );
+  const items = settled.filter(
+    (item): item is AiNftCollectionItem => item !== null,
+  );
+  aiNftCache.set(key, { items, expiresAt: Date.now() + AI_NFT_CACHE_TTL_MS });
+  return items;
+}
+
+export async function transferOwnedAiNft(params: {
+  tokenId: bigint;
+  to: string;
+  invoke: ContractMethodInvoker;
+  owner?: string;
+}): Promise<unknown> {
+  const result = await new AiNftClient(params.invoke).transfer(
+    params.tokenId,
+    params.to,
+  );
+  if (params.owner) clearAiNftCache(params.owner);
+  return result;
 }
 
 interface BoundContract {

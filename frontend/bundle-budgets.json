@@ -1,0 +1,13 @@
+{
+  "/layout": 1380,
+  "/page": 1420,
+  "/play/page": 1350,
+  "/dashboard/page": 1260,
+  "/puzzles/page": 1290,
+  "/profile/page": 1800,
+  "/player/[username]/page": 1690,
+  "/watch/page": 760,
+  "/openings/page": 730,
+  "/leaderboard/page": 690,
+  "/tournament/page": 730
+}

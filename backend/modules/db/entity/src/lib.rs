@@ -1,4 +1,6 @@
 pub mod admin_action;
+pub mod archive_job;
+pub mod failed_archive_job;
 pub mod game;
 pub mod player;
 pub mod tournament;

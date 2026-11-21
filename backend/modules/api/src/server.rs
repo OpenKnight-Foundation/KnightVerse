@@ -531,8 +531,16 @@ pub async fn main() -> std::io::Result<()> {
             // during an incident, so this one route stays outside the auth
             // gate and the limiters.
             .route("/health/engine", web::get().to(ai_health))
-            // NFT routes (placeholder — not yet implemented)
-            // .service(web::scope("/v1").configure(configure_nft_routes))
+            // BE-154: NFT routes, mounted under /v1/nft behind JWT auth.
+            .service(
+                web::scope("/v1")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .configure(st_core::endpoint::configure),
+            )
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")

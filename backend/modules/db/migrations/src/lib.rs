@@ -16,6 +16,7 @@ mod m20261021_000001_add_player_preferences;
 mod m20261022_000001_align_game_enums;
 mod m20261022_000002_drop_game_player_fks;
 mod m20261022_000003_create_tournaments;
+mod m20261120_000002_create_archive_jobs;
 
 pub struct Migrator;
 
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261022_000001_align_game_enums::Migration),
             Box::new(m20261022_000002_drop_game_player_fks::Migration),
             Box::new(m20261022_000003_create_tournaments::Migration),
+            Box::new(m20261120_000002_create_archive_jobs::Migration),
         ]
     }
 }

@@ -16,7 +16,126 @@ info:
 security:
   - bearerAuth: []
 
-# Components section with security schemes
+paths:
+  /social/friends:
+    get:
+      summary: List followed players with online status
+      operationId: listFriends
+      tags:
+        - Social
+      parameters:
+        - name: onlineOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated list of friends
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Friend'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /social/players/{playerId}/follow:
+    parameters:
+      - $ref: '#/components/parameters/PlayerId'
+    post:
+      summary: Follow a player
+      operationId: followPlayer
+      tags:
+        - Social
+      responses:
+        '201':
+          description: Follow created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Friend'
+        '400':
+          $ref: '#/components/responses/BadProposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      security:
+        - bearerAuth: []
+    delete:
+      summary: Unfollow a player
+      operationId: unfollowPlayer
+      tags:
+        - Social
+      responses:
+        '204':
+          description: Follow removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - bearerAuth: []
+
+  /social/challenges:
+    post:
+      summary: Send a direct challenge to a friend
+      operationId: challengeFriend
+      tags:
+        - Social
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+      responses:
+        '201':
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Challenge'
+        '400':
+          $ref: '#/components/responses/BadProposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      security:
+        - bearerAuth: []
+
 components:
   securitySchemes:
     bearerAuth:
@@ -25,5 +144,187 @@ components:
       bearerFormat: JWT
       description: JWT token authentication. Example: Bearer {token}
 
-# This file will be generated automatically by the server
-# Use the script generate-client-sdks.sh to generate client SDKs
+  parameters:
+    PlayerId:
+      name: playerId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not allowed to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Request conflicts with current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadProposal:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    Pagination:
+      type: object
+      required:
+        - page
+        - limit
+        - total
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    PlayerSummary:
+      type: object
+      required:
+        - id
+        - username
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        rating:
+          type: integer
+          minimum: 0
+
+    Friend:
+      type: object
+      required:
+        - player
+        - online
+        - followedRelationshipId
+        - followedSince
+      properties:
+        player:
+          $ref: '#/components/schemas/PlayerSummary'
+        online:
+          type: boolean
+        lastSeenAt:
+          type: string
+          format: date-time
+        followedRelationshipId:
+          type: string
+          format: uuid
+        followedSince:
+          type: string
+          format: date-time
+
+    TimeControl:
+      type: object
+      required:
+        - initial
+        - increment
+      properties:
+        initial:
+          type: integer
+          description: Initial clock in seconds
+          minimum: 1
+          example: 180
+        increment:
+          type: integer
+          description: Increment in seconds per move
+          minimum: 0
+          example: 2
+
+    ChallengeRequest:
+      type: object
+      required:
+        - opponentId
+        - timeControl
+      properties:
+        opponentId:
+          type: string
+          format: uuid
+        timeControl:
+          $ref: '#/components/schemas/TimeControl'
+        color:
+          type: string
+          enum: [white, black, random]
+          default: random
+        message:
+          type: string
+          maxLength: 280
+
+    Challenge:
+      type: object
+      required:
+        - id
+        - challengerId
+        - challengeeId
+        - timeControl
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        challengerId:
+          type: string
+          format: uuid
+        challengeeId:
+          type: string
+          format: uuid
+        timeControl:
+          $ref: '#/components/schemas/TimeControl'
+        color:
+          type: string
+          enum: [white, black]
+        status:
+          type: string
+          enum: [pending, accepted, declined, expired, cancelled]
+        message:
+          type: string
+        gameId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time

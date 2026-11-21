@@ -3,6 +3,7 @@
 import React from "react";
 import { FaCrown, FaRobot, FaHandshake, FaRedoAlt, FaUsers, FaClock, FaFlag, FaSearch, FaBan } from "react-icons/fa";
 import { useFocusTrap } from "@/hook/useFocusTrap";
+import type { SeriesOutcome } from "@/lib/series";
 
 type GameResult =
   | "white_wins"
@@ -16,6 +17,15 @@ type GameResult =
   | "draw_by_agreement"
   | "aborted";
 
+export interface SeriesSummary {
+  label: string;
+  score: string;
+  gameNumber: number;
+  length: number;
+  outcome: SeriesOutcome;
+  payout?: string | null;
+}
+
 interface GameResultOverlayProps {
   result: GameResult;
   onPlayAgain: () => void;
@@ -24,6 +34,7 @@ interface GameResultOverlayProps {
   onReview?: () => void;
   /** Optional extra controls rendered above the default buttons (e.g. rematch). */
   extraActions?: React.ReactNode;
+  series?: SeriesSummary;
 }
 
 const resultConfig: Record<
@@ -102,7 +113,7 @@ const resultConfig: Record<
   },
 };
 
-export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview, extraActions }: GameResultOverlayProps) {
+export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview, extraActions, series }: GameResultOverlayProps) {
   const cfg = resultConfig[result];
 
   // Focus trap: keep keyboard focus within the modal while it is open.
@@ -141,6 +152,34 @@ export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview,
             </p>
           </div>
 
+          {series && (
+            <div
+              className="w-full rounded-xl border border-gray-700/50 bg-gray-800/50 p-3 text-left text-sm"
+              aria-label="Series summary"
+            >
+              <p className="font-semibold text-white">
+                {series.label} · {series.outcome ? "Final" : "Next"}: Game {series.gameNumber} of {series.length}
+              </p>
+              <p className="mt-1 text-gray-300">Series score {series.score}</p>
+              {series.outcome && (
+                <p
+                  className={`mt-1 font-semibold ${
+                    series.outcome === "win" ? "text-emerald-300" : series.outcome === "loss" ? "text-red-300" : "text-gray-300"
+                  }`}
+                >
+                  {series.outcome === "win"
+                    ? "You won the series"
+                    : series.outcome === "loss"
+                      ? "You lost the series"
+                      : "Series drawn"}
+                </p>
+              )}
+              {series.outcome && series.payout && (
+                <p className="mt-1 text-yellow-300">Payout {series.payout}</p>
+              )}
+            </div>
+          )}
+
           {/* Buttons */}
           <div className="flex flex-col gap-3 w-full mt-2" role="group" aria-label="Post-game options">
             {extraActions}
@@ -158,7 +197,7 @@ export function GameResultOverlay({ result, onPlayAgain, onPlayOnline, onReview,
               className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-400 hover:to-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-teal-500/20 hover:shadow-teal-400/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
             >
               <FaRedoAlt aria-hidden="true" />
-              Play Again
+              {series && !series.outcome ? "Next Game" : "Play Again"}
             </button>
             <button
               onClick={onPlayOnline}

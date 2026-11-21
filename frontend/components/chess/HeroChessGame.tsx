@@ -16,6 +16,7 @@ import { useMatchmakingContext } from "@/context/matchmakingContext";
 import { getChessVariantById } from "@/lib/chessVariants";
 import { GameResultOverlay } from "@/components/GameResultOverlay";
 import type { GameResult } from "@/components/GameResultOverlay";
+import type { SeriesLength } from "@/lib/series";
 import { CapturedPieces } from "@/components/chess/CapturedPieces";
 import { EvaluationBar } from "@/components/chess/EvaluationBar";
 import MoveTree from "@/components/chess/MoveTree";
@@ -66,6 +67,7 @@ export default function HeroChessGame({
   const router = useRouter();
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);
   const [isMatchmakingModalOpen, setIsMatchmakingModalOpen] = useState(false);
+  const seriesLengthRef = useRef<SeriesLength>(1);
   const [botAnalysis, setBotAnalysis] = useState<AnalysisResult | null>(null);
 
   const [heroGameResult, setHeroGameResult] = useState<GameResult | null>(null);
@@ -134,7 +136,7 @@ export default function HeroChessGame({
 
   useEffect(() => {
     if (matchmakingStatus === "match_found" && gameId) {
-      router.push(`/play/${gameId}`);
+      router.push(`/play/${gameId}?series=${seriesLengthRef.current}`);
     }
   }, [matchmakingStatus, gameId, router]);
 
@@ -342,8 +344,9 @@ export default function HeroChessGame({
     }
   };
 
-  const handleMatchmakingConfirm = (type: "Rated" | "Casual") => {
+  const handleMatchmakingConfirm = (type: "Rated" | "Casual", length: SeriesLength) => {
     setIsMatchmakingModalOpen(false);
+    seriesLengthRef.current = length;
     joinMatchmaking(type, chessVariant);
   };
 

@@ -27,6 +27,8 @@ pub enum DataKey {
     Earnings(Address),
     /// configurable commission in basis points (e.g. 1000 = 10%)
     CommissionBps,
+    /// only this address may settle wagers (e.g. game_contract)
+    SettlementCaller,
 }
 
 #[contracterror]
@@ -40,6 +42,18 @@ pub enum Error {
     SelfReferral = 4,
     InvalidAmount = 5,
     InvalidCommission = 6,
+    /// No settlement caller has been configured
+    NotInitialized = 7,
+    /// Caller is not the configured settlement caller
+    NotSettlementCaller = 8,
+}
+
+/// Read the admin without panicking with an opaque host error (#1567).
+fn read_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
 }
 
 #[contract]
@@ -62,6 +76,14 @@ impl ReferralSplitter {
             .set(&DataKey::CommissionBps, &commission_bps);
     }
 
+    /// Configure the single address allowed to settle wagers (#1554).
+    pub fn set_settlement_caller(env: Env, caller: Address) {
+        read_admin(&env).require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementCaller, &caller);
+    }
+
     /// Register a referee→referrer binding. Permanent once set; self-referral rejected.
     pub fn register_referral(env: Env, referee: Address, referrer: Address) {
         referee.require_auth();
@@ -82,6 +104,15 @@ impl ReferralSplitter {
     /// This is accounting only: the accrued balance is moved on-chain by
     /// [`ReferralSplitter::withdraw_earnings`].
     pub fn settle_wager(env: Env, referee: Address, amount: i128) -> i128 {
+        // #1554: only the admin-configured settlement contract can credit
+        // earnings; an arbitrary caller must not be able to inflate them.
+        let settlement_caller: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::SettlementCaller)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        settlement_caller.require_auth();
+
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }
@@ -169,3 +200,46 @@ impl ReferralSplitter {
 
 #[cfg(test)]
 mod test;
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl ReferralSplitter {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

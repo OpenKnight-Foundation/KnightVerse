@@ -24,6 +24,14 @@ pub enum ReportReason {
     Bot,
 }
 
+/// Lifecycle status of a report in the moderation queue
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReportStatus {
+    Open,
+    Assigned,
+    Resolved,
+}
+
 /// Represents a player report
 #[derive(Debug, Clone)]
 pub struct PlayerReport {
@@ -39,6 +47,14 @@ pub struct PlayerReport {
     pub evidence_game_id: Option<String>,
     /// Timestamp when the report was filed
     pub timestamp: Instant,
+    /// Current queue status
+    pub status: ReportStatus,
+    /// Moderator currently assigned to the report
+    pub assigned_to: Option<String>,
+    /// Linked anti-cheat result identifier (BE-172)
+    pub anticheat_result_id: Option<String>,
+    /// Resolution note recorded by the moderator
+    pub resolution: Option<String>,
 }
 
 impl Serialize for PlayerReport {
@@ -47,15 +63,34 @@ impl Serialize for PlayerReport {
         S: Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("PlayerReport", 6)?;
+        let mut state = serializer.serialize_struct("PlayerReport", 10)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("reporter", &self.reporter)?;
         state.serialize_field("reported", &self.reported)?;
         state.serialize_field("reason", &self.reason)?;
         state.serialize_field("evidence_game_id", &self.evidence_game_id)?;
         state.serialize_field("timestamp_nanos", &self.timestamp.elapsed().as_nanos())?;
+        state.serialize_field("status", &self.status)?;
+        state.serialize_field("assigned_to", &self.assigned_to)?;
+        state.serialize_field("anticheat_result_id", &self.anticheat_result_id)?;
+        state.serialize_field("resolution", &self.resolution)?;
         state.end()
     }
+}
+
+/// An entry in the admin audit log
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditEntry {
+    /// Sequential audit entry ID
+    pub id: u64,
+    /// Moderator/admin who performed the action
+    pub actor: String,
+    /// Action performed (e.g. "assign", "resolve")
+    pub action: String,
+    /// Report the action applied to
+    pub report_id: u64,
+    /// Free-form details
+    pub details: String,
 }
 
 /// Represents a player's report history
@@ -75,6 +110,8 @@ pub struct ReportStorage {
     histories: Mutex<HashMap<String, PlayerReportHistory>>,
     /// Report counter for unique IDs
     report_counter: Mutex<u64>,
+    /// Admin audit log
+    audit_log: Mutex<Vec<AuditEntry>>,
 }
 
 impl ReportStorage {
@@ -82,6 +119,7 @@ impl ReportStorage {
         Self {
             histories: Mutex::new(HashMap::new()),
             report_counter: Mutex::new(0),
+            audit_log: Mutex::new(Vec::new()),
         }
     }
 
@@ -151,6 +189,10 @@ impl ReportStorage {
             reason,
             evidence_game_id,
             timestamp: now,
+            status: ReportStatus::Open,
+            assigned_to: None,
+            anticheat_result_id: None,
+            resolution: None,
         };
 
         // Record the report
@@ -210,6 +252,120 @@ impl ReportStorage {
         }
 
         all_reports
+    }
+
+    /// List reports in the moderation queue, optionally filtered by status
+    pub fn list_queue(&self, status: Option<ReportStatus>) -> Vec<PlayerReport> {
+        let mut reports = self.get_admin_reports(None);
+        if let Some(status) = status {
+            reports.retain(|r| r.status == status);
+        }
+        // Oldest first for queue processing
+        reports.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        reports
+    }
+
+    /// Find a report by ID across all histories
+    fn find_report_mut<'a>(
+        histories: &'a mut HashMap<String, PlayerReportHistory>,
+        report_id: u64,
+    ) -> Option<&'a mut PlayerReport> {
+        histories
+            .values_mut()
+            .flat_map(|h| h.reports_received.iter_mut())
+            .find(|r| r.id == report_id)
+    }
+
+    /// Assign a report to a moderator
+    pub fn assign_report(
+        &self,
+        actor: &str,
+        report_id: u64,
+        moderator: &str,
+    ) -> Result<PlayerReport, String> {
+        let mut histories = self.histories.lock().map_err(|e| e.to_string())?;
+        let report = Self::find_report_mut(&mut histories, report_id)
+            .ok_or_else(|| format!("Report {} not found", report_id))?;
+        if report.status == ReportStatus::Resolved {
+            return Err(format!("Report {} is already resolved", report_id));
+        }
+        report.status = ReportStatus::Assigned;
+        report.assigned_to = Some(moderator.to_string());
+        let snapshot = report.clone();
+        drop(histories);
+        self.record_audit(actor, "assign", report_id, &format!("assigned to {}", moderator))?;
+        Ok(snapshot)
+    }
+
+    /// Link a report to an anti-cheat result (BE-172)
+    pub fn link_anticheat_result(
+        &self,
+        actor: &str,
+        report_id: u64,
+        anticheat_result_id: &str,
+    ) -> Result<PlayerReport, String> {
+        let mut histories = self.histories.lock().map_err(|e| e.to_string())?;
+        let report = Self::find_report_mut(&mut histories, report_id)
+            .ok_or_else(|| format!("Report {} not found", report_id))?;
+        report.anticheat_result_id = Some(anticheat_result_id.to_string());
+        let snapshot = report.clone();
+        drop(histories);
+        self.record_audit(
+            actor,
+            "link_anticheat",
+            report_id,
+            &format!("anticheat result {}", anticheat_result_id),
+        )?;
+        Ok(snapshot)
+    }
+
+    /// Resolve a report with a note
+    pub fn resolve_report(
+        &self,
+        actor: &str,
+        report_id: u64,
+        resolution: &str,
+    ) -> Result<PlayerReport, String> {
+        let mut histories = self.histories.lock().map_err(|e| e.to_string())?;
+        let report = Self::find_report_mut(&mut histories, report_id)
+            .ok_or_else(|| format!("Report {} not found", report_id))?;
+        if report.status == ReportStatus::Resolved {
+            return Err(format!("Report {} is already resolved", report_id));
+        }
+        report.status = ReportStatus::Resolved;
+        report.resolution = Some(resolution.to_string());
+        let snapshot = report.clone();
+        drop(histories);
+        self.record_audit(actor, "resolve", report_id, resolution)?;
+        Ok(snapshot)
+    }
+
+    /// Append an entry to the admin audit log
+    fn record_audit(
+        &self,
+        actor: &str,
+        action: &str,
+        report_id: u64,
+        details: &str,
+    ) -> Result<(), String> {
+        let mut log = self.audit_log.lock().map_err(|e| e.to_string())?;
+        let id = log.len() as u64 + 1;
+        log.push(AuditEntry {
+            id,
+            actor: actor.to_string(),
+            action: action.to_string(),
+            report_id,
+            details: details.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Read the admin audit log
+    pub fn audit_entries(&self) -> Vec<AuditEntry> {
+        self.audit_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -271,6 +427,7 @@ mod tests {
         assert_eq!(report.id, 1);
         assert_eq!(report.reporter, "reporter1");
         assert_eq!(report.reported, "player1");
+        assert_eq!(report.status, ReportStatus::Open);
     }
 
     #[test]
@@ -346,5 +503,42 @@ mod tests {
 
         let reports_limited = storage.get_admin_reports(Some(2));
         assert_eq!(reports_limited.len(), 2);
+    }
+
+    #[test]
+    fn test_queue_assign_resolve_and_audit() {
+        let storage = ReportStorage::new();
+        let report = storage
+            .file_report("r1", "p1", ReportReason::Cheating, Some("g1".to_string()))
+            .unwrap();
+
+        let open = storage.list_queue(Some(ReportStatus::Open));
+        assert_eq!(open.len(), 1);
+
+        let assigned = storage.assign_report("admin1", report.id, "mod1").unwrap();
+        assert_eq!(assigned.status, ReportStatus::Assigned);
+        assert_eq!(assigned.assigned_to.as_deref(), Some("mod1"));
+
+        let linked = storage
+            .link_anticheat_result("mod1", report.id, "ac-42")
+            .unwrap();
+        assert_eq!(linked.anticheat_result_id.as_deref(), Some("ac-42"));
+
+        let resolved = storage
+            .resolve_report("mod1", report.id, "confirmed cheating")
+            .unwrap();
+        assert_eq!(resolved.status, ReportStatus::Resolved);
+        assert!(storage.resolve_report("mod1", report.id, "again").is_err());
+
+        let log = storage.audit_entries();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[0].action, "assign");
+        assert_eq!(log[2].action, "resolve");
+    }
+
+    #[test]
+    fn test_assign_unknown_report_fails() {
+        let storage = ReportStorage::new();
+        assert!(storage.assign_report("admin", 99, "mod").is_err());
     }
 }

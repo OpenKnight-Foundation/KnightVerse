@@ -914,3 +914,46 @@ mod test {
         client.admin_refund_match(&admin, &999);
     }
 }
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl PausableContract {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

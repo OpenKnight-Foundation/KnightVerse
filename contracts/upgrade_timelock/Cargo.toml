@@ -1,0 +1,17 @@
+[package]
+name = "upgrade_timelock"
+version = "0.1.0"
+edition = "2021"
+description = "Shared timelocked upgrade path (propose -> wait -> apply) for KnightVerse contracts (SC-105)"
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = "21.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }

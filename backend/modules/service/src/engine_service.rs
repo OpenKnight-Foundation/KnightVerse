@@ -79,8 +79,8 @@ impl EngineService {
                         engine.set_position(&fen).await?;
 
                         let params = GoParams {
-                            depth,
-                            time_limit_ms,
+                            depth: depth.map(u16::from),
+                            time_limit_ms: time_limit_ms.map(u64::from),
                             search_moves: None,
                         };
 

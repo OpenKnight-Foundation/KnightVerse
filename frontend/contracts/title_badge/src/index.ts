@@ -45,7 +45,7 @@ function toBoolean(value: unknown): boolean {
 export function normalizeTitleBadge(value: unknown): TitleBadge | null {
   if (!value) return null;
 
-  const raw = Array.isArray(value)
+  const raw: Record<string, unknown> | null = Array.isArray(value)
     ? { title: value[0], granted_at: value[1], active: value[2] }
     : asRecord(value);
   if (!raw) return null;

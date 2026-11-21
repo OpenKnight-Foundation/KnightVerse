@@ -416,7 +416,7 @@ impl GameContract {
             .instance()
             .get(&PENDING_UPGRADE_SEQ)
             .unwrap_or(0);
-        if env.ledger().sequence() < proposed_seq + ADMIN_TIMELOCK_DURATION as u64 {
+        if (env.ledger().sequence() as u64) < proposed_seq + ADMIN_TIMELOCK_DURATION as u64 {
             panic!("Upgrade timelock active");
         }
 
@@ -1033,7 +1033,7 @@ impl GameContract {
 
         game.moves.push_back(chess_move);
         game.current_turn = if game.current_turn == 1 { 2 } else { 1 };
-        game.last_move_at = env.ledger().timestamp();
+        game.last_move_at = env.ledger().sequence() as u64;
         game.last_activity_ts = env.ledger().timestamp();
         game.board_fen = new_board;
 
@@ -5463,10 +5463,12 @@ mod tests {
         let game_id = client.create_game(&player1, &wager, &Bytes::new(&env));
         client.join_game(&game_id, &player2);
 
+        env.ledger().set_timestamp(1_000);
         let first_move = Vec::from_array(&env, [12u32, 28u32]);
         client.submit_move(&game_id, &player1, &first_move, &Bytes::new(&env), &0u32);
 
         env.ledger().set_sequence_number(2);
+        env.ledger().set_timestamp(1_060);
 
         let second_move = Vec::from_array(&env, [52u32, 36u32]);
         client.submit_move(&game_id, &player2, &second_move, &Bytes::new(&env), &0u32);
@@ -5484,14 +5486,14 @@ mod tests {
             recorded_first.move_data,
             Vec::from_array(&env, [12u32, 28u32])
         );
-        assert_eq!(recorded_first.timestamp, 0);
+        assert_eq!(recorded_first.timestamp, 1_000);
 
         assert_eq!(recorded_second.player, player2);
         assert_eq!(
             recorded_second.move_data,
             Vec::from_array(&env, [52u32, 36u32])
         );
-        assert_eq!(recorded_second.timestamp, 2);
+        assert_eq!(recorded_second.timestamp, 1_060);
     }
 
     #[test]

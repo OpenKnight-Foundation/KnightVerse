@@ -74,7 +74,7 @@ async fn check_redis(
     let probe = async {
         let mut conn = pool.get().await.map_err(|e| e.to_string())?;
         redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -672,87 +672,46 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(2));
     }
 
-   
-async fn parse_response_body(
-    res: actix_web::dev::ServiceResponse,
-) -> (StatusCode, serde_json::Value) {
-    let status = res.status();
+    #[actix_web::test]
+    async fn readiness_returns_503_when_redis_down() {
+        let res = readiness_response(&pool_of(mock_db()), &refused_redis_pool(), TEST_TIMEOUT)
+            .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["checks"]["database"]["status"], "ok");
+        assert_eq!(body["checks"]["redis"]["status"], "error");
+    }
 
-    let bytes = actix_web::body::to_bytes(res.into_body())
-        .await
-        .expect("Failed to read response body");
+    #[actix_web::test]
+    async fn readiness_returns_503_when_db_down() {
+        let res = readiness_response(
+            &pool_of(Arc::new(DatabaseConnection::Disconnected)),
+            &refused_redis_pool(),
+            TEST_TIMEOUT,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["checks"]["database"]["status"], "error");
+    }
 
-    let body = serde_json::from_slice(&bytes)
-        .expect("Response body should contain valid JSON");
-
-    (status, body)
-}
-
-fn assert_check_status(
-    body: &serde_json::Value,
-    check: &str,
-    expected: &str,
-) {
-    assert_eq!(
-        body["checks"][check]["status"],
-        expected,
-        "Unexpected status for {check} health check"
-    );
-}
-
-#[actix_web::test]
-async fn readiness_returns_503_when_redis_down() {
-    let res = readiness_response(
-        &pool_of(mock_db()),
-        &refused_redis_pool(),
-        TEST_TIMEOUT,
-    )
-    .await;
-
-    let (status, body) = parse_response_body(res).await;
-
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["status"], "error");
-
-    assert_check_status(&body, "database", "ok");
-    assert_check_status(&body, "redis", "error");
-}
-
-#[actix_web::test]
-async fn readiness_returns_503_when_db_down() {
-    let disconnected_db = Arc::new(DatabaseConnection::Disconnected);
-
-    let res = readiness_response(
-        &pool_of(disconnected_db),
-        &refused_redis_pool(),
-        TEST_TIMEOUT,
-    )
-    .await;
-
-    let (status, body) = parse_response_body(res).await;
-
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["status"], "error");
-
-    assert_check_status(&body, "database", "error");
-    assert_check_status(&body, "redis", "error");
-}
-
-#[actix_web::test]
-async fn readiness_route_is_registered_and_reports_unready() {
-    let app = test::init_service(
-        App::new()
-            .app_data(web::Data::new(pool_of(mock_db())))
-            .app_data(web::Data::new(refused_redis_pool()))
-            .route("/health/ready", web::get().to(readiness)),
-    )
-    .await;
-
-    let req = test::TestRequest::get()
-        .uri("/health/ready")
-        .to_request();
-
-    let res = test::call_service(&app, req).await;
-
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    #[actix_web::test]
+    async fn readiness_route_is_registered_and_reports_unready() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool_of(mock_db())))
+                .app_data(web::Data::new(refused_redis_pool()))
+                .route("/health/ready", web::get().to(readiness)),
+        )
+        .await;
+        let res = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/health/ready").to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

@@ -316,7 +316,10 @@ impl GameService {
         }
 
         let start_fen = model.fen.clone();
-        let (new_fen, terminal_result) =
+        // A mating/drawing move only updates the board: the stored result is
+        // written by `complete_game_on`, which also settles ratings, so a set
+        // result always means "settled" and ratings can't be applied twice.
+        let (new_fen, _terminal_result) =
             chess::apply_uci_to_fen(&start_fen, &move_request.chess_move).map_err(|e| {
                 ApiError::BadRequest(format!("Illegal move: {e}"))
             })?;
@@ -327,9 +330,6 @@ impl GameService {
         let mut active: game::ActiveModel = model.into();
         active.pgn = Set(serde_json::json!(new_moves));
         active.fen = Set(new_fen);
-        if let Some(result) = terminal_result {
-            active.result = Set(Some(result));
-        }
         active.updated_at = Set(Utc::now().into());
 
         let updated = active.update(db).await.map_err(ApiError::from)?;
@@ -576,7 +576,12 @@ impl GameService {
             game_model.black_player
         };
 
-        chess::RatingService::get_player_rating(db, player_id).await
+        let player = db_entity::player::Entity::find_by_id(player_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
+        Ok(player.elo_rating)
     }
 
     pub(crate) async fn list_games_on(

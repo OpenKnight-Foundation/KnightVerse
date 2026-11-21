@@ -15,7 +15,7 @@ pub use mandatory_draw::{
     check_mandatory_draw_conditions, update_position_tracker, MandatoryDrawResult, PositionTracker,
 };
 pub use move_validation::{
-    apply_and_validate_uci_move, apply_uci_to_fen, MoveValidationError,
+    apply_and_validate_uci_move, apply_uci_to_fen, result_from_fen, MoveValidationError,
 };
 pub use pgn::{
     export_pgn, export_pgn_validated, parse_pgn, validate_game, ExportHeaders,

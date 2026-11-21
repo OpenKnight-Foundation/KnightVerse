@@ -132,10 +132,8 @@ pub fn verify_signature(
         } => puzzle_reward_payload(recipient, *amount, *nonce),
     };
     let digest = Sha256::digest(&payload);
-    let signature = match Signature::from_bytes(signature) {
-        Ok(sig) => sig,
-        Err(_) => return false,
-    };
+    // ed25519-dalek 2: any 64 bytes parse; invalid signatures fail `verify`.
+    let signature = Signature::from_bytes(signature);
     verifying_key.verify(&digest, &signature).is_ok()
 }
 

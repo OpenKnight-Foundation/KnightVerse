@@ -157,23 +157,33 @@ async fn full_lifecycle_create_join_move_complete() {
     assert!(status.is_success(), "join failed with {status}: {body}");
     assert_eq!(game_from_body(&body).black_player_id, Some(bob.id));
 
-    // --- move ---------------------------------------------------------------
-    let mover_app = game_app!(pool);
-    let mv = test::TestRequest::put()
-        .uri(&format!("/v1/games/{game_id}/move"))
-        .insert_header(bearer(&alice_token))
-        .set_json(MakeMoveRequest {
-            chess_move: "e2e4".to_string(),
-        })
-        .to_request();
-    let res = test::call_service(&mover_app, mv).await;
-    let status = res.status();
-    let body: serde_json::Value = test::read_body_json(res).await;
-    assert!(status.is_success(), "make_move failed with {status}: {body}");
+    // --- moves --------------------------------------------------------------
+    // Scholar's mate. Completion is server-authoritative (the result must come
+    // from the stored position), so the game has to actually end in mate.
+    let moves = ["e2e4", "e7e5", "f1c4", "b8c6", "d1h5", "g8f6", "h5f7"];
+    let mut body = serde_json::Value::Null;
+    for (i, chess_move) in moves.iter().enumerate() {
+        let token = if i % 2 == 0 { &alice_token } else { &bob_token };
+        let mover_app = game_app!(pool);
+        let mv = test::TestRequest::put()
+            .uri(&format!("/v1/games/{game_id}/move"))
+            .insert_header(bearer(token))
+            .set_json(MakeMoveRequest {
+                chess_move: chess_move.to_string(),
+            })
+            .to_request();
+        let res = test::call_service(&mover_app, mv).await;
+        let status = res.status();
+        body = test::read_body_json(res).await;
+        assert!(
+            status.is_success(),
+            "make_move {chess_move} failed with {status}: {body}"
+        );
+    }
     assert_eq!(
         game_from_body(&body).move_history,
-        vec!["e2e4".to_string()],
-        "the move must be recorded on the game"
+        moves.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
+        "every move must be recorded on the game"
     );
 
     // --- complete -----------------------------------------------------------

@@ -1,13 +1,13 @@
 {
-  "/layout": 1270,
-  "/page": 1310,
-  "/play/page": 1250,
-  "/dashboard/page": 1150,
-  "/puzzles/page": 1170,
-  "/profile/page": 1760,
-  "/player/[username]/page": 1650,
-  "/watch/page": 670,
-  "/openings/page": 640,
-  "/leaderboard/page": 590,
-  "/tournament/page": 630
+  "/layout": 1380,
+  "/page": 1420,
+  "/play/page": 1350,
+  "/dashboard/page": 1260,
+  "/puzzles/page": 1290,
+  "/profile/page": 1800,
+  "/player/[username]/page": 1690,
+  "/watch/page": 760,
+  "/openings/page": 730,
+  "/leaderboard/page": 690,
+  "/tournament/page": 730
 }

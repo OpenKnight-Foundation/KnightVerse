@@ -576,7 +576,12 @@ impl GameService {
             game_model.black_player
         };
 
-        chess::RatingService::get_player_rating(db, player_id).await
+        let player = db_entity::player::Entity::find_by_id(player_id)
+            .one(db)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::NotFound("Player not found".to_string()))?;
+        Ok(player.elo_rating)
     }
 
     pub(crate) async fn list_games_on(

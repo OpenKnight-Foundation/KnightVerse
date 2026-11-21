@@ -291,6 +291,8 @@ mod tests {
             is_enabled: true,
             wallet_address: None,
             preferences: serde_json::json!({}),
+            email_verified_at: None,
+            glicko_ratings: serde_json::json!({}),
         }
     }
 

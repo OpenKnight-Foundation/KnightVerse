@@ -40,6 +40,7 @@ const PremoveArrow: React.FC<PremoveArrowProps> = ({
 
   return (
     <svg
+      aria-hidden="true"
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
       style={{

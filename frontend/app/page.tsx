@@ -430,7 +430,7 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 <span
                   className={`text-sm font-medium transition-colors duration-300 ${
-                    game.turn() === "b" ? "text-gray-200" : "text-gray-500"
+                    game.turn() === "b" ? "text-gray-200" : "text-gray-400"
                   }`}
                 >
                   Bot (Black)
@@ -470,7 +470,7 @@ export default function Home() {
             </div>
 
             {/* Move counter */}
-            <div className="flex items-center justify-between mt-3 px-1 text-xs text-gray-500">
+            <div className="flex items-center justify-between mt-3 px-1 text-xs text-gray-400">
               <span>
                 {heroMoveCount > 0
                   ? `Move ${Math.ceil(heroMoveCount / 2)}`

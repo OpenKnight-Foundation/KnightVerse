@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { endpoints } from "@/lib/api";
 import { useAuth } from "@/context/authContext";
@@ -62,6 +62,26 @@ export function useWalletLink() {
   const [error, setError] = useState<string | null>(null);
 
   const linkedWallet = user?.wallet_address ?? null;
+  const walletUnknown = Boolean(user) && user?.wallet_address === undefined;
+
+  // A silent session restore only knows the token's claims, so load the
+  // linked wallet from the API once it is needed (#FE-166).
+  useEffect(() => {
+    if (!accessToken || !walletUnknown) return;
+    const controller = new AbortController();
+    fetch(endpoints.players.wallet(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { wallet_address?: string | null } | null) => {
+        if (body) setLinkedWallet(body.wallet_address ?? null);
+      })
+      .catch(() => {
+        // Aborted or offline: the panel keeps showing "No wallet linked yet."
+      });
+    return () => controller.abort();
+  }, [accessToken, walletUnknown, setLinkedWallet]);
 
   const linkWallet = useCallback(async () => {
     setError(null);

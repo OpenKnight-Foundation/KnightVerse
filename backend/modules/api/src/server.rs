@@ -384,6 +384,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
+                    .service(crate::wallet_link::wallet_get)
                     .service(crate::wallet_link::wallet_unlink)
                     .service(add_player)
                     .service(find_player_by_id)

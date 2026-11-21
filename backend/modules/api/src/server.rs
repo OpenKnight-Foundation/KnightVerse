@@ -74,7 +74,7 @@ async fn check_redis(
     let probe = async {
         let mut conn = pool.get().await.map_err(|e| e.to_string())?;
         redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())

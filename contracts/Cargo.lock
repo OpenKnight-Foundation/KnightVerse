@@ -159,6 +159,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -440,6 +447,7 @@ dependencies = [
 name = "emergency_circuit_breaker"
 version = "0.1.0"
 dependencies = [
+ "common",
  "soroban-sdk",
  "upgrade_timelock",
 ]
@@ -1328,6 +1336,7 @@ dependencies = [
 name = "sponsorship_escrow"
 version = "0.1.0"
 dependencies = [
+ "common",
  "emergency_circuit_breaker",
  "soroban-sdk",
  "upgrade_timelock",

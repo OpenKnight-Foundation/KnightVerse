@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "common",
     "game_contract",
     "emergency_circuit_breaker",
     "ai_nft",

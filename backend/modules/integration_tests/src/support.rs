@@ -99,6 +99,7 @@ pub async fn create_player(pool: &DbPool, username: &str, password: &str) -> Tes
         is_enabled: Set(true),
         wallet_address: Set(None),
         preferences: Set(serde_json::json!({})),
+        email_verified_at: Set(None),
     }
     .insert(pool.primary())
     .await

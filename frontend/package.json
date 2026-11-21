@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "storybook:build": "npx --yes storybook build",
     "api:generate": "node scripts/generate-api-client.mjs",
     "api:check": "node scripts/check-api-paths.mjs",
     "bindings:generate": "bash scripts/generate-contract-bindings.sh"

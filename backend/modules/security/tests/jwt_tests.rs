@@ -58,8 +58,9 @@ fn expired_token_is_rejected() {
         user_id: 1,
         player_id: Uuid::new_v4(),
         username: "alice".to_string(),
-        exp: now - 10,
-        iat: now - 100,
+        // Past jsonwebtoken's default 60s leeway for clock skew.
+        exp: now - 120,
+        iat: now - 300,
         jti: None,
         token_type: TokenType::Access,
     };

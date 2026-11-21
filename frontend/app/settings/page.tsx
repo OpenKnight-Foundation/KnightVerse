@@ -4,6 +4,7 @@ import React from 'react';
 import AppearanceSettings from '@/components/AppearanceSettings';
 import SoundSettings from '@/components/SoundSettings';
 import GamePreferencesSettings from '@/components/GamePreferencesSettings';
+import ResponsiblePlaySettings from '@/components/ResponsiblePlaySettings';
 import LinkedWalletSettings from '@/components/LinkedWalletSettings';
 import { GameSidebar } from '@/components/GameSidebar';
 import { Header } from '@/components/Header';
@@ -29,6 +30,8 @@ export default function SettingsPage() {
               <p className="text-gray-400">Manage your game appearance and preferences.</p>
             </div>
             
+            <ResponsiblePlaySettings />
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <AppearanceSettings />
               <SoundSettings />

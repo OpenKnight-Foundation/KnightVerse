@@ -31,7 +31,7 @@ import {
   createTypedContractClient,
 } from "@/lib/contracts";
 
-type AppContextType = {
+export type AppContextType = {
   address?: string;
   status: "connected" | "disconnected" | "connecting" | "error";
   balance?: string | React.ReactNode;
@@ -86,7 +86,7 @@ type AppContextType = {
   ) => T;
 };
 
-const AppContext = createContext<AppContextType | undefined>(undefined);
+export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 function toScVal(arg: any): xdr.ScVal {
   if (

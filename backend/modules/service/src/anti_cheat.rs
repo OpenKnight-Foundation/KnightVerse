@@ -1,10 +1,21 @@
+use crate::admin_audit::{self, AdminActionType, NewAdminAction};
+use chrono::Utc;
+use db::DbPool;
+use db_entity::{anti_cheat_report, game};
+use error::error::ApiError;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tracing::warn;
+use uuid::Uuid;
 
 /// Minimum variance threshold below which move timing is considered artificial
 const VAR_MIN_THRESHOLD: f64 = 0.01;
 
 /// Engine correlation threshold above which the game is flagged
 const ENGINE_CORRELATION_THRESHOLD: f64 = 0.95;
+
+const SYSTEM_ACTOR_ID: Uuid = Uuid::nil();
 
 /// Represents a single move's timing data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +236,178 @@ pub fn analyze_move_timing(
     }
 }
 
+pub fn queue_completed_game(pool: DbPool, game_id: Uuid) {
+    let _ = tokio::spawn(async move {
+        if let Err(error) = analyze_completed_game(&pool, game_id).await {
+            warn!("anti-cheat analysis failed for game {game_id}: {error}");
+        }
+    });
+}
+
+pub async fn analyze_completed_game(pool: &DbPool, game_id: Uuid) -> Result<(), ApiError> {
+    let game = game::Entity::find_by_id(game_id)
+        .one(pool.replica())
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("Game not found".to_string()))?;
+
+    let moves: Vec<String> = game
+        .pgn
+        .as_array()
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|value| value.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (player_id, is_white) in [(game.white_player, true), (game.black_player, false)] {
+        let timings = move_timings_for_player(&game, &moves, is_white);
+        let report = analyze_move_timing(&game_id.to_string(), &player_id.to_string(), &timings);
+
+        store_report(pool, game_id, player_id, &report).await?;
+
+        if report.flagged {
+            record_flag(pool, game_id, player_id, &report).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn store_report(
+    pool: &DbPool,
+    game_id: Uuid,
+    player_id: Uuid,
+    report: &AntiCheatReport,
+) -> Result<(), ApiError> {
+    let metrics = serde_json::to_value(&report.metrics)
+        .map_err(|error| ApiError::BadRequest(format!("Failed to serialize metrics: {error}")))?;
+    let full_report = serde_json::to_value(report)
+        .map_err(|error| ApiError::BadRequest(format!("Failed to serialize report: {error}")))?;
+
+    anti_cheat_report::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        game_id: Set(game_id),
+        player_id: Set(player_id),
+        flagged: Set(report.flagged),
+        flag_reason: Set(report.flag_reason.clone()),
+        metrics: Set(metrics),
+        report: Set(full_report),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(pool.primary())
+    .await
+    .map_err(ApiError::DatabaseError)?;
+
+    Ok(())
+}
+
+async fn record_flag(
+    pool: &DbPool,
+    game_id: Uuid,
+    player_id: Uuid,
+    report: &AntiCheatReport,
+) -> Result<(), ApiError> {
+    let metadata = json!({
+        "game_id": game_id,
+        "player_id": player_id,
+        "source": "anti_cheat",
+        "report": report,
+    });
+
+    admin_audit::record_admin_action(
+        pool,
+        NewAdminAction::new(SYSTEM_ACTOR_ID, AdminActionType::FlagCheating)
+            .target(game_id)
+            .reason(
+                report
+                    .flag_reason
+                    .clone()
+                    .unwrap_or_else(|| "Anti-cheat analysis flagged this game".to_string()),
+            )
+            .metadata(metadata),
+    )
+    .await?;
+
+    Ok(())
+}
+
+fn move_timings_for_player(
+    game: &game::Model,
+    moves: &[String],
+    is_white: bool,
+) -> Vec<MoveTiming> {
+    let player_moves: Vec<&String> = moves
+        .iter()
+        .skip(if is_white { 0 } else { 1 })
+        .step_by(2)
+        .collect();
+
+    if player_moves.is_empty() {
+        return Vec::new();
+    }
+
+    let average_ms = average_move_ms(game, player_moves.len());
+    let mut previous_clock: Option<u64> = None;
+    let mut timings = Vec::with_capacity(player_moves.len());
+
+    for (index, move_text) in player_moves.iter().enumerate() {
+        let clock = annotation_value(move_text, "clk").and_then(|value| parse_clock_ms(&value));
+        let time_ms = match (previous_clock, clock) {
+            (Some(previous), Some(current)) => previous.saturating_sub(current),
+            _ => average_ms,
+        };
+        let engine_eval = annotation_value(move_text, "eval").and_then(|value| parse_eval(&value));
+
+        timings.push(MoveTiming {
+            move_number: index as u32 + 1,
+            time_ms,
+            engine_eval,
+        });
+
+        if clock.is_some() {
+            previous_clock = clock;
+        }
+    }
+
+    timings
+}
+
+fn average_move_ms(game: &game::Model, move_count: usize) -> u64 {
+    if move_count == 0 {
+        return 0;
+    }
+
+    game.duration_sec.max(0) as u64 * 1000 / move_count as u64
+}
+
+fn annotation_value(move_text: &str, key: &str) -> Option<String> {
+    let marker = format!("%{key} ");
+    let start = move_text.find(&marker)? + marker.len();
+    let rest = &move_text[start..];
+    let end = rest.find(']')?;
+    Some(rest[..end].trim().to_string())
+}
+
+fn parse_clock_ms(value: &str) -> Option<u64> {
+    let parts: Vec<&str> = value.split(':').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let hours: u64 = parts[0].parse().ok()?;
+    let minutes: u64 = parts[1].parse().ok()?;
+    let seconds: f64 = parts[2].parse().ok()?;
+
+    Some(((hours * 3600 + minutes * 60) as f64 * 1000.0 + seconds * 1000.0).round() as u64)
+}
+
+fn parse_eval(value: &str) -> Option<f64> {
+    value.trim().parse::<f64>().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +488,28 @@ mod tests {
         let report = analyze_move_timing("game1", "player1", &timings);
         assert!(!report.flagged);
         assert_eq!(report.metrics.move_count, 5);
+    }
+
+    #[test]
+    fn test_annotation_value() {
+        let move_text = "e4 {[%clk 0:01:30] [%eval 0.32]}";
+
+        assert_eq!(annotation_value(move_text, "clk").as_deref(), Some("0:01:30"));
+        assert_eq!(annotation_value(move_text, "eval").as_deref(), Some("0.32"));
+        assert_eq!(annotation_value(move_text, "missing"), None);
+    }
+
+    #[test]
+    fn test_parse_clock_ms() {
+        assert_eq!(parse_clock_ms("0:01:30"), Some(90_000));
+        assert_eq!(parse_clock_ms("1:02:03.5"), Some(3_723_500));
+        assert_eq!(parse_clock_ms("invalid"), None);
+    }
+
+    #[test]
+    fn test_parse_eval() {
+        assert_eq!(parse_eval("0.32"), Some(0.32));
+        assert_eq!(parse_eval("-1.25"), Some(-1.25));
+        assert_eq!(parse_eval("n/a"), None);
     }
 }

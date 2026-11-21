@@ -25,7 +25,7 @@ import {
   CompanionsIcon,
   UserIcon,
 } from "@/components/icons"
-import { Medal, Trophy } from "lucide-react"
+import { ImageIcon, Medal, Trophy } from "lucide-react"
 
 interface SidebarProps {
   collapsed: boolean;
@@ -65,7 +65,7 @@ export function GameSidebar({
               <span className="sr-only">Toggle menu</span>
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-64 bg-gray-900 border-r border-gray-800">
+          <SheetContent side="left" className="p-0 w-64 bg-background border-r border-border">
             <MobileSidebar />
           </SheetContent>
         </Sheet>
@@ -77,7 +77,7 @@ export function GameSidebar({
   return (
     <>
       <div
-        className={`fixed left-0 top-0 h-full bg-gray-900/95 backdrop-blur-sm border-r border-gray-800/50 flex-col transition-all duration-500 ease-in-out hidden md:flex ${
+        className={`fixed left-0 top-0 h-full bg-background/95 backdrop-blur-sm border-r border-border/50 flex-col transition-all duration-500 ease-in-out hidden md:flex ${
           collapsed && !isHovered ? "w-16" : "w-64"
         } shadow-xl group z-[50]`}
         role="navigation"
@@ -187,6 +187,13 @@ export function GameSidebar({
             active={pathname === "/openings"}
           />
           <SidebarItem
+            icon={<ImageIcon className="h-5 w-5" aria-hidden="true" />}
+            label="Collection"
+            href="/collection"
+            collapsed={collapsed && !isHovered}
+            active={pathname.startsWith("/collection")}
+          />
+          <SidebarItem
             icon={<UserIcon />}
             label="Profile"
             href="/profile"
@@ -208,12 +215,12 @@ export function GameSidebar({
           }`}
         >
           {status === "connected" && address ? (
-            <div className="flex items-center space-x-3 p-3 rounded-xl bg-gray-800/60 border border-gray-700/40">
+            <div className="flex items-center space-x-3 p-3 rounded-xl bg-accent/60 border border-border/40">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                 {address.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">
+                <p className="text-sm font-medium text-foreground truncate">
                   {truncateAddress(address)}
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -223,7 +230,7 @@ export function GameSidebar({
               </div>
               <button
                 onClick={() => setIsWalletModalOpen(true)}
-                className="p-1.5 rounded-lg hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
+                className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Manage wallet"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -253,11 +260,11 @@ export function GameSidebar({
           )}
         </div>
 
-        <div className="border-t border-gray-800 p-2">
+        <div className="border-t border-border p-2">
           <button
             onClick={() => setLocalCollapsed(!collapsed)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="p-2 w-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 rounded-md transition-all duration-300 group"
+            className="p-2 w-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-all duration-300 group"
           >
             <div className={`transform transition-transform duration-300 ${collapsed ? "rotate-180" : ""}`}>
               <CollapseIcon />
@@ -293,20 +300,20 @@ function SidebarItem({
       href={href}
       className={`flex items-center gap-4 px-4 py-3 rounded-lg transition-all duration-300 ${
         active
-          ? "bg-gray-800/50 text-white"
-          : "text-gray-400 hover:text-white hover:bg-gray-800/30"
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
       }`}
       aria-current={active ? "page" : undefined}
     >
       <span
         className={`${
-          active ? "text-teal-400" : "text-gray-300"
+          active ? "text-teal-400" : "text-muted-foreground"
         } transition-all duration-300 group-hover:text-teal-400 transform group-hover:scale-110 min-w-[24px]`}
       >
         {icon}
       </span>
       <span
-        className={`ml-3 text-sm font-medium text-gray-300 group-hover:text-white transition-all duration-500 ${
+        className={`ml-3 text-sm font-medium text-muted-foreground group-hover:text-foreground transition-all duration-500 ${
           collapsed ? "opacity-0 w-0" : "opacity-100 w-auto"
         } whitespace-nowrap`}
       >
@@ -326,7 +333,7 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
   const pathname = usePathname();
 
   return (
-    <div className={`flex flex-col h-full bg-gray-900 ${className}`} role="navigation" aria-label="Main Navigation">
+    <div className={`flex flex-col h-full bg-background ${className}`} role="navigation" aria-label="Main Navigation">
       <div className="p-4 flex items-center space-x-2">
         <div className="w-16 h-16 relative">
           <Image
@@ -349,17 +356,18 @@ function MobileSidebar({ className = "" }: MobileSidebarProps) {
         <MobileSidebarItem icon={<GuildIcon />} label="Guilds" href="/guilds" active={pathname.startsWith("/guilds")} />
         <MobileSidebarItem icon={<StakeIcon />} label="Stake" href="/stake" active={pathname.startsWith("/stake")} />
         <MobileSidebarItem icon={<LearnIcon />} label="Openings" href="/openings" active={pathname === "/openings"} />
+        <MobileSidebarItem icon={<ImageIcon className="h-5 w-5" aria-hidden="true" />} label="Collection" href="/collection" active={pathname.startsWith("/collection")} />
         <MobileSidebarItem icon={<UserIcon />} label="Profile" href="/profile" active={pathname.startsWith("/profile")} />
         <MobileSidebarItem icon={<SettingsIcon />} label="Settings" href="/settings" active={pathname === "/settings"} />
       </nav>
       <div className="p-4 space-y-2">
         {status === "connected" && address ? (
-          <div className="flex items-center space-x-3 p-3 rounded-xl bg-gray-800/60 border border-gray-700/40">
+          <div className="flex items-center space-x-3 p-3 rounded-xl bg-accent/60 border border-border/40">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
               {address.slice(0, 2).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">
+              <p className="text-sm font-medium text-foreground truncate">
                 {truncateAddress(address)}
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
@@ -389,18 +397,18 @@ function MobileSidebarItem({ icon, label, href, active }: SidebarItemProps) {
   return (
     <Link
       href={href}
-      className={`flex items-center p-3 px-4 hover:bg-gray-800/50 transition-all duration-300 rounded-lg mb-1 group ${
-        active ? "bg-gray-800/50 shadow-lg" : ""
+      className={`flex items-center p-3 px-4 hover:bg-accent/50 transition-all duration-300 rounded-lg mb-1 group ${
+        active ? "bg-accent shadow-lg" : ""
       }`}
     >
       <span
         className={`${
-          active ? "text-teal-400" : "text-gray-300"
+          active ? "text-teal-400" : "text-muted-foreground"
         } transition-all duration-300 group-hover:text-teal-400 transform group-hover:scale-110`}
       >
         {icon}
       </span>
-      <span className="ml-3 text-sm font-medium text-gray-300 group-hover:text-white transition-colors duration-300">
+      <span className="ml-3 text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors duration-300">
         {label}
       </span>
     </Link>

@@ -114,7 +114,9 @@ impl GameService {
         result: db_entity::game::ResultSide,
         rating_config: Option<RatingConfig>,
     ) -> Result<(i32, i32), ApiError> {
-        Self::complete_game_on(pool.primary(), game_id, result, rating_config).await
+        let ratings = Self::complete_game_on(pool.primary(), game_id, result, rating_config).await?;
+        crate::anti_cheat::queue_completed_game(pool.clone(), game_id);
+        Ok(ratings)
     }
 
     // =========================================================================

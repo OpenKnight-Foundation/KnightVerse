@@ -7,6 +7,7 @@
  */
 
 import { endpoints } from "./api";
+import { getSessionAccessToken } from "@/lib/sessionToken";
 import type { EloDataPoint } from "@/components/profile/EloRatingChart";
 
 export interface PlayerProfile {
@@ -88,8 +89,7 @@ export function toRecentGame(raw: unknown): RecentGame | null {
 }
 
 function authHeaders(): HeadersInit {
-  const token =
-    typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null;
+  const token = getSessionAccessToken();
   return token
     ? { Accept: "application/json", Authorization: `Bearer ${token}` }
     : { Accept: "application/json" };

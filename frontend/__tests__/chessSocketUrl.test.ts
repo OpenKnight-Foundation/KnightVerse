@@ -31,7 +31,6 @@ describe("useChessSocket URL (#FE-90)", () => {
 
   async function openSocketFor(gameId: string) {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
-    localStorage.setItem("access_token", "test-access-token");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -39,6 +38,10 @@ describe("useChessSocket URL (#FE-90)", () => {
         json: async () => ({ ticket: "single-use-ticket", expires_in: 60 }),
       }),
     );
+    // vi.resetModules() in afterEach means these dynamic imports (and the
+    // in-memory session token module they share) are fresh per test (#FE-166).
+    const { setSessionAccessToken } = await import("@/lib/sessionToken");
+    setSessionAccessToken("test-access-token");
     const { useChessSocket } = await import("@/hook/useChessSocket");
     const { unmount } = renderHook(() => useChessSocket(gameId));
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));

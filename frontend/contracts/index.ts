@@ -16,3 +16,18 @@ export { Client as GameContractClient } from "./game_contract/src/index";
 export type { Proof as PuzzleRewardProof } from "./game_contract/src/index";
 export { Client as YieldStakingClient } from "./yield_staking/src/index";
 export type { PoolState } from "./yield_staking/src/index";
+export { TitleBadgeClient } from "./title_badge/src/index";
+export type {
+  ContractMethodInvoker,
+  TitleBadge as OnChainTitleBadge,
+} from "./title_badge/src/index";
+export {
+  AiNftClient,
+  displayNameForMetadata,
+  normalizeAiNftMetadata,
+  parseTokenIds,
+} from "./ai_nft/src/index";
+export type {
+  AiNftMetadata as OnChainAiNftMetadata,
+  OwnedAiNft as OnChainAiNft,
+} from "./ai_nft/src/index";

@@ -17,6 +17,7 @@ mod m20261022_000001_align_game_enums;
 mod m20261022_000002_drop_game_player_fks;
 mod m20261022_000003_create_tournaments;
 mod m20261023_000001_create_friendships_table;
+mod m20261120_000001_create_anti_cheat_reports_table;
 
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261022_000002_drop_game_player_fks::Migration),
             Box::new(m20261022_000003_create_tournaments::Migration),
             Box::new(m20261023_000001_create_friendships_table::Migration),
+            Box::new(m20261120_000001_create_anti_cheat_reports_table::Migration),
         ]
     }
 }

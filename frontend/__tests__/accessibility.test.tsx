@@ -29,9 +29,10 @@ describe("useBoardAnnouncer", () => {
     vi.useRealTimers();
   });
 
-  it("starts with an empty announcement", () => {
+  it("starts with empty move and time announcements", () => {
     const { result } = renderHook(() => useBoardAnnouncer());
     expect(result.current.announcement).toBe("");
+    expect(result.current.timeAnnouncement).toBe("");
   });
 
   it("announces a move with correct description", () => {
@@ -133,9 +134,10 @@ describe("useBoardAnnouncer", () => {
       vi.advanceTimersByTime(100);
     });
 
-    expect(result.current.announcement).toBe(
+    expect(result.current.timeAnnouncement).toBe(
       "Time alert: 30 seconds remaining",
     );
+    expect(result.current.announcement).toBe("");
   });
 });
 

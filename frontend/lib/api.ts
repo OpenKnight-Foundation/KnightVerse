@@ -317,6 +317,11 @@ export const endpoints = {
     ws: () => `${WS_BASE}/v1/ws/notifications`,
   },
 
+  /** Guilds (#FE-108 / #1349) */
+  guilds: {
+    detail: (id: string) => `${API_BASE}/v1/guilds/${encodeURIComponent(id)}`,
+  },
+
   /** Puzzles (#FE-68) */
   puzzles: {
     list: () => `${API_BASE}/v1/puzzles`,

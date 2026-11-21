@@ -477,6 +477,7 @@ dependencies = [
  "actix-web",
  "actix-web-actors",
  "actix-web-prom",
+ "archiving",
  "awc",
  "base64 0.22.1",
  "challenge",
@@ -488,6 +489,7 @@ dependencies = [
  "dotenv",
  "dto",
  "ed25519-dalek",
+ "engine",
  "error",
  "futures-util",
  "hex",
@@ -495,7 +497,9 @@ dependencies = [
  "jsonwebtoken",
  "matchmaking",
  "migration",
+ "move_protocol",
  "once_cell",
+ "pairing",
  "prometheus",
  "rand 0.8.6",
  "redis",
@@ -508,6 +512,7 @@ dependencies = [
  "sha2",
  "st_core",
  "tokio",
+ "tournament",
  "tracing",
  "tracing-actix-web",
  "tracing-subscriber",
@@ -1053,6 +1058,7 @@ dependencies = [
 name = "chess"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "db_entity",
  "error",
  "matchmaking",
@@ -2264,6 +2270,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration_tests"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "actix-web",
+ "api",
+ "chrono",
+ "db",
+ "db_entity",
+ "dto",
+ "error",
+ "migration",
+ "sea-orm",
+ "security",
+ "serde",
+ "serde_json",
+ "service",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2366,12 +2394,6 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "api",
- "chrono",
- "lazy_static",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2520,8 +2542,11 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "chrono",
+ "db",
+ "db_entity",
  "deadpool-redis",
  "redis",
+ "sea-orm",
  "serde",
  "serde_json",
  "tracing",

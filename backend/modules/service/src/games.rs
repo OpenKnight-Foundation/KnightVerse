@@ -313,11 +313,21 @@ impl GameService {
             return Err(ApiError::Forbidden("It is not your turn".to_string()));
         }
 
+        let start_fen = model.fen.clone();
+        let (new_fen, terminal_result) =
+            chess::apply_uci_to_fen(&start_fen, &move_request.chess_move).map_err(|e| {
+                ApiError::BadRequest(format!("Illegal move: {e}"))
+            })?;
+
         let mut new_moves = moves;
         new_moves.push(move_request.chess_move.clone());
 
         let mut active: game::ActiveModel = model.into();
         active.pgn = Set(serde_json::json!(new_moves));
+        active.fen = Set(new_fen);
+        if let Some(result) = terminal_result {
+            active.result = Set(Some(result));
+        }
         active.updated_at = Set(Utc::now().into());
 
         let updated = active.update(db).await.map_err(ApiError::from)?;

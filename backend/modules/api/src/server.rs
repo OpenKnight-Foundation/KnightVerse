@@ -2,7 +2,10 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
+use crate::auth::{
+    issue_ws_ticket, login, logout, logout_all, refresh, register, resend_verification,
+    verify_email,
+};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -427,6 +430,8 @@ pub async fn main() -> std::io::Result<()> {
                     .wrap(auth_redis_limiter.clone())
                     .service(login)
                     .service(register)
+                    .service(verify_email)
+                    .service(resend_verification)
                     .service(refresh)
                     .service(issue_ws_ticket)
                     .service(logout)
@@ -510,8 +515,6 @@ pub async fn main() -> std::io::Result<()> {
             )
             // WebSocket routes
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
-            // Matchmaking routes
-            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
             .service(
                 web::scope("/v1/ai")
@@ -527,6 +530,8 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Matchmaking routes (registered after other /v1 scopes to avoid shadowing)
+            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // Engine-pool saturation is exactly what an operator needs to see
             // during an incident, so this one route stays outside the auth
             // gate and the limiters.

@@ -11,6 +11,8 @@ interface KeyboardMoveInputProps {
   isMyTurn: boolean;
   /** Optional legal-move suggestions for auto-complete (FE-52). */
   suggestions?: string[];
+  idPrefix?: string;
+  enableGlobalShortcut?: boolean;
 }
 
 const PLACEHOLDER_HINTS = [
@@ -23,12 +25,19 @@ export function KeyboardMoveInput({
   isGameActive,
   isMyTurn,
   suggestions = [],
+  idPrefix = "keyboard-move",
+  enableGlobalShortcut = true,
 }: KeyboardMoveInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputId = `${idPrefix}-input`;
+  const suggestionsId = `${idPrefix}-suggestions`;
+  const hintId = `${idPrefix}-hint`;
+  const errorId = `${idPrefix}-error`;
+  const successId = `${idPrefix}-success`;
 
   const clearFeedback = useCallback(() => {
     if (feedbackTimeoutRef.current) {
@@ -43,6 +52,7 @@ export function KeyboardMoveInput({
 
   // Global shortcut: press Enter when input is not focused to focus the input
   useEffect(() => {
+    if (!enableGlobalShortcut) return;
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       // Don't capture when typing in another input or modal
       const tag = (e.target as HTMLElement)?.tagName;
@@ -56,7 +66,7 @@ export function KeyboardMoveInput({
 
     document.addEventListener("keydown", handleGlobalKeyDown);
     return () => document.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [isGameActive, isMyTurn]);
+  }, [enableGlobalShortcut, isGameActive, isMyTurn]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -88,13 +98,13 @@ export function KeyboardMoveInput({
       aria-label="Keyboard move input"
     >
       <div className="flex items-center gap-2">
-        <label htmlFor="keyboard-move-input" className="sr-only">
+        <label htmlFor={inputId} className="sr-only">
           Enter chess move in algebraic notation
         </label>
         <div className="relative flex-1">
           <input
             ref={inputRef}
-            id="keyboard-move-input"
+            id={inputId}
             type="text"
             value={inputValue}
             onChange={(e) => {
@@ -104,11 +114,11 @@ export function KeyboardMoveInput({
             placeholder={isMyTurn ? PLACEHOLDER_HINTS[0] : "Waiting for opponent..."}
             disabled={!isMyTurn}
             autoComplete="off"
-            list={suggestions.length ? "keyboard-move-suggestions" : undefined}
+            list={suggestions.length ? suggestionsId : undefined}
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            aria-describedby="keyboard-move-hint keyboard-move-error keyboard-move-success"
+            aria-describedby={`${hintId} ${errorId} ${successId}`}
             aria-invalid={!!error}
             className="w-full px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700/50 text-white text-sm font-mono placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
           />
@@ -120,7 +130,7 @@ export function KeyboardMoveInput({
           )}
         </div>
         {suggestions.length > 0 && (
-          <datalist id="keyboard-move-suggestions">
+          <datalist id={suggestionsId}>
             {suggestions.map((s) => (
               <option key={s} value={s} />
             ))}
@@ -137,13 +147,13 @@ export function KeyboardMoveInput({
       </div>
 
       {/* Hint text */}
-      <p id="keyboard-move-hint" className="mt-1 text-xs text-gray-500" aria-hidden="true">
+      <p id={hintId} className="mt-1 text-xs text-gray-500" aria-hidden="true">
         Press <kbd className="px-1 py-0.5 rounded bg-gray-700/60 text-gray-400 text-[10px]">Enter</kbd> to focus. Type SAN notation (e.g. <span className="font-mono">e4</span>, <span className="font-mono">Nf3</span>, <span className="font-mono">O-O</span>, <span className="font-mono">Qh5#</span>).
       </p>
 
       {/* Error feedback */}
       <div
-        id="keyboard-move-error"
+        id={errorId}
         role="alert"
         aria-live="assertive"
         aria-atomic="true"
@@ -159,7 +169,7 @@ export function KeyboardMoveInput({
 
       {/* Success feedback */}
       <div
-        id="keyboard-move-success"
+        id={successId}
         role="status"
         aria-live="polite"
         aria-atomic="true"

@@ -13,11 +13,17 @@ const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     rules: {
-      // FE-130: debug traces must go through `lib/debugLogger` (a no-op in
-      // production) instead of `console.log`. `warn`/`error` still report real
-      // problems, so they stay allowed.
-      "no-console": ["error", { allow: ["warn", "error"] }],
+      // FE-169 / FE-130: Enforce no-console as an error, allowing console.error for error boundaries.
+      "no-console": ["error", { allow: ["error"] }],
     },
+  },
+  {
+    // Allow console.error in error boundaries specifically if needed, or keep standard error boundary file overrides
+    files: ["**/ErrorBoundary.tsx", "**/error.tsx"],
+    rules:
+      {
+        "no-console": ["error", { allow: ["error"] }],
+      },
   },
   {
     // Tests legitimately assert on console output and may log freely.

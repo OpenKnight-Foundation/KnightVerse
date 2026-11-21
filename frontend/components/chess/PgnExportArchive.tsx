@@ -3,7 +3,8 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/authContext";
-import { endpoints, IPFS_GATEWAY } from "@/lib/api";
+import { IPFS_GATEWAY } from "@/lib/api";
+import { apiClient } from "@/lib/api/generated";
 import { debugLog } from "@/lib/debugLogger";
 
 interface PgnArchiveResult {
@@ -82,24 +83,10 @@ export function PgnExportArchive({ gameId, pgnContent, onArchiveComplete }: PgnE
       setIsArchiving(true);
       setError(null);
 
-      const response = await fetch(endpoints.games.archivePgn(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          game_id: gameId,
-          pgn_content: pgnContent,
-        }),
+      const data = await apiClient.archivePgn({
+        body: { game_id: gameId, pgn_content: pgnContent },
+        token: accessToken,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to archive PGN");
-      }
-
-      const data = await response.json();
       setArchiveResult(data.archive_result);
 
       if (onArchiveComplete) {

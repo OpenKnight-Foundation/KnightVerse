@@ -12,8 +12,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-deadpool-redis = "0.14"
-redis = { version = "0.24", features = ["tokio-comp", "json"] }
+deadpool-redis = "0.18"
+redis = { version = "0.27", features = ["tokio-comp", "json"] }
 tracing = "0.1"
 sea-orm = { version = "1.1.0", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros"] }
 db = { path = "../db" }

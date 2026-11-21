@@ -114,9 +114,12 @@ const TOKEN_CONTRACT: Symbol = symbol_short!("TOKEN");
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN_KEY"); // BytesN<32> ED25519 backend pubkey
 const TREASURY: Symbol = symbol_short!("TREASURY"); // i128 treasury reserve
 const BALANCES: Symbol = symbol_short!("BALANCES"); // Map<Address, i128>
-const USED_NONCE: Symbol = symbol_short!("NONCES"); // Map<u64, bool>
+const PUZZLE_NONCE: Symbol = symbol_short!("PZL_NNC");
 const MAX_STAKE: Symbol = symbol_short!("MAXSTAKE");
 const MAX_PRIZE_POOL: Symbol = symbol_short!("MAXPOOL");
+const FIRST_PUZZLE_NONCE: u64 = 1;
+const PUZZLE_NONCE_TTL_THRESHOLD: u32 = 100_000;
+const PUZZLE_NONCE_TTL_EXTEND_TO: u32 = 500_000;
 
 // Maximum number of proofs accepted by a single claim_puzzle_rewards_batch call.
 // Keeps per-invocation resource usage (CPU/memory/events) bounded.
@@ -537,6 +540,27 @@ impl GameContract {
         admin_key_bytes
             .try_into()
             .map_err(|_| ContractError::NotInitialized)
+    }
+
+    fn puzzle_nonce_key(recipient: &Address) -> (Symbol, Address) {
+        (PUZZLE_NONCE, recipient.clone())
+    }
+
+    fn next_puzzle_nonce(env: &Env, recipient: &Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&Self::puzzle_nonce_key(recipient))
+            .unwrap_or(FIRST_PUZZLE_NONCE)
+    }
+
+    fn store_puzzle_nonce(env: &Env, recipient: &Address, next_nonce: u64) {
+        let key = Self::puzzle_nonce_key(recipient);
+        env.storage().persistent().set(&key, &next_nonce);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PUZZLE_NONCE_TTL_THRESHOLD,
+            PUZZLE_NONCE_TTL_EXTEND_TO,
+        );
     }
 
     /// Reentrancy guard (#860): reject a call if another guarded call is
@@ -1943,7 +1967,7 @@ impl GameContract {
     /// # Parameters
     /// - `recipient`      — Address to credit; must be the one encoded in the signature.
     /// - `reward_amount`  — Token amount to award; must be > 0 and ≤ `i64::MAX`.
-    /// - `nonce`          — Unique per-claim `u64` nonce; prevents replay attacks.
+    /// - `nonce`          — Recipient's next sequential nonce; prevents replay attacks.
     /// - `signature`      — 64-byte ED25519 signature from the backend service.
     ///
     /// # Returns
@@ -1951,7 +1975,7 @@ impl GameContract {
     ///
     /// # Errors
     /// - [`ContractError::InvalidAmount`]  — `reward_amount ≤ 0` or `> i64::MAX`.
-    /// - [`ContractError::Unauthorized`]   — `nonce` has already been used.
+    /// - [`ContractError::Unauthorized`]   — `nonce` is not the recipient's next sequential nonce.
     ///
     /// # Panics
     /// - If the ED25519 signature is invalid.
@@ -1978,13 +2002,8 @@ impl GameContract {
         let admin_pubkey = Self::admin_public_key(&env)?;
 
         // 2. Replay protection – check nonce before any state mutation
-        let mut nonces: Map<u64, bool> = env
-            .storage()
-            .instance()
-            .get(&USED_NONCE)
-            .unwrap_or(Map::new(&env));
-
-        if nonces.get(nonce).unwrap_or(false) {
+        let expected_nonce = Self::next_puzzle_nonce(&env, &recipient);
+        if nonce != expected_nonce {
             return Err(ContractError::Unauthorized);
         }
 
@@ -2016,9 +2035,8 @@ impl GameContract {
 
         Self::non_reentrant_enter(&env)?;
 
-        // 4. Mark nonce as used (state-before-interaction pattern)
-        nonces.set(nonce, true);
-        env.storage().instance().set(&USED_NONCE, &nonces);
+        // 4. Advance the recipient's nonce (state-before-interaction pattern)
+        Self::store_puzzle_nonce(&env, &recipient, nonce + 1);
 
         // 5. Deduct from Treasury
         let treasury: i128 = env.storage().instance().get(&TREASURY).unwrap_or(0);
@@ -2053,19 +2071,15 @@ impl GameContract {
     //
     // Batches multiple puzzle-reward proofs into a single transaction so a
     // player redeeming several puzzle rewards pays one base fee instead of
-    // one per claim, AND one resource-fee-bearing read/write of the
-    // nonce/balance/treasury storage entries instead of N. `claim_puzzle_reward`
-    // reads and rewrites the *entire* USED_NONCE and BALANCES maps on every
-    // call (Soroban (de)serializes a Map storage entry in full on get/set),
-    // so that cost otherwise scales linearly with batch size; here it's paid
-    // once for the whole batch. Each `Proof` is still validated exactly like
-    // a call to `claim_puzzle_reward` (same signature scheme, same replay
-    // protection) — signature verification itself is inherently per-proof
+    // one per claim, AND one storage read/write per recipient for the sequential
+    // nonce counter instead of one per proof. Each `Proof` is still validated
+    // exactly like a call to `claim_puzzle_reward` (same signature scheme, same
+    // replay protection) — signature verification itself is inherently per-proof
     // and cannot be batched.
     //
-    // Atomicity: proofs are applied in order against in-memory copies of the
-    // nonce/balance/treasury maps, which are only written back to storage
-    // once the whole batch has validated successfully. If any proof is
+    // Atomicity: proofs are applied in order against in-memory nonce counters
+    // and balance/treasury state, which are only written back to storage once
+    // the whole batch has validated successfully. If any proof is
     // invalid (bad amount, reused nonce — including duplicates within the
     // same batch — or bad signature), the function returns/panics before the
     // storage writes happen, and Soroban rolls back the entire invocation, so
@@ -2082,8 +2096,8 @@ impl GameContract {
     /// Claim multiple puzzle rewards in a single transaction.
     ///
     /// More gas-efficient than calling [`claim_puzzle_reward`] repeatedly because
-    /// the nonce, balance, and treasury storage maps are read and written only
-    /// once for the whole batch. Each [`Proof`] is validated with the same
+    /// each recipient's nonce counter is written only once and the balance and
+    /// treasury maps are read and written once for the whole batch. Each [`Proof`] is validated with the same
     /// signature scheme and replay-protection rules as the single-claim variant.
     ///
     /// **Atomicity:** all proofs are applied to in-memory state first; storage
@@ -2103,7 +2117,7 @@ impl GameContract {
     /// - [`ContractError::EmptyBatch`]    — `proofs` is empty.
     /// - [`ContractError::BatchTooLarge`] — `proofs.len() > MAX_BATCH_SIZE`.
     /// - [`ContractError::InvalidAmount`] — Any proof has `reward_amount ≤ 0` or `> i64::MAX`.
-    /// - [`ContractError::Unauthorized`]  — Any nonce is already used or duplicated within the batch.
+    /// - [`ContractError::Unauthorized`]  — Any nonce is not the recipient's next sequential nonce.
     ///
     /// # Panics
     /// - If any ED25519 signature is invalid.
@@ -2124,11 +2138,7 @@ impl GameContract {
         // 1. Load admin ED25519 public key (shared across all proofs)
         let admin_pubkey = Self::admin_public_key(&env)?;
 
-        let mut nonces: Map<u64, bool> = env
-            .storage()
-            .instance()
-            .get(&USED_NONCE)
-            .unwrap_or(Map::new(&env));
+        let mut next_nonces: Map<Address, u64> = Map::new(&env);
 
         let mut balances: Map<Address, i128> = env
             .storage()
@@ -2156,8 +2166,11 @@ impl GameContract {
             }
 
             // Replay protection — also rejects duplicate nonces within the
-            // same batch, since `nonces` is updated as we go.
-            if nonces.get(nonce).unwrap_or(false) {
+            // same batch, since `next_nonces` is updated as we go.
+            let expected_nonce = next_nonces
+                .get(recipient.clone())
+                .unwrap_or_else(|| Self::next_puzzle_nonce(&env, &recipient));
+            if nonce != expected_nonce {
                 Self::non_reentrant_exit(&env);
                 return Err(ContractError::Unauthorized);
             }
@@ -2188,7 +2201,7 @@ impl GameContract {
             }
             treasury -= reward_amount;
 
-            nonces.set(nonce, true);
+            next_nonces.set(recipient.clone(), nonce + 1);
 
             let prev_balance = balances.get(recipient.clone()).unwrap_or(0);
             balances.set(recipient.clone(), prev_balance + reward_amount);
@@ -2200,7 +2213,9 @@ impl GameContract {
         }
 
         // Commit all state changes atomically, once every proof has passed.
-        env.storage().instance().set(&USED_NONCE, &nonces);
+        for (recipient, next_nonce) in next_nonces.iter() {
+            Self::store_puzzle_nonce(&env, &recipient, next_nonce);
+        }
         env.storage().instance().set(&BALANCES, &balances);
         env.storage().instance().set(&TREASURY, &treasury);
 
@@ -4378,6 +4393,33 @@ mod tests {
         assert_eq!(client.treasury_balance(), 10_000 - reward_amount);
     }
 
+    #[test]
+    fn test_claim_many_puzzle_rewards() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 1_000_000);
+        let recipient = Address::generate(&env);
+        let reward_amount: i128 = 1;
+        let claim_count = MAX_BATCH_SIZE as u64;
+        let mut proofs: Vec<Proof> = Vec::new(&env);
+
+        for nonce in 1..=claim_count {
+            let sig = sign_payload(&env, &signing_key, &recipient, reward_amount, nonce);
+            proofs.push_back(Proof {
+                recipient: recipient.clone(),
+                reward_amount,
+                nonce,
+                signature: sig,
+            });
+        }
+
+        client.claim_puzzle_rewards_batch(&proofs);
+
+        assert_eq!(client.reward_balance(&recipient), claim_count as i128);
+        assert_eq!(client.treasury_balance(), 1_000_000 - claim_count as i128);
+    }
+
     /// Invalid signature must panic (Unauthorized / ed25519_verify panics)
     #[test]
     #[should_panic]
@@ -4403,13 +4445,34 @@ mod tests {
         let (client, signing_key) = setup(&env, 10_000);
         let recipient = Address::generate(&env);
         let reward_amount: i128 = 300;
-        let nonce: u64 = 42;
+        let nonce: u64 = 1;
 
         let sig = sign_payload(&env, &signing_key, &recipient, reward_amount, nonce);
         client.claim_puzzle_reward(&recipient, &reward_amount, &nonce, &sig);
 
         let sig2 = sign_payload(&env, &signing_key, &recipient, reward_amount, nonce);
         let result = client.try_claim_puzzle_reward(&recipient, &reward_amount, &nonce, &sig2);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_claim_puzzle_reward_out_of_order_nonce_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, signing_key) = setup(&env, 10_000);
+        let recipient = Address::generate(&env);
+        let reward_amount: i128 = 300;
+
+        let sig = sign_payload(&env, &signing_key, &recipient, reward_amount, 2);
+        let result = client.try_claim_puzzle_reward(&recipient, &reward_amount, &2, &sig);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+        let sig = sign_payload(&env, &signing_key, &recipient, reward_amount, 1);
+        client.claim_puzzle_reward(&recipient, &reward_amount, &1, &sig);
+
+        let sig = sign_payload(&env, &signing_key, &recipient, reward_amount, 3);
+        let result = client.try_claim_puzzle_reward(&recipient, &reward_amount, &3, &sig);
         assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
     }
 
@@ -4441,8 +4504,8 @@ mod tests {
         let recipient3 = Address::generate(&env);
 
         let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
-        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 2);
-        let sig3 = sign_payload(&env, &signing_key, &recipient3, 300, 3);
+        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 1);
+        let sig3 = sign_payload(&env, &signing_key, &recipient3, 300, 1);
 
         let proofs = Vec::from_array(
             &env,
@@ -4456,13 +4519,13 @@ mod tests {
                 Proof {
                     recipient: recipient2.clone(),
                     reward_amount: 200,
-                    nonce: 2,
+                    nonce: 1,
                     signature: sig2,
                 },
                 Proof {
                     recipient: recipient3.clone(),
                     reward_amount: 300,
-                    nonce: 3,
+                    nonce: 1,
                     signature: sig3,
                 },
             ],
@@ -4524,8 +4587,9 @@ mod tests {
         let recipient1 = Address::generate(&env);
         let recipient2 = Address::generate(&env);
 
-        let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 9);
-        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 9); // reused nonce
+        let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
+        let sig2 = sign_payload(&env, &signing_key, &recipient2, 200, 1);
+        let sig3 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
 
         let proofs = Vec::from_array(
             &env,
@@ -4533,14 +4597,20 @@ mod tests {
                 Proof {
                     recipient: recipient1.clone(),
                     reward_amount: 100,
-                    nonce: 9,
+                    nonce: 1,
                     signature: sig1,
                 },
                 Proof {
                     recipient: recipient2.clone(),
                     reward_amount: 200,
-                    nonce: 9,
+                    nonce: 1,
                     signature: sig2,
+                },
+                Proof {
+                    recipient: recipient1.clone(),
+                    reward_amount: 100,
+                    nonce: 1,
+                    signature: sig3,
                 },
             ],
         );
@@ -4568,7 +4638,7 @@ mod tests {
 
         let sig1 = sign_payload(&env, &signing_key, &recipient1, 100, 1);
         let wrong_key = SigningKey::generate(&mut OsRng);
-        let bad_sig = sign_payload(&env, &wrong_key, &recipient2, 200, 2);
+        let bad_sig = sign_payload(&env, &wrong_key, &recipient2, 200, 1);
 
         let proofs = Vec::from_array(
             &env,
@@ -4582,7 +4652,7 @@ mod tests {
                 Proof {
                     recipient: recipient2.clone(),
                     reward_amount: 200,
-                    nonce: 2,
+                    nonce: 1,
                     signature: bad_sig,
                 },
             ],

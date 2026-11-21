@@ -7,8 +7,9 @@ import { CONTRACT_AI_NFT } from '@/lib/api';
 import { AiNftContractClient } from '@/lib/contracts';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Sparkles, CheckCircle2, Info, X } from 'lucide-react';
+import { debugLog } from '@/lib/debugLogger';
 
-export const DEFAULT_COMPANIONS: AICompanion[] = [
+const DEFAULT_COMPANIONS: AICompanion[] = [
   { id: '101', name: 'Stockfish Titan v16', level: 42, exp: 85, tacticalStyle: 'Aggressive', winRate: 91, winStreak: 12, image: '/images/ai-1.png', priceXLM: 150 },
   { id: '102', name: 'Leela Zero Sentinel', level: 38, exp: 64, tacticalStyle: 'Defensive', winRate: 88, winStreak: 8, image: '/images/ai-2.png', priceXLM: 120 },
   { id: '103', name: 'Kasparov Gambit AI', level: 50, exp: 95, tacticalStyle: 'Tactical', winRate: 94, winStreak: 19, image: '/images/ai-3.png', priceXLM: 250 },
@@ -63,23 +64,25 @@ export default function AICompanionsPage() {
               // Non-JSON personality traits fallback
             }
 
-            if (parsedTraits.tacticalStyle && STYLES.includes(parsedTraits.tacticalStyle as any)) {
+            const metaFields = (meta ?? {}) as { name?: string; uri?: string };
+
+            if (parsedTraits.tacticalStyle && (STYLES as readonly string[]).includes(parsedTraits.tacticalStyle)) {
               style = parsedTraits.tacticalStyle;
             }
 
             loaded.push({
               id: String(i),
-              name: (meta as any)?.name ?? `AI Companion #${i}`,
+              name: metaFields.name ?? `AI Companion #${i}`,
               level: parsedTraits.level ?? 20,
               exp: 50,
               tacticalStyle: style,
               winRate: parsedTraits.winRate ?? 80,
               winStreak: 3,
-              image: (meta as any)?.uri ?? `/images/ai-${((i - 1) % 4) + 1}.png`,
+              image: metaFields.uri ?? `/images/ai-${((i - 1) % 4) + 1}.png`,
               priceXLM: 100,
             });
           } catch (e) {
-            console.warn(`Failed to load metadata for NFT #${i}:`, e);
+            debugLog(`Failed to load metadata for NFT #${i}:`, e);
           }
         }
 
@@ -88,7 +91,7 @@ export default function AICompanionsPage() {
         }
       }
     } catch (err) {
-      console.warn('Error reading from ai_nft contract, falling back to catalog:', err);
+      debugLog('Error reading from ai_nft contract, falling back to catalog:', err);
     } finally {
       setIsLoading(false);
     }
@@ -119,11 +122,11 @@ export default function AICompanionsPage() {
     if (!address) {
       try {
         await connectWallet();
-      } catch (err: any) {
+      } catch (err: unknown) {
         setNotification({
           type: 'destructive',
           title: 'Wallet Connection Required',
-          message: err?.message || 'Please connect your Freighter wallet to mint an AI Companion.',
+          message: (err instanceof Error && err.message) || 'Please connect your Freighter wallet to mint an AI Companion.',
         });
         return;
       }
@@ -146,18 +149,18 @@ export default function AICompanionsPage() {
         title: 'Mint Submitted',
         message: `AI Companion #${id} mint transaction submitted successfully! Hash: ${res?.hash ?? 'Confirmed'}`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setNotification({
         type: 'destructive',
         title: 'Mint Failed',
-        message: err?.message || 'Failed to submit mint transaction via Freighter.',
+        message: (err instanceof Error && err.message) || 'Failed to submit mint transaction via Freighter.',
       });
     } finally {
       setIsMinting(null);
     }
   };
 
-  const handleRent = (_id: string) => {
+  const handleRent = () => {
     setNotification({
       type: 'info',
       title: 'Decentralized Rental Market',

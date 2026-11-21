@@ -832,10 +832,7 @@ impl PausableContract {
 }
 
 fn sc105_admin(env: &Env) -> Address {
-    env.storage()
-        .instance()
-        .get(&DataKey::Admin)
-        .expect("admin not set")
+    admin::get(env).expect("admin not set")
 }
 
 #[cfg(test)]

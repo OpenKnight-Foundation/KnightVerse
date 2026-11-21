@@ -25,7 +25,6 @@ pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
 mod test;
-pub mod social;
 pub mod wallet_link;
 pub mod ws;
 
@@ -33,7 +32,7 @@ pub mod ws;
 extern crate challenge;
 
 // Re-export server module for external use
-pub use autb::{login, logout, logout_all, refresh, register};
+pub use auth::{login, logout, logout_all, refresh, register};
 pub use idempotency::IdempotencyMiddleware;
 pub use players::export_player_data;
 pub use server::main;

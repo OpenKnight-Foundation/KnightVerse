@@ -9,6 +9,13 @@ const spec = JSON.parse(await readFile(specPath, "utf8"));
 
 const normalize = (path) => path.replace(/\/\{[^}]*\}/g, "/*").replace(/\{[^}]*\}/g, "");
 const knownPaths = new Set(Object.keys(spec.paths ?? {}).map(normalize));
+
+// Endpoints the frontend already calls behind a preview fallback, before the
+// backend ships them. Remove an entry once the route is in openapi.json.
+const plannedPaths = [
+  "/v1/guilds/*", // guildService.fetchGuild falls back to PREVIEW_FIXTURES
+];
+for (const path of plannedPaths) knownPaths.add(path);
 const skippedDirectories = new Set(["node_modules", ".next", "dist", "coverage", "__tests__", "e2e"]);
 const violations = [];
 let checked = 0;

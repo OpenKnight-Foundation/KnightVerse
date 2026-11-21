@@ -6,8 +6,7 @@
 //! throughout a tournament.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Bytes, Env,
-    String,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
 };
 
 #[contracttype]
@@ -59,21 +58,19 @@ pub enum Error {
 
 /// Reject malformed digests and store one canonical encoding (#1557).
 fn normalize_hash(env: &Env, hash: &String) -> String {
-    let bytes = hash.to_bytes();
-    if bytes.len() != 64 {
+    if hash.len() != 64 {
         panic_with_error!(env, Error::InvalidHash);
     }
-    let mut out = Bytes::new(env);
-    for i in 0..bytes.len() {
-        let mut b = bytes.get(i).unwrap();
-        if b >= b'A' && b <= b'F' {
-            b += b'a' - b'A';
-        } else if !((b >= b'0' && b <= b'9') || (b >= b'a' && b <= b'f')) {
+    let mut buf = [0u8; 64];
+    hash.copy_into_slice(&mut buf);
+    for b in buf.iter_mut() {
+        if b.is_ascii_uppercase() && *b <= b'F' {
+            *b += b'a' - b'A';
+        } else if !b.is_ascii_hexdigit() {
             panic_with_error!(env, Error::InvalidHash);
         }
-        out.push(b);
     }
-    String::from_bytes(env, &out)
+    String::from_bytes(env, &buf)
 }
 
 fn require_admin(env: &Env, caller: &Address) {

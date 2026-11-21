@@ -17,7 +17,7 @@ export const SERIES_OPTIONS: { length: SeriesLength; label: string; payoutMultip
 ];
 
 export function parseSeriesLength(value: string | null | undefined): SeriesLength {
-  return value === "3" || value === "5" ? value : 1;
+  return value === "3" ? 3 : value === "5" ? 5 : 1;
 }
 
 export function seriesTarget(length: SeriesLength): number {

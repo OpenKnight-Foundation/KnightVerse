@@ -117,7 +117,12 @@ pub enum ContractError {
 
 /// #1568: read-only views and escrow claims stay available while paused.
 fn check_not_paused(env: &Env) -> Result<(), ContractError> {
-    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
         return Err(ContractError::ContractPaused);
     }
     Ok(())
@@ -159,7 +164,10 @@ impl YieldStakingContract {
     }
 
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// #1562: paged view instead of returning an unbounded map in one read.
@@ -218,7 +226,7 @@ impl YieldStakingContract {
     /// point prize funds at an arbitrary "pool" that was never reviewed.
     pub fn whitelist_pool(env: Env, caller: Address, pool: Address) -> Result<(), ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let mut whitelist: Map<Address, bool> = Self::whitelist(&env);
@@ -239,7 +247,7 @@ impl YieldStakingContract {
     /// unaffected — they continue to harvest and settle normally.
     pub fn unwhitelist_pool(env: Env, caller: Address, pool: Address) -> Result<(), ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let mut whitelist: Map<Address, bool> = Self::whitelist(&env);
@@ -283,7 +291,7 @@ impl YieldStakingContract {
         amount: i128,
     ) -> Result<u64, ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_not_entered(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -343,7 +351,7 @@ impl YieldStakingContract {
         amount: i128,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_not_entered(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -400,7 +408,7 @@ impl YieldStakingContract {
         allow: bool,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let (organizer, mut state) = Self::load_position(&env, pool_id)?;
@@ -450,7 +458,7 @@ impl YieldStakingContract {
     /// earning. Returns the amount harvested by this call.
     pub fn harvest_yield(env: Env, caller: Address, pool_id: u64) -> Result<i128, ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_entered(&env)?;
 
@@ -542,7 +550,7 @@ impl YieldStakingContract {
         percentages: Vec<i128>,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        Self::check_not_paused(&env)?;
+        check_not_paused(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_entered(&env)?;
         Self::validate_distribution(&winners, &percentages)?;

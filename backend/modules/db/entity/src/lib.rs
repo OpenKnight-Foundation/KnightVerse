@@ -1,5 +1,7 @@
 pub mod admin_action;
 pub mod anti_cheat_report;
+pub mod archive_job;
+pub mod failed_archive_job;
 pub mod game;
 pub mod player;
 pub mod tournament;

@@ -68,6 +68,22 @@ pub fn apply_uci_to_fen(
     Ok((new_fen, result))
 }
 
+/// The result the board itself decides: checkmate, stalemate or insufficient
+/// material. `None` while the game can still continue.
+pub fn result_from_fen(fen: &str) -> Result<Option<ResultSide>, MoveValidationError> {
+    let position = parse_position(fen)?;
+    Ok(if position.is_checkmate() {
+        Some(match position.turn() {
+            shakmaty::Color::White => ResultSide::BlackWins,
+            shakmaty::Color::Black => ResultSide::WhiteWins,
+        })
+    } else if position.is_stalemate() || position.is_insufficient_material() {
+        Some(ResultSide::Draw)
+    } else {
+        None
+    })
+}
+
 fn parse_position(fen: &str) -> Result<Chess, MoveValidationError> {
     let fen = fen
         .parse::<Fen>()

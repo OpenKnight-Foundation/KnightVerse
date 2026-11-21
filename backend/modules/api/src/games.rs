@@ -632,12 +632,10 @@ pub async fn complete_game(
         }
         r
     } else {
-        match game.result.as_ref() {
-            Some(db_entity::game::ResultSide::WhiteWins) => db_entity::game::ResultSide::WhiteWins,
-            Some(db_entity::game::ResultSide::BlackWins) => db_entity::game::ResultSide::BlackWins,
-            Some(db_entity::game::ResultSide::Draw) => db_entity::game::ResultSide::Draw,
-            Some(db_entity::game::ResultSide::Abandoned) => db_entity::game::ResultSide::Abandoned,
-            Some(db_entity::game::ResultSide::Ongoing) | None => {
+        // Players can only settle what the stored position decides.
+        match chess::result_from_fen(&game.fen) {
+            Ok(Some(result)) => result,
+            Ok(None) | Err(_) => {
                 return HttpResponse::BadRequest().json(json!({
                     "message": "Result cannot be determined from stored game state"
                 }));

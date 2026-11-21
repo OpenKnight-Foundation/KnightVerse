@@ -5,6 +5,7 @@ pub mod engine_pool;
 pub mod engine_service;
 pub mod games;
 pub mod helper;
+pub mod leaderboard;
 pub mod players;
 pub mod reporting;
 pub mod user;

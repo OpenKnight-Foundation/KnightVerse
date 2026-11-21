@@ -19,6 +19,7 @@ mod m20261022_000003_create_tournaments;
 mod m20261120_000001_create_anti_cheat_reports_table;
 mod m20261120_000001_add_player_email_verified_at;
 mod m20261120_000002_create_archive_jobs;
+mod m20261120_000003_create_password_reset_tokens;
 mod m20261201_000001_add_player_glicko_ratings;
 
 pub struct Migrator;
@@ -46,6 +47,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261120_000001_create_anti_cheat_reports_table::Migration),
             Box::new(m20261120_000001_add_player_email_verified_at::Migration),
             Box::new(m20261120_000002_create_archive_jobs::Migration),
+            Box::new(m20261120_000003_create_password_reset_tokens::Migration),
             Box::new(m20261201_000001_add_player_glicko_ratings::Migration),
         ]
     }

@@ -15,10 +15,12 @@ use crate::games::{
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
 use crate::lc0::{lc0_analyze, lc0_health};
+use crate::leaderboard::get_leaderboard;
 use crate::players::{
     add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
     put_preferences, update_player,
 };
+use crate::password_reset::{forgot_password, reset_password};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -424,6 +426,8 @@ pub async fn main() -> std::io::Result<()> {
                     .service(import_game)
                     .service(complete_game),
             )
+            // BE-158: leaderboard (public read, Redis-cached)
+            .service(web::scope("/v1/leaderboard").service(get_leaderboard))
             // Auth routes
             .service(
                 web::scope("/v1/auth")
@@ -436,7 +440,9 @@ pub async fn main() -> std::io::Result<()> {
                     .service(refresh)
                     .service(issue_ws_ticket)
                     .service(logout)
-                    .service(logout_all),
+                    .service(logout_all)
+                    .service(forgot_password)
+                    .service(reset_password),
             )
             // Tournament routes (with Idempotency protection)
             .service(

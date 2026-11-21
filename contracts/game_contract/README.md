@@ -20,6 +20,24 @@ A complete on-chain chess game contract built with Soroban SDK for Stellar block
 - **Error Handling**: Comprehensive error codes for all edge cases
 - **Gas Optimization**: Efficient storage and computation
 
+## Responsible-Play Wager Controls (SC-122)
+
+The game contract should support player-level controls for wagered games:
+
+- A player can set a daily wager cap. The contract checks the player's
+  accumulated wagers for the current daily period before accepting a new
+  wager.
+- A player can set an exclusion-until timestamp. While the exclusion is
+  active, the player cannot create or join a wagered game.
+- An increase to a player's wager cap takes effect only after the configured
+  delay.
+- Both `create_game` and `join_game` enforce the applicable cap and exclusion
+  for the acting player. A rejected wager must not alter game or escrow state.
+
+Tests for these controls should cover cap enforcement on both entry points,
+active and expired exclusions, and a cap increase both before and after its
+delay.
+
 ## Contract Structure
 
 ### Main Functions

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { useParams, useRouter } from "next/navigation";
@@ -31,6 +31,9 @@ import { useGamePreferences } from "@/context/GamePreferencesContext";
 import AICompanionHUD from "@/components/chess/AICompanionHUD";
 import { ReconnectionBanner } from "@/components/ReconnectionBanner";
 import { ConnectionStatusIndicator } from "@/components/chess/ConnectionStatusIndicator";
+import { useGameShortcuts } from "@/hook/useGameShortcuts";
+import { ShortcutsHelpDialog } from "@/components/ShortcutsHelpDialog";
+import { GameChatPanel } from "@/components/GameChatPanel";
 import {
   Sheet,
   SheetContent,
@@ -137,6 +140,11 @@ export default function PlayGameEngine({
 
   const [pendingOffer, setPendingOffer] = useState<PendingOffer | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [resignConfirmOpen, setResignConfirmOpen] = useState(false);
+  const [reviewPly, setReviewPly] = useState<number | null>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   const handledActionIdRef = useRef(0);
   const [series, setSeries] = useState(() => initialSeries(seriesLength));
   const seriesRecordedRef = useRef(false);
@@ -337,6 +345,38 @@ export default function PlayGameEngine({
     ((playerColor === "white" && game.turn() === "w") ||
       (playerColor === "black" && game.turn() === "b"));
 
+  const isReviewing = reviewPly !== null;
+
+  useEffect(() => {
+    setReviewPly(null);
+  }, [moveHistory.length]);
+
+  const displayPosition = useMemo(() => {
+    if (reviewPly === null) return position;
+    const replay = new Chess(fen);
+    for (let i = 0; i < reviewPly; i++) {
+      try {
+        if (!replay.move(moveHistory[i])) break;
+      } catch {
+        break;
+      }
+    }
+    return replay.fen();
+  }, [fen, moveHistory, position, reviewPly]);
+
+  const stepBack = useCallback(() => {
+    setReviewPly((prev) =>
+      prev === null ? Math.max(0, moveHistory.length - 1) : Math.max(0, prev - 1),
+    );
+  }, [moveHistory.length]);
+
+  const stepForward = useCallback(() => {
+    setReviewPly((prev) => {
+      if (prev === null) return null;
+      return prev >= moveHistory.length ? null : prev + 1;
+    });
+  }, [moveHistory.length]);
+
   const handleMove = useCallback(
     ({
       sourceSquare,
@@ -345,7 +385,7 @@ export default function PlayGameEngine({
       sourceSquare: string;
       targetSquare: string;
     }) => {
-      if (!isMyTurn || gameStatus !== "playing") return false;
+      if (!isMyTurn || isReviewing || gameStatus !== "playing") return false;
 
       try {
         const fenBeforeMyMove = game.fen();
@@ -389,6 +429,7 @@ export default function PlayGameEngine({
     },
     [
       isMyTurn,
+      isReviewing,
       game,
       gameStatus,
       sendMove,
@@ -401,7 +442,7 @@ export default function PlayGameEngine({
 
   const handleSanMove = useCallback(
     (san: string): boolean => {
-      if (!isMyTurn || gameStatus !== "playing") return false;
+      if (!isMyTurn || isReviewing || gameStatus !== "playing") return false;
       try {
         const fenBeforeMyMove = game.fen();
         const move = game.move(san);
@@ -439,6 +480,7 @@ export default function PlayGameEngine({
     },
     [
       isMyTurn,
+      isReviewing,
       game,
       gameStatus,
       sendMove,
@@ -497,6 +539,33 @@ export default function PlayGameEngine({
     setPendingOffer(null);
     resetCheatDetection();
   }, [sendResign, resetCheatDetection]);
+
+  const requestResign = useCallback(() => {
+    if (gameStatus === "playing") setResignConfirmOpen(true);
+  }, [gameStatus]);
+
+  const openChat = useCallback(() => {
+    setChatOpen(true);
+    requestAnimationFrame(() => chatInputRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!resignConfirmOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResignConfirmOpen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [resignConfirmOpen]);
+
+  useGameShortcuts({
+    flipBoard: handleFlipBoard,
+    stepBack,
+    stepForward,
+    openChat,
+    resign: requestResign,
+    help: () => setHelpOpen((prev) => !prev),
+  });
 
   // ── BE-170: draw / abort / takeback / rematch ─────────────────────────────
   const myColorCode = playerColor === "white" ? "w" : "b";
@@ -1001,7 +1070,7 @@ export default function PlayGameEngine({
         Flip Board
       </button>
       <button
-        onClick={handleResign}
+        onClick={requestResign}
         disabled={gameStatus !== "playing"}
         aria-label="Resign game"
         className="py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1134,7 +1203,7 @@ export default function PlayGameEngine({
               <ErrorBoundary componentName="Chessboard">
                 {preferences.boardRenderer === "3d" ? (
                   <ChessboardWebGL3D
-                    fen={position === "start" ? game.fen() : position}
+                    fen={displayPosition === "start" ? game.fen() : displayPosition}
                     interactive
                     onMove={(from, to) =>
                       handleMove({ sourceSquare: from, targetSquare: to })
@@ -1142,10 +1211,12 @@ export default function PlayGameEngine({
                   />
                 ) : (
                   <ChessboardComponent
-                    position={position}
+                    position={displayPosition}
                     onDrop={handleMove}
                     orientation={boardOrientation}
                     blindfoldMode={preferences.blindfoldMode}
+                    isMyTurn={isMyTurn && !isReviewing}
+                    premovesEnabled={!isReviewing && socketStatus === "connected"}
                   />
                 )}
               </ErrorBoundary>
@@ -1156,6 +1227,50 @@ export default function PlayGameEngine({
                 blindfoldMode={preferences.blindfoldMode}
                 onToggle={(v) => setPreference("blindfoldMode", v)}
               />
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={stepBack}
+                aria-label="Step one move back"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={stepForward}
+                aria-label="Step one move forward"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ›
+              </button>
+              {isReviewing && (
+                <button
+                  type="button"
+                  onClick={() => setReviewPly(null)}
+                  className="rounded-lg bg-blue-600/20 px-3 py-2 text-xs text-blue-300 hover:bg-blue-600/30"
+                >
+                  Back to live
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={openChat}
+                aria-label="Open game chat"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                aria-label="Keyboard shortcuts help"
+                className="rounded-lg bg-gray-800/60 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700/60"
+              >
+                ?
+              </button>
             </div>
 
             <div
@@ -1328,6 +1443,52 @@ export default function PlayGameEngine({
           extraActions={rematchControls}
           series={seriesSummary}
         />
+      )}
+
+      <ShortcutsHelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+      />
+      <GameChatPanel
+        ref={chatInputRef}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
+      {resignConfirmOpen && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="resign-confirm-title"
+        >
+          <div className="w-full max-w-sm rounded-xl border border-red-500/40 bg-gray-900 p-5 text-white shadow-2xl">
+            <h2 id="resign-confirm-title" className="text-lg font-bold text-red-300">
+              Resign this game?
+            </h2>
+            <p className="mt-2 text-sm text-gray-400">
+              Your opponent will be declared the winner.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResignConfirmOpen(false)}
+                className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResignConfirmOpen(false);
+                  handleResign();
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold hover:bg-red-500"
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -5,6 +5,9 @@ interface PremoveArrowProps {
   from: string;
   to: string;
   color: string;
+  id?: string;
+  orientation?: "white" | "black";
+  dashed?: boolean;
 }
 
 const squareToPercent = (sq: string) => {
@@ -17,12 +20,28 @@ const squareToPercent = (sq: string) => {
   };
 };
 
-const PremoveArrow: React.FC<PremoveArrowProps> = ({ from, to, color }) => {
+const PremoveArrow: React.FC<PremoveArrowProps> = ({
+  from,
+  to,
+  color,
+  id = "arrowhead",
+  orientation = "white",
+  dashed = false,
+}) => {
   const fromPos = squareToPercent(from);
   const toPos = squareToPercent(to);
+  const point = (pos: { x: number; y: number }) =>
+    orientation === "black"
+      ? { x: 100 - pos.x, y: 100 - pos.y }
+      : pos;
+  const start = point(fromPos);
+  const end = point(toPos);
+  const markerId = `arrowhead-${id}`;
 
   return (
     <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
       style={{
         position: "absolute",
         top: 0,
@@ -34,7 +53,7 @@ const PremoveArrow: React.FC<PremoveArrowProps> = ({ from, to, color }) => {
     >
       <defs>
         <marker
-          id="arrowhead"
+          id={markerId}
           markerWidth="10"
           markerHeight="7"
           refX="0"
@@ -45,13 +64,14 @@ const PremoveArrow: React.FC<PremoveArrowProps> = ({ from, to, color }) => {
         </marker>
       </defs>
       <line
-        x1={fromPos.x}
-        y1={fromPos.y}
-        x2={toPos.x}
-        y2={toPos.y}
+        x1={start.x}
+        y1={start.y}
+        x2={end.x}
+        y2={end.y}
         stroke={color}
         strokeWidth="5"
-        markerEnd="url(#arrowhead)"
+        strokeDasharray={dashed ? "6 4" : undefined}
+        markerEnd={`url(#${markerId})`}
       />
     </svg>
   );

@@ -1,0 +1,33 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:4173/",
+        "http://localhost:4173/play",
+        "http://localhost:4173/puzzles",
+        "http://localhost:4173/watch"
+      ],
+      "numberOfRuns": 1,
+      "startServerCommand": "npm run start -- --port 4173",
+      "startServerReadyPattern": "Ready in|Local:",
+      "startServerReadyTimeout": 60000,
+      "settings": {
+        "preset": "desktop",
+        "onlyCategories": ["performance", "accessibility"],
+        "maxWaitForLoad": 45000,
+        "chromeFlags": "--no-sandbox --headless=new --disable-dev-shm-usage"
+      }
+    },
+    "assert": {
+      "aggregationMethod": "median-run",
+      "assertions": {
+        "categories:performance": ["error", { "minScore": 0.7 }],
+        "categories:accessibility": ["error", { "minScore": 0.9 }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": ".lighthouse"
+    }
+  }
+}

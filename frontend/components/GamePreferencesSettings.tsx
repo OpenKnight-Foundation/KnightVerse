@@ -205,6 +205,12 @@ export default function GamePreferencesSettings() {
           onChange={(v) => setPreference("ttsOpponentMoves", v)}
           tooltip="Use text-to-speech to speak opponent moves. Volume and rate configurable below."
         />
+        <Toggle
+          label="Keyboard shortcuts"
+          checked={preferences.keyboardShortcutsEnabled}
+          onChange={(v) => setPreference("keyboardShortcutsEnabled", v)}
+          tooltip="Enable board shortcuts: F flip, arrows step, C chat, R resign, ? help."
+        />
       </div>
 
       <div className="border-t border-gray-800 pt-4 mb-4">

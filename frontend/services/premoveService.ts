@@ -8,7 +8,7 @@ export interface PreMove {
 
 export class PremoveService {
   private premoves: PreMove[] = [];
-  private readonly MAX_PREMOVES = 3;
+  private readonly MAX_PREMOVES = 1;
 
   public addPremove(from: string, to: string, piece: string): void {
     if (this.premoves.length < this.MAX_PREMOVES) {

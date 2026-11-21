@@ -212,14 +212,11 @@ async fn client_ping_is_answered_with_pong() {
     }
 }
 
-/// A `Move` sent by the client over the socket is parsed and broadcast to
-/// everyone in the game (see `WsSession`'s `StreamHandler` for
-/// `ws::Message::Text`). Because the sender is itself a member of the game's
-/// broadcast set, it receives its own move back, stamped with the server
-/// `version` field. (This previously asserted a no-op gap; the Text handler
-/// now broadcasts, so the test asserts that behavior instead.)
+/// BE-148/149: a client `Move` is never broadcast unless it was validated and
+/// persisted by `GameService`. In this test server no DB pool is registered, so
+/// the move must be rejected with an `Error` frame rather than echoed.
 #[actix_web::test]
-async fn client_sent_move_is_parsed_and_broadcast_back() {
+async fn client_sent_move_is_not_broadcast_without_persistence() {
     let (srv, _lobby) = start_ws_test_server();
     let game_id = "integration-game-echo".to_string();
     let url = srv.url(&format!("/v1/ws/game/{}", game_id)).replace("http://", "ws://");
@@ -242,11 +239,10 @@ async fn client_sent_move_is_parsed_and_broadcast_back() {
         .await
         .unwrap();
 
-    // The move is parsed and broadcast back to the sender within a short window.
     let item = tokio::time::timeout(std::time::Duration::from_secs(2), connection.next())
         .await
-        .expect("expected the client's move to be broadcast back within the timeout")
-        .expect("connection closed before receiving the broadcast")
+        .expect("expected a rejection frame within the timeout")
+        .expect("connection closed before receiving the rejection")
         .expect("WS transport error");
 
     let text = match item {
@@ -256,25 +252,9 @@ async fn client_sent_move_is_parsed_and_broadcast_back() {
 
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(value["version"], "1.0", "server-sent messages are version-stamped");
-
-    let received: WsMessage = serde_json::from_value({
-        let mut v = value.clone();
-        if let serde_json::Value::Object(ref mut m) = v {
-            m.remove("version");
-        }
-        v
-    })
-    .expect("broadcast should round-trip back into WsMessage");
-
     assert_eq!(
-        received,
-        WsMessage::Move {
-            from: "e2".into(),
-            to: "e4".into(),
-            san: "e4".into(),
-            fen: fen.into(),
-            seq: None,
-        }
+        value["type"], "Error",
+        "an unpersisted move must be rejected, never broadcast as a Move"
     );
 
     let _ = connection.close().await;

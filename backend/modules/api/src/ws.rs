@@ -150,6 +150,9 @@ pub enum WsMessage {
         result: String,
         final_fen: String,
     },
+    /// BE-151: a player resigning is a distinct action; the server settles the
+    /// game and emits `End` itself.
+    Resign,
     Error {
         code: u16,
         message: String,
@@ -560,6 +563,12 @@ pub struct WsSession {
     pub redis_sub_task: Option<SpectatorSubscription>,
     /// Out-of-order move resolution for this player (BE-135).
     pub move_order: MoveOrderGuard,
+    /// BE-148/149: server-side persistence and clock authority.
+    pub db_pool: Option<DbPool>,
+    pub white_time_ms: u64,
+    pub black_time_ms: u64,
+    pub last_move_ms: u64,
+    pub clocks_initialized: bool,
 }
 
 impl WsSession {
@@ -723,23 +732,17 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
 }
 
 impl WsSession {
-    /// Player-originated message handling. Moves/clock/end updates go out
-    /// on the fast in-process lobby path (unaffected latency for the
-    /// opponent) AND are published to Redis, fire-and-forget, so spectators
-    /// on any backend node pick them up. The Redis publish never blocks
-    /// this handler — `publish_fire_and_forget` just spawns a task.
-    fn handle_player_message(&mut self, ws_msg: WsMessage, _ctx: &mut ws::WebsocketContext<Self>) {
-        match &ws_msg {
-            // BE-135: sequenced moves go through the reorder buffer first, so
-            // a packet that overtook the one before it is held until the gap
-            // closes instead of being broadcast out of turn.
-            WsMessage::Move { san, seq, .. } => {
+    /// Player-originated message handling. Moves are validated and persisted
+    /// through `GameService` before anything is broadcast (BE-148); clocks and
+    /// end results are never trusted from clients (BE-149/BE-150).
+    fn handle_player_message(&mut self, ws_msg: WsMessage, ctx: &mut ws::WebsocketContext<Self>) {
+        match ws_msg {
+            WsMessage::Move { from, to, san, fen, seq } => {
+                // BE-135: sequenced moves go through the reorder buffer first.
                 let now_ms = now_millis();
                 let player_key = self.player_id.to_string();
-                match self.move_order.accept(&player_key, *seq, san, now_ms) {
-                    MoveDecision::Apply(_) => {
-                        self.fan_out(ws_msg);
-                    }
+                match self.move_order.accept(&player_key, seq, &san, now_ms) {
+                    MoveDecision::Apply(_) => {}
                     MoveDecision::Buffered { .. } => {
                         debug!(
                             "Move seq {:?} from {} held in reorder buffer ({} pending)",
@@ -747,9 +750,11 @@ impl WsSession {
                             self.username,
                             self.move_order.buffered(&player_key)
                         );
+                        return;
                     }
                     MoveDecision::Duplicate => {
                         debug!("Duplicate move seq {:?} from {} dropped", seq, self.username);
+                        return;
                     }
                     MoveDecision::Retransmit(missing) => {
                         warn!(
@@ -757,16 +762,137 @@ impl WsSession {
                             missing,
                             self.username
                         );
+                        return;
                     }
                 }
+
+                let Some(db_pool) = self.db_pool.clone() else {
+                    self.reject_move(ctx, "Move persistence unavailable".to_string());
+                    return;
+                };
+                let Ok(game_id) = Uuid::parse_str(&self.game_id) else {
+                    self.reject_move(ctx, "Invalid game id".to_string());
+                    return;
+                };
+                let player_id = self.player_id;
+                let username = self.username.clone();
+                let redis = self.redis.clone();
+                let game_id_str = self.game_id.clone();
+                let recipient: Recipient<WsMessage> = ctx.address().recipient();
+                let uci = format!("{from}{to}");
+                let move_at_ms = now_ms;
+
+                let fut = async move {
+                    service::games::GameService::make_move(
+                        &db_pool,
+                        game_id,
+                        player_id,
+                        dto::games::MakeMoveRequest { chess_move: uci },
+                    )
+                    .await
+                };
+                let actor_fut = actix::fut::wrap_future(fut).map(
+                    move |result, act: &mut WsSession, ctx| match result {
+                        Ok(game) => {
+                            // BE-149: derive clocks on the server from move
+                            // timestamps; client Clock frames are never used.
+                            if !act.clocks_initialized {
+                                let initial = game.time_control.max(0) as u64 * 1000;
+                                act.white_time_ms = initial;
+                                act.black_time_ms = initial;
+                                act.last_move_ms = move_at_ms;
+                                act.clocks_initialized = true;
+                            } else {
+                                let elapsed = move_at_ms.saturating_sub(act.last_move_ms);
+                                if game.white_player_id == player_id {
+                                    act.white_time_ms = act.white_time_ms.saturating_sub(elapsed);
+                                } else {
+                                    act.black_time_ms = act.black_time_ms.saturating_sub(elapsed);
+                                }
+                                act.last_move_ms = move_at_ms;
+                            }
+
+                            let authoritative = WsMessage::Move {
+                                from: from.clone(),
+                                to: to.clone(),
+                                san: san.clone(),
+                                fen: game.current_fen.clone(),
+                                seq,
+                            };
+                            act.lobby.do_send(Broadcast {
+                                game_id: game_id_str.clone(),
+                                message: authoritative.clone(),
+                            });
+                            act.redis
+                                .publish_fire_and_forget(&game_id_str, &authoritative);
+
+                            let clock = WsMessage::Clock {
+                                white: (act.white_time_ms / 1000) as u32,
+                                black: (act.black_time_ms / 1000) as u32,
+                            };
+                            act.redis.publish_fire_and_forget(&game_id_str, &clock);
+                            let _ = ctx.address().try_send(clock);
+
+                            if !matches!(game.result, dto::games::GameResult::InProgress) {
+                                act.redis.publish_fire_and_forget(
+                                    &game_id_str,
+                                    &WsMessage::End {
+                                        result: format!("{:?}", game.result),
+                                        final_fen: game.current_fen.clone(),
+                                    },
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Rejected WS move from {}: {}", username, e);
+                            let _ = recipient.do_send(WsMessage::Error {
+                                code: 400,
+                                message: format!("Illegal move: {e}"),
+                            });
+                        }
+                    },
+                );
+                ctx.spawn(actor_fut);
+            }
+            WsMessage::Resign => {
+                let Some(db_pool) = self.db_pool.clone() else {
+                    self.reject_move(ctx, "Move persistence unavailable".to_string());
+                    return;
+                };
+                let Ok(game_id) = Uuid::parse_str(&self.game_id) else {
+                    return;
+                };
+                let player_id = self.player_id;
+                let redis = self.redis.clone();
+                let game_id_str = self.game_id.clone();
+                let fut = async move {
+                    service::games::GameService::abandon_game(&db_pool, game_id, player_id).await
+                };
+                let actor_fut = actix::fut::wrap_future(fut).map(
+                    move |result, _act: &mut WsSession, _ctx| match result {
+                        Ok(game) => {
+                            redis.publish_fire_and_forget(
+                                &game_id_str,
+                                &WsMessage::End {
+                                    result: "resignation".to_string(),
+                                    final_fen: game.current_fen,
+                                },
+                            );
+                        }
+                        Err(e) => warn!("Failed to resign game {}: {}", game_id_str, e),
+                    },
+                );
+                ctx.spawn(actor_fut);
             }
             WsMessage::Clock { .. } | WsMessage::End { .. } => {
-                self.fan_out(ws_msg);
+                // BE-149/BE-150: clients never dictate clocks or results.
+                warn!("Ignoring player-supplied Clock/End frame in game {}", self.game_id);
             }
             WsMessage::Eval { .. } => {
                 // Evaluation updates are spectator-facing only; skip the
                 // player lobby entirely and go straight to Redis.
-                self.redis.publish_fire_and_forget(&self.game_id, &ws_msg);
+                self.redis
+                    .publish_fire_and_forget(&self.game_id, &ws_msg);
             }
             _ => {
                 // Chat/SpectatorCount/ReconnectToken/Error aren't expected
@@ -774,6 +900,13 @@ impl WsSession {
                 // stay tolerant of client/version skew.
             }
         }
+    }
+
+    fn reject_move(&self, ctx: &mut ws::WebsocketContext<Self>, message: String) {
+        let _ = ctx.address().try_send(WsMessage::Error {
+            code: 400,
+            message,
+        });
     }
 
     /// Publish a player event to the in-process lobby and to Redis.
@@ -926,6 +1059,7 @@ pub async fn ws_route(
     redis: web::Data<RedisBroadcaster>,
     connection_tracker: web::Data<Addr<ConnectionStateTracker>>,
     ticket_redis_pool: Option<web::Data<deadpool_redis::Pool>>,
+    db_pool: Option<web::Data<DbPool>>,
 ) -> Result<HttpResponse, Error> {
     let auth_header = req
         .headers()
@@ -1031,6 +1165,11 @@ pub async fn ws_route(
             is_spectator,
             redis_sub_task: None,
             move_order: MoveOrderGuard::new(),
+            db_pool: db_pool.map(|p| p.get_ref().clone()),
+            white_time_ms: 0,
+            black_time_ms: 0,
+            last_move_ms: 0,
+            clocks_initialized: false,
         },
         &req,
         stream,

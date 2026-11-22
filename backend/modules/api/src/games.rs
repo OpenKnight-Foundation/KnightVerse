@@ -568,20 +568,11 @@ pub async fn complete_game(
 
     let game_id = id.into_inner();
 
-    // Only a participant may settle a game: completing one writes to both
-    // players' ratings, so without this check any authenticated account could
-    // award itself rating by settling somebody else's game.
-    match db_entity::game::Entity::find_by_id(game_id)
+    let game = match db_entity::game::Entity::find_by_id(game_id)
         .one(pool.replica())
         .await
     {
-        Ok(Some(game))
-            if game.white_player == player_id || game.black_player == player_id => {}
-        Ok(Some(_)) => {
-            return HttpResponse::Forbidden().json(json!({
-                "message": "You are not a participant in this game"
-            }));
-        }
+        Ok(Some(game)) => game,
         Ok(None) => {
             return HttpResponse::NotFound().json(json!({
                 "message": "Game not found"
@@ -593,18 +584,71 @@ pub async fn complete_game(
                 "message": "Failed to load game"
             }));
         }
+    };
+
+    let is_participant = game.white_player == player_id || game.black_player == player_id;
+    let claims = req.extensions().get::<security::jwt::Claims>().cloned();
+    let is_admin = claims
+        .as_ref()
+        .map(crate::admin::is_admin)
+        .unwrap_or(false);
+
+    if !is_participant && !is_admin {
+        return HttpResponse::Forbidden().json(json!({
+            "message": "You are not a participant in this game"
+        }));
     }
 
-    let result_enum = match payload.result.as_str() {
-        "white_wins" => db_entity::game::ResultSide::WhiteWins,
-        "black_wins" => db_entity::game::ResultSide::BlackWins,
-        "draw" => db_entity::game::ResultSide::Draw,
-        "abandoned" => db_entity::game::ResultSide::Abandoned,
-        _ => {
+    fn parse_result_str(s: &str) -> Option<db_entity::game::ResultSide> {
+        match s {
+            "white_wins" => Some(db_entity::game::ResultSide::WhiteWins),
+            "black_wins" => Some(db_entity::game::ResultSide::BlackWins),
+            "draw" => Some(db_entity::game::ResultSide::Draw),
+            "abandoned" => Some(db_entity::game::ResultSide::Abandoned),
+            _ => None,
+        }
+    }
+
+    let result_enum = if is_admin {
+        let Some(r) = parse_result_str(payload.result.as_str()) else {
             return HttpResponse::BadRequest().json(json!({
                 "message": "Invalid result. Must be one of: white_wins, black_wins, draw, abandoned"
             }));
+        };
+        if let Some(c) = &claims {
+            let _ = service::admin_audit::perform_admin_action(
+                pool.get_ref(),
+                c.player_id,
+                service::admin_audit::AdminActionType::ResolveDispute,
+                game_id,
+                Some("Manual game result set by admin".to_string()),
+                serde_json::json!({
+                    "endpoint": "complete_game",
+                    "result": payload.result,
+                    "source": "admin_manual"
+                }),
+            )
+            .await;
         }
+        r
+    } else {
+        // Players can only settle what the stored position decides.
+        match chess::result_from_fen(&game.fen) {
+            Ok(Some(result)) => result,
+            Ok(None) | Err(_) => {
+                return HttpResponse::BadRequest().json(json!({
+                    "message": "Result cannot be determined from stored game state"
+                }));
+            }
+        }
+    };
+
+    let effective_result_str = match &result_enum {
+        db_entity::game::ResultSide::WhiteWins => "white_wins",
+        db_entity::game::ResultSide::BlackWins => "black_wins",
+        db_entity::game::ResultSide::Draw => "draw",
+        db_entity::game::ResultSide::Abandoned => "abandoned",
+        db_entity::game::ResultSide::Ongoing => "ongoing",
     };
 
     // An explicit K-factor keeps the legacy single-K behavior. When absent,
@@ -671,7 +715,7 @@ pub async fn complete_game(
                         game_id,
                         white: game.white_player.to_string(),
                         black: game.black_player.to_string(),
-                        result: payload.result.clone(),
+                        result: effective_result_str.to_string(),
                         // `CompleteGameRequest` does not carry the time
                         // control and the `game` row does not store it, so the
                         // archive records it as unknown rather than guessing.
@@ -692,7 +736,7 @@ pub async fn complete_game(
             HttpResponse::Ok().json(CompleteGameResponse {
                 success: true,
                 game_id,
-                result: payload.result.clone(),
+                result: effective_result_str.to_string(),
                 white_new_rating,
                 black_new_rating,
                 rating_change_white: white_change,
@@ -703,7 +747,7 @@ pub async fn complete_game(
         Err(ApiError::NotFound(_)) => HttpResponse::NotFound().json(CompleteGameResponse {
             success: false,
             game_id,
-            result: payload.result.clone(),
+            result: effective_result_str.to_string(),
             white_new_rating: white_old_rating,
             black_new_rating: black_old_rating,
             rating_change_white: 0,
@@ -713,7 +757,7 @@ pub async fn complete_game(
         Err(ApiError::BadRequest(msg)) => HttpResponse::BadRequest().json(CompleteGameResponse {
             success: false,
             game_id,
-            result: payload.result.clone(),
+            result: effective_result_str.to_string(),
             white_new_rating: white_old_rating,
             black_new_rating: black_old_rating,
             rating_change_white: 0,
@@ -725,7 +769,7 @@ pub async fn complete_game(
             HttpResponse::InternalServerError().json(CompleteGameResponse {
                 success: false,
                 game_id,
-                result: payload.result.clone(),
+                result: effective_result_str.to_string(),
                 white_new_rating: white_old_rating,
                 black_new_rating: black_old_rating,
                 rating_change_white: 0,

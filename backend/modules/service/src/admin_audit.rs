@@ -55,6 +55,8 @@ impl AdminActionType {
             AdminActionType::Unmute => "unmute",
             AdminActionType::ResolveDispute => "resolve_dispute",
             AdminActionType::FlagCheating => "flag_cheating",
+            AdminActionType::AssignReport => "assign_report",
+            AdminActionType::ResolveReport => "resolve_report",
         }
     }
 
@@ -67,6 +69,8 @@ impl AdminActionType {
             "unmute" => Some(AdminActionType::Unmute),
             "resolve_dispute" => Some(AdminActionType::ResolveDispute),
             "flag_cheating" => Some(AdminActionType::FlagCheating),
+            "assign_report" => Some(AdminActionType::AssignReport),
+            "resolve_report" => Some(AdminActionType::ResolveReport),
             _ => None,
         }
     }
@@ -287,6 +291,8 @@ mod tests {
             is_enabled: true,
             wallet_address: None,
             preferences: serde_json::json!({}),
+            email_verified_at: None,
+            glicko_ratings: serde_json::json!({}),
         }
     }
 

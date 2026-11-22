@@ -56,7 +56,7 @@ jobs:
         run: npm run build
 
       - name: Install Storybook build dependencies
-        run: npm install --no-save --no-package-lock storybook@8 @storybook/nextjs@8
+        run: npm install --no-save --no-package-lock storybook@9 @storybook/nextjs@9
 
       - name: Storybook build
         run: npm run storybook:build

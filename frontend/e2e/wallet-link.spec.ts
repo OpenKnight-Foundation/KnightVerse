@@ -16,7 +16,8 @@ function makeJwt(): string {
   const encode = (obj: Record<string, unknown>) =>
     Buffer.from(JSON.stringify(obj)).toString("base64url").replace(/=/g, "");
   return `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
-    sub: 1,
+    sub: "1",
+    user_id: 1,
     username: "tester",
     exp: Math.floor(Date.now() / 1000) + 3600,
   })}.signature`;
@@ -32,9 +33,7 @@ async function setup(
   const requests: string[] = [];
 
   await page.addInitScript(
-    ({ token, user, wallet }) => {
-      window.localStorage.setItem("access_token", token);
-      window.localStorage.setItem("user", JSON.stringify(user));
+    ({ wallet }) => {
       window.localStorage.setItem("freighter_address", wallet);
       (window as unknown as { freighterApi: unknown }).freighterApi = {
         getPublicKey: async () => wallet,
@@ -42,16 +41,24 @@ async function setup(
         signTransaction: async (xdr: string) => xdr,
       };
     },
-    {
-      token: makeJwt(),
-      user: {
-        user_id: 1,
-        username: "tester",
-        wallet_address: linked,
-      },
-      wallet: WALLET,
-    },
+    { wallet: WALLET },
   );
+
+  // The access token lives in memory only (#FE-166): sign in through the
+  // silent refresh on mount, which sends the session cookie cross-origin.
+  await page.route("**/v1/auth/refresh", (route) => {
+    const origin = route.request().headers()["origin"] ?? "*";
+    const headers = {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+    };
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers });
+    }
+    return route.fulfill({ headers, json: { access_token: makeJwt() } });
+  });
 
   await page.route("**/v1/players/me/wallet/challenge", (route) => {
     requests.push("challenge");
@@ -74,10 +81,15 @@ async function setup(
   });
 
   await page.route("**/v1/players/me/wallet", (route) => {
-    requests.push("unlink");
-    if (route.request().method() === "OPTIONS") {
+    const method = route.request().method();
+    if (method === "OPTIONS") {
       return route.fulfill({ status: 204, headers: CORS_HEADERS });
     }
+    // The settings panel loads the linked wallet after the silent restore.
+    if (method === "GET") {
+      return route.fulfill({ headers: CORS_HEADERS, json: { wallet_address: linked } });
+    }
+    requests.push("unlink");
     return route.fulfill({ headers: CORS_HEADERS, json: { success: true } });
   });
 

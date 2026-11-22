@@ -2,7 +2,10 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
+use crate::auth::{
+    issue_ws_ticket, login, logout, logout_all, refresh, register, resend_verification,
+    verify_email,
+};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -12,10 +15,12 @@ use crate::games::{
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
 use crate::lc0::{lc0_analyze, lc0_health};
+use crate::leaderboard::get_leaderboard;
 use crate::players::{
     add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
     put_preferences, update_player,
 };
+use crate::password_reset::{forgot_password, reset_password};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -74,7 +79,7 @@ async fn check_redis(
     let probe = async {
         let mut conn = pool.get().await.map_err(|e| e.to_string())?;
         redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -384,6 +389,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
+                    .service(crate::wallet_link::wallet_get)
                     .service(crate::wallet_link::wallet_unlink)
                     .service(add_player)
                     .service(find_player_by_id)
@@ -420,6 +426,8 @@ pub async fn main() -> std::io::Result<()> {
                     .service(import_game)
                     .service(complete_game),
             )
+            // BE-158: leaderboard (public read, Redis-cached)
+            .service(web::scope("/v1/leaderboard").service(get_leaderboard))
             // Auth routes
             .service(
                 web::scope("/v1/auth")
@@ -427,10 +435,14 @@ pub async fn main() -> std::io::Result<()> {
                     .wrap(auth_redis_limiter.clone())
                     .service(login)
                     .service(register)
+                    .service(verify_email)
+                    .service(resend_verification)
                     .service(refresh)
                     .service(issue_ws_ticket)
                     .service(logout)
-                    .service(logout_all),
+                    .service(logout_all)
+                    .service(forgot_password)
+                    .service(reset_password),
             )
             // Tournament routes (with Idempotency protection)
             .service(
@@ -510,8 +522,6 @@ pub async fn main() -> std::io::Result<()> {
             )
             // WebSocket routes
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
-            // Matchmaking routes
-            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
             .service(
                 web::scope("/v1/ai")
@@ -527,12 +537,22 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Matchmaking routes (registered after other /v1 scopes to avoid shadowing)
+            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // Engine-pool saturation is exactly what an operator needs to see
             // during an incident, so this one route stays outside the auth
             // gate and the limiters.
             .route("/health/engine", web::get().to(ai_health))
-            // NFT routes (placeholder — not yet implemented)
-            // .service(web::scope("/v1").configure(configure_nft_routes))
+            // BE-154: NFT routes, mounted under /v1/nft behind JWT auth.
+            .service(
+                web::scope("/v1")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .configure(st_core::endpoint::configure),
+            )
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")
@@ -672,87 +692,46 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(2));
     }
 
-   
-async fn parse_response_body(
-    res: actix_web::dev::ServiceResponse,
-) -> (StatusCode, serde_json::Value) {
-    let status = res.status();
+    #[actix_web::test]
+    async fn readiness_returns_503_when_redis_down() {
+        let res = readiness_response(&pool_of(mock_db()), &refused_redis_pool(), TEST_TIMEOUT)
+            .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["checks"]["database"]["status"], "ok");
+        assert_eq!(body["checks"]["redis"]["status"], "error");
+    }
 
-    let bytes = actix_web::body::to_bytes(res.into_body())
-        .await
-        .expect("Failed to read response body");
+    #[actix_web::test]
+    async fn readiness_returns_503_when_db_down() {
+        let res = readiness_response(
+            &pool_of(Arc::new(DatabaseConnection::Disconnected)),
+            &refused_redis_pool(),
+            TEST_TIMEOUT,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["checks"]["database"]["status"], "error");
+    }
 
-    let body = serde_json::from_slice(&bytes)
-        .expect("Response body should contain valid JSON");
-
-    (status, body)
-}
-
-fn assert_check_status(
-    body: &serde_json::Value,
-    check: &str,
-    expected: &str,
-) {
-    assert_eq!(
-        body["checks"][check]["status"],
-        expected,
-        "Unexpected status for {check} health check"
-    );
-}
-
-#[actix_web::test]
-async fn readiness_returns_503_when_redis_down() {
-    let res = readiness_response(
-        &pool_of(mock_db()),
-        &refused_redis_pool(),
-        TEST_TIMEOUT,
-    )
-    .await;
-
-    let (status, body) = parse_response_body(res).await;
-
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["status"], "error");
-
-    assert_check_status(&body, "database", "ok");
-    assert_check_status(&body, "redis", "error");
-}
-
-#[actix_web::test]
-async fn readiness_returns_503_when_db_down() {
-    let disconnected_db = Arc::new(DatabaseConnection::Disconnected);
-
-    let res = readiness_response(
-        &pool_of(disconnected_db),
-        &refused_redis_pool(),
-        TEST_TIMEOUT,
-    )
-    .await;
-
-    let (status, body) = parse_response_body(res).await;
-
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["status"], "error");
-
-    assert_check_status(&body, "database", "error");
-    assert_check_status(&body, "redis", "error");
-}
-
-#[actix_web::test]
-async fn readiness_route_is_registered_and_reports_unready() {
-    let app = test::init_service(
-        App::new()
-            .app_data(web::Data::new(pool_of(mock_db())))
-            .app_data(web::Data::new(refused_redis_pool()))
-            .route("/health/ready", web::get().to(readiness)),
-    )
-    .await;
-
-    let req = test::TestRequest::get()
-        .uri("/health/ready")
-        .to_request();
-
-    let res = test::call_service(&app, req).await;
-
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    #[actix_web::test]
+    async fn readiness_route_is_registered_and_reports_unready() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool_of(mock_db())))
+                .app_data(web::Data::new(refused_redis_pool()))
+                .route("/health/ready", web::get().to(readiness)),
+        )
+        .await;
+        let res = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/health/ready").to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

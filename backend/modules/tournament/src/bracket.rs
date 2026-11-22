@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +81,7 @@ pub enum BracketError {
     MatchNotFound,
     PlayerNotInMatch,
     MatchAlreadyCompleted,
+    InvalidParticipants,
 }
 
 impl std::fmt::Display for BracketError {
@@ -94,6 +95,9 @@ impl std::fmt::Display for BracketError {
             Self::MatchNotFound => write!(f, "Match not found"),
             Self::PlayerNotInMatch => write!(f, "Player is not a participant in this match"),
             Self::MatchAlreadyCompleted => write!(f, "Match result has already been recorded"),
+            Self::InvalidParticipants => {
+                write!(f, "Participant list contains duplicate or invalid players")
+            }
         }
     }
 }
@@ -461,6 +465,13 @@ impl BracketService {
             return Err(BracketError::NotEnoughPlayers);
         }
 
+        // A malformed roster (nil ids or duplicates) would otherwise seed the
+        // bracket with the same player twice, producing an incoherent draw.
+        let mut seen = HashSet::new();
+        if participants.iter().any(|p| p.id.is_nil() || !seen.insert(p.id)) {
+            return Err(BracketError::InvalidParticipants);
+        }
+
         // Sort by ELO descending for seeding
         participants.sort_by(|a, b| b.elo.cmp(&a.elo));
         for (i, p) in participants.iter_mut().enumerate() {
@@ -539,7 +550,7 @@ impl BracketService {
                 .matches
                 .iter_mut()
                 .find(|m| m.id == match_id)
-                .unwrap();
+                .ok_or(BracketError::MatchNotFound)?;
             m.winner_id = Some(winner_id);
             m.status = MatchStatus::Completed;
             m.completed_at = Some(Utc::now());
@@ -672,7 +683,11 @@ impl BracketService {
                     bracket.completed_at = Some(Utc::now());
                 } else {
                     // First GF match - check if losers bracket winner won
-                    let completed_match = bracket.matches.iter().find(|m| m.id == match_id).unwrap();
+                    let completed_match = bracket
+                        .matches
+                        .iter()
+                        .find(|m| m.id == match_id)
+                        .ok_or(BracketError::MatchNotFound)?;
                     let wb_champion = completed_match.player1_id;
                     
                     if wb_champion != Some(winner_id) {
@@ -737,6 +752,37 @@ mod tests {
                 seed: 0,
             })
             .collect()
+    }
+
+    #[test]
+    fn rejects_malformed_participant_lists_without_panicking() {
+        let single = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Too few",
+            make_participants(1),
+            BracketFormat::SingleElimination,
+        );
+        assert!(matches!(single, Err(BracketError::NotEnoughPlayers)));
+
+        let mut participants = make_participants(2);
+        participants[1].id = participants[0].id;
+        let duplicate = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Duplicate",
+            participants,
+            BracketFormat::SingleElimination,
+        );
+        assert!(matches!(duplicate, Err(BracketError::InvalidParticipants)));
+
+        let mut participants = make_participants(2);
+        participants[0].id = Uuid::nil();
+        let nil = BracketService::create_bracket(
+            Uuid::new_v4(),
+            "Nil id",
+            participants,
+            BracketFormat::DoubleElimination,
+        );
+        assert!(matches!(nil, Err(BracketError::InvalidParticipants)));
     }
 
     #[test]

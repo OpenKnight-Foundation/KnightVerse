@@ -7,6 +7,7 @@ pub mod chess960;
 mod auth_tests;
 pub mod config;
 pub mod games;
+pub mod leaderboard;
 // pub mod player_stats;
 // ^ #1539's rating-history/online-count module is not compiled yet: it uses
 //   sqlx with a PgPool and table names that don't exist in this schema. Port
@@ -20,12 +21,12 @@ pub mod openapi;
 pub mod pairings;
 pub mod tournaments;
 pub mod players;
+pub mod password_reset;
 pub mod rate_limiter;
 pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
 mod test;
-pub mod social;
 pub mod wallet_link;
 pub mod ws;
 
@@ -33,7 +34,7 @@ pub mod ws;
 extern crate challenge;
 
 // Re-export server module for external use
-pub use autb::{login, logout, logout_all, refresh, register};
+pub use auth::{login, logout, logout_all, refresh, register};
 pub use idempotency::IdempotencyMiddleware;
 pub use players::export_player_data;
 pub use server::main;

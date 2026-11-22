@@ -51,6 +51,7 @@ describe("useMatchmaking (#FE-98)", () => {
       elo: 1200,
       invite_address: null,
       time_control: "blitz",
+      series_length: 1,
     });
     expect(result.current.status).toBe("searching");
   });

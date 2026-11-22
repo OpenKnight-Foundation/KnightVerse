@@ -1181,7 +1181,7 @@ export default function PlayGameEngine({
             aria-label="Chess board"
           >
             <div
-              className="sticky top-0 z-20 -mx-2 mb-3 flex items-center justify-between border-b border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
+              className="sticky top-0 z-20 -mx-2 mb-3 lg:static flex items-center justify-between border-b border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
               role="status"
               aria-label="Opponent info"
             >
@@ -1292,7 +1292,7 @@ export default function PlayGameEngine({
             </div>
 
             <div
-              className="sticky bottom-0 z-20 -mx-2 mt-3 flex items-center justify-between border-t border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
+              className="sticky bottom-0 z-20 -mx-2 mt-3 lg:static flex items-center justify-between border-t border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1"
               role="status"
               aria-label="Your info"
             >

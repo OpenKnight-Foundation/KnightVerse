@@ -690,6 +690,7 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
 
     return (
       <div
+        aria-hidden="true"
         style={{
           position: "absolute",
           top: `${displayRow * 12.5}%`,
@@ -798,25 +799,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           const piece = premove.piece;
           return renderGhostPiece(piece, toSquare);
         })}
-        {/* Screen reader live region for selection announcements */}
-        <div
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {selectedSquare &&
-            (() => {
-              const [r, c] = selectedSquare.split(",").map(Number);
-              const actualR = orientation === "black" ? 7 - r : r;
-              const actualC = orientation === "black" ? 7 - c : c;
-              const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
-              const piece = displayRows[r][c];
-              return `Selected ${piece} on ${sq}. Use arrow keys to navigate, Space to move, Escape to deselect.`;
-            })()}
-        </div>
-        {displayRows.map((row, rowIndex) =>
-          row.map((piece, colIndex) => {
+        {/* Selection is announced by the live region above, outside the grid.
+            Each rank is an ARIA row; `display: contents` keeps the CSS grid. */}
+        {displayRows.map((row, rowIndex) => (
+          <div key={`rank-${rowIndex}`} role="row" style={{ display: "contents" }}>
+          {row.map((piece, colIndex) => {
             const isLight = (rowIndex + colIndex) % 2 === 1;
             const squareKey = `${rowIndex},${colIndex}`;
             const isSelected = selectedSquare === squareKey;
@@ -991,8 +978,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
 
               </div>
             );
-          }),
-        )}
+          })}
+          </div>
+        ))}
       </div>
     </div>
   );

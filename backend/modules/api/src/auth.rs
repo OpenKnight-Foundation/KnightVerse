@@ -1,12 +1,14 @@
 use actix_web::{
     cookie::{time::Duration, Cookie},
-    post, web, HttpRequest, HttpResponse,
+    post, web, HttpMessage, HttpRequest, HttpResponse,
 };
+use chrono::Utc;
 use deadpool_redis::Pool;
 use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
 
@@ -25,6 +27,193 @@ use service::helper::password;
 /// value itself is the Redis key suffix; the associated claims never reach the
 /// browser.
 pub const WS_TICKET_TTL_SECONDS: usize = 60;
+
+/// Email-verification links are valid for 24 hours (BE-160).
+const EMAIL_VERIFICATION_TTL_SECONDS: usize = 24 * 60 * 60;
+
+fn email_verification_key(token: &str) -> String {
+    format!("email_verification:{token}")
+}
+
+/// Store a fresh single-use verification token in Redis and emit the link.
+/// Delivery is logged rather than handed to an external mailer so the flow
+/// remains testable without SMTP credentials; a configured
+/// `EMAIL_VERIFICATION_BASE_URL` controls the host shown in the link.
+async fn issue_email_verification(
+    redis_pool: &Pool,
+    player_id: Uuid,
+    email: &str,
+) -> Result<String, String> {
+    let token = Uuid::new_v4().to_string();
+    let mut conn = redis_pool
+        .get()
+        .await
+        .map_err(|e| format!("Redis connection failed: {e}"))?;
+    let key = email_verification_key(&token);
+    let stored: redis::RedisResult<Option<String>> = redis::cmd("SET")
+        .arg(&key)
+        .arg(player_id.to_string())
+        .arg("EX")
+        .arg(EMAIL_VERIFICATION_TTL_SECONDS)
+        .arg("NX")
+        .query_async(&mut conn)
+        .await;
+    match stored {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err("verification token collision".to_string()),
+        Err(e) => return Err(format!("Redis SET failed: {e}")),
+    }
+
+    let base = env::var("EMAIL_VERIFICATION_BASE_URL")
+        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+    info!(
+        "Email verification link for {}: {}/verify-email?token={}",
+        email, base, token
+    );
+    Ok(token)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailRequest {
+    pub token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerificationResponse {
+    pub message: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/auth/verify-email",
+    request_body = VerifyEmailRequest,
+    responses(
+        (status = 200, description = "Email verified", body = VerificationResponse),
+        (status = 400, description = "Invalid or expired token", body = ErrorResponse)
+    ),
+    tag = "Authentication"
+)]
+#[post("/verify-email")]
+pub async fn verify_email(
+    pool: web::Data<DbPool>,
+    redis_pool: web::Data<Pool>,
+    payload: web::Json<VerifyEmailRequest>,
+) -> HttpResponse {
+    let mut conn = match redis_pool.get().await {
+        Ok(conn) => conn,
+        Err(e) => {
+            error!("Failed to acquire Redis connection for email verification: {e}");
+            return HttpResponse::ServiceUnavailable().finish();
+        }
+    };
+    let key = email_verification_key(&payload.token);
+    let player_id: Option<String> = match conn.get(&key).await {
+        Ok(value) => value,
+        Err(e) => {
+            error!("Failed to read email verification token: {e}");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+    let Some(player_id_str) = player_id else {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            message: "Invalid or expired verification token".to_string(),
+            code: "INVALID_VERIFICATION_TOKEN".to_string(),
+        });
+    };
+    let Ok(player_id) = Uuid::parse_str(&player_id_str) else {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            message: "Invalid or expired verification token".to_string(),
+            code: "INVALID_VERIFICATION_TOKEN".to_string(),
+        });
+    };
+
+    let model = match player::Entity::find_by_id(player_id).one(pool.primary()).await {
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                message: "Invalid or expired verification token".to_string(),
+                code: "INVALID_VERIFICATION_TOKEN".to_string(),
+            });
+        }
+        Err(e) => {
+            error!("Failed to load player during email verification: {e}");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    let mut active: player::ActiveModel = model.into();
+    active.email_verified_at = Set(Some(Utc::now().into()));
+    if let Err(e) = active.update(pool.primary()).await {
+        error!("Failed to persist email verification: {e}");
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    let _: redis::RedisResult<()> = conn.del(&key).await;
+    increment_auth_events("verify_email", true);
+
+    HttpResponse::Ok().json(VerificationResponse {
+        message: "Email verified successfully".to_string(),
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/auth/resend-verification",
+    responses(
+        (status = 200, description = "Verification link reissued", body = VerificationResponse),
+        (status = 401, description = "Missing or invalid access token")
+    ),
+    tag = "Authentication"
+)]
+#[post("/resend-verification")]
+pub async fn resend_verification(
+    req: HttpRequest,
+    pool: web::Data<DbPool>,
+    redis_pool: web::Data<Pool>,
+) -> HttpResponse {
+    let claims = match req.extensions().get::<security::jwt::Claims>() {
+        Some(claims) => claims.clone(),
+        None => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Missing or invalid authorization token".to_string(),
+                code: "UNAUTHORIZED".to_string(),
+            });
+        }
+    };
+
+    let model = match player::Entity::find_by_id(claims.player_id)
+        .one(pool.replica())
+        .await
+    {
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            return HttpResponse::Unauthorized().json(ErrorResponse {
+                message: "Account not found".to_string(),
+                code: "UNAUTHORIZED".to_string(),
+            });
+        }
+        Err(e) => {
+            error!("Failed to load player during verification resend: {e}");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    if model.email_verified_at.is_some() {
+        return HttpResponse::Ok().json(VerificationResponse {
+            message: "Email is already verified".to_string(),
+        });
+    }
+
+    match issue_email_verification(redis_pool.get_ref(), model.id, &model.email).await {
+        Ok(_) => HttpResponse::Ok().json(VerificationResponse {
+            message: "Verification link sent".to_string(),
+        }),
+        Err(e) => {
+            error!("Failed to issue verification token: {e}");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
 
 #[utoipa::path(
     post,
@@ -180,6 +369,7 @@ async fn is_jti_blacklisted(redis_pool: &Pool, jti: &str) -> bool {
 #[post("/register")]
 pub async fn register(
     pool: web::Data<DbPool>,
+    redis_pool: web::Data<Pool>,
     payload: web::Json<RegisterRequest>,
     jwt_service: web::Data<JwtService>,
 ) -> HttpResponse {
@@ -231,6 +421,7 @@ pub async fn register(
         flair: Set(String::new()),
         real_name: Set(username.clone()),
         is_enabled: Set(true),
+        email_verified_at: Set(None),
         ..Default::default()
     };
 
@@ -248,6 +439,12 @@ pub async fn register(
             message: "Failed to create account".to_string(),
             code: "INTERNAL_ERROR".to_string(),
         });
+    }
+
+    // BE-160: issue a single-use verification link. Delivery failing must not
+    // roll back an otherwise valid registration; the user can resend later.
+    if let Err(e) = issue_email_verification(redis_pool.get_ref(), player_id, &email).await {
+        warn!("Failed to issue email verification token for {}: {e}", email);
     }
 
     // Same identity and token flow as login from here on.

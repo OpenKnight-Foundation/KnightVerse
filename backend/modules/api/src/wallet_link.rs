@@ -16,7 +16,7 @@
 //! older Freighter releases is also accepted; both are bound to the nonce, so
 //! a signature can't be replayed for another player or challenge.
 
-use actix_web::{delete, post, web, HttpMessage, HttpRequest, HttpResponse};
+use actix_web::{delete, get, post, web, HttpMessage, HttpRequest, HttpResponse};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use db::DbPool;
 use db_entity::player;
@@ -277,6 +277,29 @@ pub async fn wallet_verify(
     HttpResponse::Ok().json(WalletLinkResponse {
         wallet_address: Some(address.to_string()),
     })
+}
+
+/// GET /v1/players/me/wallet
+///
+/// Lets the frontend re-sync the linked wallet after a silent session
+/// restore, where only the token's claims are known (#FE-166).
+#[get("/me/wallet")]
+pub async fn wallet_get(req: HttpRequest, pool: web::Data<DbPool>) -> HttpResponse {
+    let player_id = match authenticated_player(&req) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    match player::Entity::find_by_id(player_id)
+        .one(pool.replica())
+        .await
+    {
+        Ok(Some(m)) => HttpResponse::Ok().json(WalletLinkResponse {
+            wallet_address: m.wallet_address,
+        }),
+        Ok(None) => HttpResponse::NotFound().json(json!({ "message": "Player not found" })),
+        Err(_) => HttpResponse::InternalServerError()
+            .json(json!({ "message": "Failed to load wallet" })),
+    }
 }
 
 /// DELETE /v1/players/me/wallet

@@ -8,6 +8,11 @@ dotenv = "0.15.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-actix-web = "0.7"
+# BE-183: optional OTLP trace export, enabled by OTEL_EXPORTER_OTLP_ENDPOINT.
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+tracing-opentelemetry = "0.32"
 actix-web = "4"
 actix = "0.13"
 actix-web-actors = "4"
@@ -68,6 +73,7 @@ rand = "0.8"
 hex = "0.4"
 
 [dev-dependencies]
+opentelemetry_sdk = { version = "0.31", features = ["testing"] }
 tokio = { version = "1", features = ["full"] }
 actix-rt = "2.9"
 awc = "3"

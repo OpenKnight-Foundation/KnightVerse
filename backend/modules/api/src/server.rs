@@ -175,23 +175,8 @@ pub async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenv().ok();
 
-    // Initialize structured logger with JSON output in release builds
-    {
-        use tracing_subscriber::EnvFilter;
-
-        let env_filter =
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-        let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter);
-
-        #[cfg(debug_assertions)]
-        let subscriber = subscriber.pretty();
-
-        #[cfg(not(debug_assertions))]
-        let subscriber = subscriber.json();
-
-        subscriber.init();
-    }
+    // BE-183: tracing + optional OpenTelemetry OTLP export.
+    let _telemetry_guard = crate::telemetry::init_tracing();
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());

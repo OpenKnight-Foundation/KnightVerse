@@ -32,7 +32,7 @@ pub enum EngineError {
     Unknown(String),
 }
 
-/// Parameters controlling an engine search.
+/// Parameters controlling a chess engine search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GoParams {
@@ -42,17 +42,18 @@ pub struct GoParams {
     /// Maximum search duration in milliseconds.
     pub time_limit_ms: Option<u64>,
 
-    /// Restrict search to the specified UCI moves.
+    /// Restrict the search to the specified UCI moves.
     pub search_moves: Option<Vec<String>>,
 }
 
-/// Result returned after an engine search.
+/// Result returned after a chess engine search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineResult {
-    /// Best move found. None when no legal move exists.
+    /// Best move found, or `None` when no legal move exists.
     pub best_move: Option<String>,
 
     /// Position evaluation in pawns.
+    ///
     /// Positive values favor the side to move.
     pub evaluation: Option<f32>,
 
@@ -67,20 +68,14 @@ pub struct EngineResult {
 /// Common interface for chess engine implementations.
 #[async_trait]
 pub trait Engine: Send + Sync {
-    /// Starts a search using the supplied parameters.
-    async fn go(
-        &mut self,
-        params: GoParams,
-    ) -> Result<EngineResult, EngineError>;
+    /// Starts a search with the supplied parameters.
+    async fn go(&mut self, params: GoParams) -> Result<EngineResult, EngineError>;
 
     /// Stops the current search.
     async fn stop(&mut self) -> Result<(), EngineError>;
 
-    /// Sets the current board position using FEN notation.
-    async fn set_position(
-        &mut self,
-        fen: &str,
-    ) -> Result<(), EngineError>;
+    /// Sets the current board position using Forsyth–Edwards Notation (FEN).
+    async fn set_position(&mut self, fen: &str) -> Result<(), EngineError>;
 
     /// Checks whether the engine is ready to receive commands.
     async fn is_ready(&mut self) -> Result<bool, EngineError>;

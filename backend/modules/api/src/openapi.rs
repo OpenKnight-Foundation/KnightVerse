@@ -1,5 +1,6 @@
 use crate::{
-    ai, auth, chess960, games, lc0, leaderboard, pairings, password_reset, players, tournaments,
+    ai, auth, chess960, games, lc0, leaderboard, matchmaking, pairings, password_reset, players,
+    puzzles, tournaments, wallet,
 };
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::Modify;
@@ -58,6 +59,21 @@ impl Modify for SecurityAddon {
         tournaments::list_tournaments,
         tournaments::create_tournament,
         tournaments::register_for_tournament,
+
+        // Wallet linking endpoints (BE-182)
+        wallet::link_wallet,
+        wallet::get_wallet,
+        wallet::unlink_wallet,
+
+        // Matchmaking endpoints (BE-182)
+        matchmaking::join_queue,
+        matchmaking::leave_queue,
+        matchmaking::get_queue_status,
+
+        // Puzzle endpoints (BE-182)
+        puzzles::list_puzzles,
+        puzzles::get_puzzle,
+        puzzles::submit_puzzle_attempt,
 
         // AI suggestion endpoints
         ai::get_ai_suggestion,
@@ -122,6 +138,14 @@ impl Modify for SecurityAddon {
             dto::responses::NotFoundResponse,
             tournaments::CreateTournamentRequest,
             tournaments::TournamentFormat,
+
+            // Wallet schemas (BE-182)
+            dto::wallet::LinkWalletRequest,
+            dto::wallet::WalletResponse,
+
+            // Puzzle schemas (BE-182)
+            dto::puzzles::PuzzleAttemptRequest,
+            dto::puzzles::PuzzleAttemptResponse,
         )
     ),
     modifiers(&SecurityAddon),
@@ -133,6 +157,9 @@ impl Modify for SecurityAddon {
         (name = "AI", description = "AI suggestion operations"),
         (name = "Chess960", description = "Chess960 starting-position library"),
         (name = "NFT", description = "NFT minting and metadata operations"),
+        (name = "Wallet", description = "Wallet linking operations"),
+        (name = "Matchmaking", description = "Matchmaking queue operations"),
+        (name = "Puzzles", description = "Puzzle library and attempt operations"),
         (name = "WebSocket", description = "WebSocket communication protocol")
     ),
     info(

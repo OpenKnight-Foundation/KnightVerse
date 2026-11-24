@@ -20,10 +20,19 @@ import {
   SOROBAN_RPC,
   NETWORK_PASSPHRASE,
   CONTRACT_STAKING,
+  CONTRACT_YIELD_STAKING,
+  CONTRACT_GAME,
   CONTRACT_GAME_ESCROW,
   CONTRACT_AI_NFT,
+  CONTRACT_TITLE_BADGE,
 } from "@/lib/api";
-import { invokeBoundContract as invokeGeneratedBinding } from "@/contracts/client";
+import {
+  getAiNftContractId,
+  getGameContractId,
+  getTitleBadgeContractId,
+  getYieldStakingContractId,
+  invokeBoundContract as invokeGeneratedBinding,
+} from "@/contracts/client";
 import {
   InvokeContractOptions,
   TypedContractClient,
@@ -136,18 +145,25 @@ function resolveContractId(type: KnownContractType | string): string {
   switch (type.toLowerCase()) {
     case "staking":
     case "yield_staking":
-      return CONTRACT_STAKING;
+      return (
+        getYieldStakingContractId() ||
+        CONTRACT_YIELD_STAKING ||
+        CONTRACT_STAKING
+      );
     case "puzzle":
     case "puzzles":
     case "puzzle_rewards":
     case "game":
-      return CONTRACT_GAME_ESCROW;
+      return getGameContractId() || CONTRACT_GAME || CONTRACT_GAME_ESCROW;
     case "nft":
     case "ai_nft":
-      return CONTRACT_AI_NFT;
+      return getAiNftContractId() || CONTRACT_AI_NFT;
     case "escrow":
     case "arbiter_escrow":
-      return CONTRACT_GAME_ESCROW;
+      return CONTRACT_GAME_ESCROW || getGameContractId() || CONTRACT_GAME;
+    case "title":
+    case "title_badge":
+      return getTitleBadgeContractId() || CONTRACT_TITLE_BADGE;
     default:
       return "";
   }

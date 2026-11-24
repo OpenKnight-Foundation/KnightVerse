@@ -37,6 +37,8 @@ function WalletButtonPreview({ status, address }: WalletPreviewProps) {
     invokeBoundContract: async () => undefined,
     invokeSorobanContract: async () => undefined,
     getContractClient: unavailableClient,
+    networkMismatch: false,
+    refreshWalletNetwork: async () => undefined,
   };
 
   return (

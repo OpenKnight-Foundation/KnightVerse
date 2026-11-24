@@ -14,6 +14,7 @@ const knownPaths = new Set(Object.keys(spec.paths ?? {}).map(normalize));
 // backend ships them. Remove an entry once the route is in openapi.json.
 const plannedPaths = [
   "/v1/guilds/*", // guildService.fetchGuild falls back to PREVIEW_FIXTURES
+  "/v1/games/*/win-claim", // useClaimWinnings reports 404/501 as "not available yet"
 ];
 for (const path of plannedPaths) knownPaths.add(path);
 const skippedDirectories = new Set(["node_modules", ".next", "dist", "coverage", "__tests__", "e2e"]);

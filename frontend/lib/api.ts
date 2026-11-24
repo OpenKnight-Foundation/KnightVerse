@@ -232,6 +232,13 @@ export const endpoints = {
     spectate: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}?role=spectator`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
+    /**
+     * Backend-signed `claim_win` payload for a finished staked game (FE-163).
+     * The signing service itself is BE-151; until it is deployed this returns
+     * 404/501 and the claim UI hides itself.
+     */
+    winClaim: (gameId: string) =>
+      `${API_BASE}/v1/games/${encodeURIComponent(gameId)}/win-claim`,
     /** Per-move engine evaluations for a finished game (BE-179). */
     analysis: (gameId: string) =>
       `${API_BASE}/v1/games/${encodeURIComponent(gameId)}/analysis`,

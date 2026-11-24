@@ -115,6 +115,18 @@ export interface ContractCallResult {
   hash?: string;
 }
 
+/**
+ * A backend-signed win claim for `game_contract.claim_win` (FE-163).
+ *
+ * The signature is the result-signing service's ED25519 signature over
+ * `SHA256(game_id_le8 || winner_address_bytes)`.
+ */
+export interface WinClaim {
+  game_id: bigint;
+  winner: string;
+  signature: Buffer;
+}
+
 /** Soroban token amounts are 128-bit integers with 7 decimals. */
 export function toTokenAmount(units: number, decimals = 7): bigint {
   if (!Number.isFinite(units)) {
@@ -172,6 +184,53 @@ export function parsePuzzleRewardProof(value: unknown): PuzzleRewardProof | null
   }
 }
 
+/**
+ * Normalise a win-claim payload as received from the backend into the shape
+ * the generated `game_contract` client expects. Accepts the game id as a
+ * string/number/bigint and the signature as base64/hex string or byte array.
+ */
+export function normalizeWinClaim(value: unknown): WinClaim {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Win claim must be an object");
+  }
+  const raw = value as {
+    game_id?: unknown;
+    winner?: unknown;
+    signature?: unknown;
+  };
+  if (raw.game_id === undefined || raw.game_id === null || raw.game_id === "") {
+    throw new TypeError("Win claim is missing `game_id`");
+  }
+  if (typeof raw.winner !== "string" || !raw.winner) {
+    throw new TypeError("Win claim is missing `winner`");
+  }
+  const signature = toBytes(raw.signature);
+  if (signature.length !== 64) {
+    throw new TypeError(
+      `Win claim signature must be 64 bytes, received ${signature.length}`,
+    );
+  }
+  return {
+    game_id: BigInt(raw.game_id as string | number | bigint),
+    winner: raw.winner,
+    signature,
+  };
+}
+
+/**
+ * Best-effort variant of {@link normalizeWinClaim}: returns `null` (and warns)
+ * instead of throwing, for payloads straight off the wire.
+ */
+export function parseWinClaim(value: unknown): WinClaim | null {
+  if (!value) return null;
+  try {
+    return normalizeWinClaim(value);
+  } catch (err) {
+    console.warn("Ignoring malformed win claim", err);
+    return null;
+  }
+}
+
 function toBytes(value: unknown): Buffer {
   if (Buffer.isBuffer(value)) return value;
   if (value instanceof Uint8Array) return Buffer.from(value);
@@ -180,7 +239,7 @@ function toBytes(value: unknown): Buffer {
     if (value.startsWith("0x")) return Buffer.from(value.slice(2), "hex");
     return Buffer.from(value, "base64");
   }
-  throw new TypeError("Puzzle reward proof has an invalid `signature`");
+  throw new TypeError("Contract signature must be a byte array, hex or base64 string");
 }
 
 /**
@@ -203,6 +262,29 @@ export async function claimPuzzleReward(params: {
     reward_amount: BigInt(proof.reward_amount),
     nonce: BigInt(proof.nonce),
     signature: Buffer.from(proof.signature),
+  });
+  const sent = await tx.signAndSend();
+  return { hash: hashOf(sent) };
+}
+
+/**
+ * Claim a staked game's winnings on-chain via the generated game-contract
+ * client (`claim_win`, FE-163). The claim must carry the result-signing
+ * service's ED25519 signature — the contract verifies it before paying out.
+ */
+export async function claimGameWin(params: {
+  claim: WinClaim;
+  signer: ContractSigner;
+}): Promise<ContractCallResult> {
+  const { claim, signer } = params;
+  const client = createGameContractClient({
+    publicKey: signer.address,
+    signTransaction: toSdkSigner(signer),
+  });
+  const tx = await client.claim_win({
+    game_id: BigInt(claim.game_id),
+    winner: claim.winner,
+    signature: Buffer.from(claim.signature),
   });
   const sent = await tx.signAndSend();
   return { hash: hashOf(sent) };

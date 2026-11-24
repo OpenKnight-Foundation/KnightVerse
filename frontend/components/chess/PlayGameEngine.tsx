@@ -41,6 +41,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ClaimWinningsPanel } from "@/components/ClaimWinningsPanel";
+import { useClaimWinnings } from "@/hook/useClaimWinnings";
 
 const ChessboardComponent = dynamic(
   () => import("@/components/chess/ChessboardComponent"),
@@ -857,6 +859,21 @@ export default function PlayGameEngine({
     seriesRecordedRef.current = false;
   }, [game, initialMinutes, resetCheatDetection]);
 
+  // FE-163: only a won staked game has winnings to claim.
+  const claim = useClaimWinnings({
+    gameId,
+    enabled: gameSeriesResult === "win",
+  });
+
+  const claimControls = claim.isUnavailable ? null : (
+    <ClaimWinningsPanel
+      status={claim.status}
+      hash={claim.hash}
+      error={claim.error}
+      onClaim={() => void claim.claimWinnings()}
+    />
+  );
+
   const offerLabel: Record<OfferKind, string> = {
     draw: "a draw",
     takeback: "a takeback",
@@ -1101,6 +1118,7 @@ export default function PlayGameEngine({
 
   const rematchControls = (
     <div className="space-y-2">
+      {claimControls}
       {incomingOffer}
       {outgoingOffer}
       {actionNotice && (

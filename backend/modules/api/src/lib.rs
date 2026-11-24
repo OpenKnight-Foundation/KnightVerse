@@ -3,7 +3,7 @@ pub mod archive;
 pub mod ai;
 pub mod auth;
 pub mod chess960;
-#[kgtest]
+#[cfg(test)]
 mod auth_tests;
 pub mod config;
 pub mod games;

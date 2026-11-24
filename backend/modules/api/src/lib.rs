@@ -26,6 +26,7 @@ pub mod rate_limiter;
 pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
+pub mod telemetry;
 mod test;
 pub mod wallet_link;
 pub mod ws;

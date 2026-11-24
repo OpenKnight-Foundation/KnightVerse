@@ -103,11 +103,11 @@ pub mod db {
         ///
         /// `replica_url = None` activates single-node (fallback) mode.
         pub async fn connect(primary_url: &str, replica_url: Option<&str>) -> Self {
-            let primary = Arc::new(
+            let primary = Arc::new(Self::instrument(
                 Database::connect(Self::options(primary_url))
                     .await
                     .unwrap_or_else(|e| panic!("Failed to connect to primary DB: {e}")),
-            );
+            ));
             info!("Connected to primary database");
 
             // Initialise primary pool metrics ceiling from the pool config.
@@ -123,7 +123,7 @@ pub mod db {
                             Self::options(url).get_max_connections().unwrap_or(20) as i64;
                         POOL_MAX.with_label_values(&["replica"]).set(replica_max);
                         info!("Connected to replica database");
-                        (Arc::new(conn), true)
+                        (Arc::new(Self::instrument(conn)), true)
                     }
                     Err(e) => {
                         warn!("Failed to connect to replica DB ({e}); falling back to primary");
@@ -244,6 +244,12 @@ pub mod db {
         // ------------------------------------------------------------------
         // Internals
         // ------------------------------------------------------------------
+
+        /// Emit an OpenTelemetry client span for every statement (BE-183).
+        fn instrument(mut conn: DatabaseConnection) -> DatabaseConnection {
+            conn.set_metric_callback(crate::tracing_spans::record_query_span);
+            conn
+        }
 
         fn options(url: &str) -> ConnectOptions {
             let mut opts = ConnectOptions::new(url.to_owned());

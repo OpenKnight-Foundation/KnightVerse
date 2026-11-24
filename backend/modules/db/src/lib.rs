@@ -6,6 +6,7 @@
 //! single-node mode.
 
 pub mod db;
+pub mod tracing_spans;
 
 /// Convenience re-export so downstream crates can write `db::DbPool`.
 pub use db::db::DbPool;

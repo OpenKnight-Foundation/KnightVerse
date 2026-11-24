@@ -10,7 +10,7 @@ import { useTransactionContext } from "@/context/transactionContext";
  * CPU-efficient: re-renders only when wallet context values change.
  */
 export function Web3StatusBar() {
-  const { address, status } = useAppContext();
+  const { address, status, networkMismatch, walletNetwork } = useAppContext();
   const { activeCount } = useTransactionContext();
 
   const statusConfig: Record<
@@ -53,6 +53,17 @@ export function Web3StatusBar() {
         <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${cfg.dot}`} aria-hidden="true" />
       </span>
       <span className={`relative ${cfg.color} font-semibold tracking-wide drop-shadow-sm`}>{cfg.label}</span>
+      {networkMismatch && (
+        <>
+          <span className="relative text-gray-600">|</span>
+          <span
+            className="relative font-semibold text-amber-300 text-xs"
+            title={`Freighter is on ${walletNetwork ?? "another network"}; KnightVerse needs the configured network.`}
+          >
+            Wrong network
+          </span>
+        </>
+      )}
       {address && (
         <>
           <span className="relative text-gray-600">|</span>

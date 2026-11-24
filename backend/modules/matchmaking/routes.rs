@@ -1,11 +1,34 @@
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
+use db::DbPool;
+use db_entity::player;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use uuid::Uuid;
 
 use super::models::*;
 use super::service::MatchmakingService;
+
+const EMAIL_NOT_VERIFIED: &str = "email_not_verified";
+
+/// BE-160: rated and staked queues require a verified email so throwaway
+/// accounts cannot be used for rating manipulation.
+async fn email_is_verified(pool: &DbPool, wallet_address: &str) -> Result<bool, String> {
+    let model = player::Entity::find()
+        .filter(player::Column::WalletAddress.eq(wallet_address))
+        .one(pool.replica())
+        .await
+        .map_err(|e| format!("Failed to look up player: {e}"))?;
+    Ok(model.and_then(|p| p.email_verified_at).is_some())
+}
+
+fn unverified_response() -> HttpResponse {
+    HttpResponse::Forbidden().json(ErrorResponse {
+        status: "error".to_string(),
+        error: EMAIL_NOT_VERIFIED.to_string(),
+    })
+}
 
 #[derive(Debug, Deserialize)]
 pub struct JoinCasualQueueRequest {
@@ -115,8 +138,21 @@ async fn join_casual_queue(
 
 async fn join_rated_free_queue(
     service: web::Data<MatchmakingService>,
+    pool: web::Data<DbPool>,
     req: web::Json<JoinRatedFreeQueueRequest>,
 ) -> impl Responder {
+    match email_is_verified(pool.get_ref(), &req.wallet_address).await {
+        Ok(true) => {}
+        Ok(false) => return unverified_response(),
+        Err(e) => {
+            error!("Email verification lookup failed: {e}");
+            return HttpResponse::ServiceUnavailable().json(ErrorResponse {
+                status: "error".to_string(),
+                error: "internal_error".to_string(),
+            });
+        }
+    }
+
     let request_id = Uuid::new_v4();
 
     let player = Player {
@@ -149,8 +185,21 @@ async fn join_rated_free_queue(
 
 async fn join_rated_staked_queue(
     service: web::Data<MatchmakingService>,
+    pool: web::Data<DbPool>,
     req: web::Json<JoinRatedStakedQueueRequest>,
 ) -> impl Responder {
+    match email_is_verified(pool.get_ref(), &req.wallet_address).await {
+        Ok(true) => {}
+        Ok(false) => return unverified_response(),
+        Err(e) => {
+            error!("Email verification lookup failed: {e}");
+            return HttpResponse::ServiceUnavailable().json(ErrorResponse {
+                status: "error".to_string(),
+                error: "internal_error".to_string(),
+            });
+        }
+    }
+
     let request_id = Uuid::new_v4();
 
     let player = Player {

@@ -1,8 +1,9 @@
 #![no_std]
 
+use common::{admin, pause, ttl};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
-    Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
+    Address, Env, Symbol, Vec,
 };
 
 /// Structured error codes for SponsorshipEscrowContract.
@@ -122,8 +123,6 @@ pub struct Tournament {
 /// Storage data keys for the contract.
 #[contracttype]
 pub enum DataKey {
-    Admin,
-    Paused,
     Tournament(u64),
     MilestoneInput(u64, u32),
     MilestoneState(u64, u32),
@@ -136,8 +135,6 @@ pub enum DataKey {
 }
 
 pub const TOTAL_BASIS_POINTS: u32 = 10000;
-const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
-const PERSISTENT_TTL_EXTEND_TO: u32 = 500_000;
 
 #[contract]
 pub struct SponsorshipEscrowContract;
@@ -146,12 +143,8 @@ pub struct SponsorshipEscrowContract;
 impl SponsorshipEscrowContract {
     /// Initialize the contract with a designated admin address.
     pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic_with_error!(&env, EscrowError::AlreadyInitialized);
-        }
-
-        env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Paused, &false);
+        admin::initialize(&env, &admin, EscrowError::AlreadyInitialized);
+        pause::initialize(&env);
     }
 
     // =========================================================================
@@ -160,38 +153,29 @@ impl SponsorshipEscrowContract {
 
     /// Pause the contract, blocking state-changing escrow operations.
     pub fn pause(env: Env, caller: Address) {
-        caller.require_auth();
-        Self::check_admin(&env, &caller);
-
-        if Self::is_paused(&env) {
-            panic_with_error!(&env, EscrowError::AlreadyPaused);
-        }
-
-        env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((symbol_short!("paused"),), caller);
+        pause::pause(
+            &env,
+            &caller,
+            EscrowError::Unauthorized,
+            EscrowError::AlreadyPaused,
+        );
     }
 
     /// Unpause the contract, restoring normal operations.
     pub fn unpause(env: Env, caller: Address) {
-        caller.require_auth();
-        Self::check_admin(&env, &caller);
-
-        if !Self::is_paused(&env) {
-            panic_with_error!(&env, EscrowError::NotPaused);
-        }
-
-        env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("unpaused"),), caller);
+        pause::unpause(
+            &env,
+            &caller,
+            EscrowError::Unauthorized,
+            EscrowError::NotPaused,
+        );
     }
 
     /// Transfer contract admin role.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
-        current_admin.require_auth();
-        Self::check_admin(&env, &current_admin);
-
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
-        env.events()
-            .publish((symbol_short!("adm_xfer"),), new_admin);
+        admin::require_admin(&env, &current_admin, EscrowError::Unauthorized);
+        admin::set(&env, &new_admin);
+        common::events::admin_transfer_accepted(&env, &new_admin);
     }
 
     /// Update tournament oracle address before tournament completion.
@@ -202,10 +186,10 @@ impl SponsorshipEscrowContract {
         new_oracle: Address,
     ) {
         caller.require_auth();
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, EscrowError::ContractPaused);
 
         let mut tournament = Self::get_tournament_internal(&env, tournament_id);
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = admin::get(&env).expect("Contract not initialized");
 
         if caller != tournament.organizer && caller != admin {
             panic_with_error!(&env, EscrowError::Unauthorized);
@@ -218,7 +202,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.oracle = new_oracle.clone();
-        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
+        ttl::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events().publish(
             (symbol_short!("set_orc"), tournament_id),
@@ -245,10 +229,10 @@ impl SponsorshipEscrowContract {
         milestones: Vec<MilestoneInput>,
     ) {
         organizer.require_auth();
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, EscrowError::ContractPaused);
 
         let tourn_key = DataKey::Tournament(tournament_id);
-        if Self::has_persistent(&env, &tourn_key) {
+        if ttl::has_persistent(&env, &tourn_key) {
             panic_with_error!(&env, EscrowError::TournamentAlreadyExists);
         }
 
@@ -268,7 +252,7 @@ impl SponsorshipEscrowContract {
                 .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidBasisPointsSum));
 
             // Store milestone config & initial state
-            Self::set_persistent(&env, &DataKey::MilestoneInput(tournament_id, i), &m);
+            ttl::set_persistent(&env, &DataKey::MilestoneInput(tournament_id, i), &m);
 
             let initial_state = MilestoneState {
                 stage_id: m.stage_id,
@@ -278,7 +262,7 @@ impl SponsorshipEscrowContract {
                 completed: false,
                 disbursed_ledger: 0,
             };
-            Self::set_persistent(
+            ttl::set_persistent(
                 &env,
                 &DataKey::MilestoneState(tournament_id, i),
                 &initial_state,
@@ -300,17 +284,17 @@ impl SponsorshipEscrowContract {
             kickoff_deadline,
         };
 
-        Self::set_persistent(&env, &tourn_key, &tournament);
+        ttl::set_persistent(&env, &tourn_key, &tournament);
 
         let empty_tokens: Vec<Address> = Vec::new(&env);
-        Self::set_persistent(
+        ttl::set_persistent(
             &env,
             &DataKey::TournamentTokens(tournament_id),
             &empty_tokens,
         );
 
         let empty_sponsors: Vec<Address> = Vec::new(&env);
-        Self::set_persistent(
+        ttl::set_persistent(
             &env,
             &DataKey::TournamentSponsors(tournament_id),
             &empty_sponsors,
@@ -386,7 +370,7 @@ impl SponsorshipEscrowContract {
         amount: i128,
     ) {
         sponsor.require_auth();
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, EscrowError::ContractPaused);
 
         if amount <= 0 {
             panic_with_error!(&env, EscrowError::InvalidAmount);
@@ -403,32 +387,32 @@ impl SponsorshipEscrowContract {
 
         // Update total deposited for this token
         let total_key = DataKey::TotalDeposited(tournament_id, token.clone());
-        let current_total: i128 = Self::get_persistent(&env, &total_key).unwrap_or(0);
+        let current_total: i128 = ttl::get_persistent(&env, &total_key).unwrap_or(0);
         let new_total = current_total
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        Self::set_persistent(&env, &total_key, &new_total);
+        ttl::set_persistent(&env, &total_key, &new_total);
 
         // Update remaining balance for this token
         let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-        let current_rem: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
+        let current_rem: i128 = ttl::get_persistent(&env, &rem_key).unwrap_or(0);
         let new_rem = current_rem
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        Self::set_persistent(&env, &rem_key, &new_rem);
+        ttl::set_persistent(&env, &rem_key, &new_rem);
 
         // Update sponsor's individual deposit for this token
         let sponsor_key = DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-        let current_sponsor_dep: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
+        let current_sponsor_dep: i128 = ttl::get_persistent(&env, &sponsor_key).unwrap_or(0);
         let new_sponsor_dep = current_sponsor_dep
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::InvalidAmount));
-        Self::set_persistent(&env, &sponsor_key, &new_sponsor_dep);
+        ttl::set_persistent(&env, &sponsor_key, &new_sponsor_dep);
 
         // Record token in tournament's token list if not present
         let tokens_key = DataKey::TournamentTokens(tournament_id);
         let mut tokens: Vec<Address> =
-            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
+            ttl::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let mut token_found = false;
         for i in 0..tokens.len() {
@@ -439,13 +423,13 @@ impl SponsorshipEscrowContract {
         }
         if !token_found {
             tokens.push_back(token.clone());
-            Self::set_persistent(&env, &tokens_key, &tokens);
+            ttl::set_persistent(&env, &tokens_key, &tokens);
         }
 
         // Record sponsor in tournament's sponsors list if not present
         let sponsors_key = DataKey::TournamentSponsors(tournament_id);
         let mut sponsors: Vec<Address> =
-            Self::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
+            ttl::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
 
         let mut sponsor_found = false;
         for i in 0..sponsors.len() {
@@ -456,7 +440,7 @@ impl SponsorshipEscrowContract {
         }
         if !sponsor_found {
             sponsors.push_back(sponsor.clone());
-            Self::set_persistent(&env, &sponsors_key, &sponsors);
+            ttl::set_persistent(&env, &sponsors_key, &sponsors);
         }
 
         // Emit deposit event
@@ -486,7 +470,7 @@ impl SponsorshipEscrowContract {
         stage_index: u32,
         override_recipient: Option<Address>,
     ) {
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, EscrowError::ContractPaused);
 
         let mut tournament = Self::get_tournament_internal(&env, tournament_id);
         tournament.oracle.require_auth();
@@ -506,7 +490,7 @@ impl SponsorshipEscrowContract {
         }
 
         let milestone_state_key = DataKey::MilestoneState(tournament_id, stage_index);
-        let mut milestone_state: MilestoneState = Self::get_persistent(&env, &milestone_state_key)
+        let mut milestone_state: MilestoneState = ttl::get_persistent(&env, &milestone_state_key)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::MilestoneNotFound));
 
         if milestone_state.completed {
@@ -533,18 +517,17 @@ impl SponsorshipEscrowContract {
 
         // Execute disbursements across all deposited tokens
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> =
-            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> = ttl::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let is_last_stage = (stage_index + 1) == tournament.total_milestones;
 
         for i in 0..tokens.len() {
             let token = tokens.get(i).unwrap();
             let total_dep_key = DataKey::TotalDeposited(tournament_id, token.clone());
-            let total_dep: i128 = Self::get_persistent(&env, &total_dep_key).unwrap_or(0);
+            let total_dep: i128 = ttl::get_persistent(&env, &total_dep_key).unwrap_or(0);
 
             let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-            let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
+            let rem_balance: i128 = ttl::get_persistent(&env, &rem_key).unwrap_or(0);
 
             let payout_amount = if is_last_stage {
                 // Disburse full remaining balance on final stage (guarantees zero leftover dust)
@@ -564,11 +547,11 @@ impl SponsorshipEscrowContract {
 
                 // Update remaining balance & total disbursed
                 let new_rem = rem_balance - payout_amount;
-                Self::set_persistent(&env, &rem_key, &new_rem);
+                ttl::set_persistent(&env, &rem_key, &new_rem);
 
                 let disb_key = DataKey::TotalDisbursed(tournament_id, token.clone());
-                let total_disb: i128 = Self::get_persistent(&env, &disb_key).unwrap_or(0);
-                Self::set_persistent(&env, &disb_key, &(total_disb + payout_amount));
+                let total_disb: i128 = ttl::get_persistent(&env, &disb_key).unwrap_or(0);
+                ttl::set_persistent(&env, &disb_key, &(total_disb + payout_amount));
 
                 // Transfer tokens to the verified recipient
                 let token_client = token::Client::new(&env, &token);
@@ -585,7 +568,7 @@ impl SponsorshipEscrowContract {
         milestone_state.completed = true;
         milestone_state.recipient = Some(recipient.clone());
         milestone_state.disbursed_ledger = env.ledger().sequence() as u64;
-        Self::set_persistent(&env, &milestone_state_key, &milestone_state);
+        ttl::set_persistent(&env, &milestone_state_key, &milestone_state);
 
         // Advance tournament stage
         tournament.current_stage_index = stage_index + 1;
@@ -596,7 +579,7 @@ impl SponsorshipEscrowContract {
         }
 
         // Save updated tournament
-        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
+        ttl::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events().publish(
             (symbol_short!("stg_done"), tournament_id, stage_index),
@@ -616,7 +599,7 @@ impl SponsorshipEscrowContract {
         caller.require_auth();
 
         let mut tournament = Self::get_tournament_internal(&env, tournament_id);
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = admin::get(&env).expect("Contract not initialized");
 
         if caller != tournament.organizer && caller != admin && caller != tournament.oracle {
             panic_with_error!(&env, EscrowError::Unauthorized);
@@ -629,7 +612,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
+        ttl::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events()
             .publish((symbol_short!("cancel"), tournament_id), caller);
@@ -653,7 +636,7 @@ impl SponsorshipEscrowContract {
         }
 
         tournament.status = TournamentStatus::Cancelled;
-        Self::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
+        ttl::set_persistent(&env, &DataKey::Tournament(tournament_id), &tournament);
 
         env.events()
             .publish((symbol_short!("timeout"), tournament_id), caller);
@@ -669,8 +652,7 @@ impl SponsorshipEscrowContract {
         }
 
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> =
-            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> = ttl::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         let mut total_refunded_any = false;
 
@@ -678,19 +660,19 @@ impl SponsorshipEscrowContract {
             let token = tokens.get(i).unwrap();
             let sponsor_key =
                 DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-            let deposit_amount: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
+            let deposit_amount: i128 = ttl::get_persistent(&env, &sponsor_key).unwrap_or(0);
 
             if deposit_amount > 0 {
                 total_refunded_any = true;
 
                 // Reset sponsor's recorded deposit to prevent double refunds
-                Self::set_persistent(&env, &sponsor_key, &0i128);
+                ttl::set_persistent(&env, &sponsor_key, &0i128);
 
                 // Decrement remaining balance
                 let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-                let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
+                let rem_balance: i128 = ttl::get_persistent(&env, &rem_key).unwrap_or(0);
                 let new_rem = rem_balance.saturating_sub(deposit_amount);
-                Self::set_persistent(&env, &rem_key, &new_rem);
+                ttl::set_persistent(&env, &rem_key, &new_rem);
 
                 // Transfer tokens back to sponsor
                 let token_client = token::Client::new(&env, &token);
@@ -710,8 +692,7 @@ impl SponsorshipEscrowContract {
 
     /// Admin emergency batch refund for all sponsors in a cancelled tournament.
     pub fn admin_refund_all_sponsors(env: Env, tournament_id: u64, admin: Address) {
-        admin.require_auth();
-        Self::check_admin(&env, &admin);
+        admin::require_admin(&env, &admin, EscrowError::Unauthorized);
 
         let tournament = Self::get_tournament_internal(&env, tournament_id);
         if tournament.status != TournamentStatus::Cancelled {
@@ -720,11 +701,10 @@ impl SponsorshipEscrowContract {
 
         let sponsors_key = DataKey::TournamentSponsors(tournament_id);
         let sponsors: Vec<Address> =
-            Self::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
+            ttl::get_persistent(&env, &sponsors_key).unwrap_or(Vec::new(&env));
 
         let tokens_key = DataKey::TournamentTokens(tournament_id);
-        let tokens: Vec<Address> =
-            Self::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
+        let tokens: Vec<Address> = ttl::get_persistent(&env, &tokens_key).unwrap_or(Vec::new(&env));
 
         for s_idx in 0..sponsors.len() {
             let sponsor = sponsors.get(s_idx).unwrap();
@@ -733,15 +713,15 @@ impl SponsorshipEscrowContract {
                 let token = tokens.get(t_idx).unwrap();
                 let sponsor_key =
                     DataKey::SponsorDeposit(tournament_id, sponsor.clone(), token.clone());
-                let deposit_amount: i128 = Self::get_persistent(&env, &sponsor_key).unwrap_or(0);
+                let deposit_amount: i128 = ttl::get_persistent(&env, &sponsor_key).unwrap_or(0);
 
                 if deposit_amount > 0 {
-                    Self::set_persistent(&env, &sponsor_key, &0i128);
+                    ttl::set_persistent(&env, &sponsor_key, &0i128);
 
                     let rem_key = DataKey::RemainingBalance(tournament_id, token.clone());
-                    let rem_balance: i128 = Self::get_persistent(&env, &rem_key).unwrap_or(0);
+                    let rem_balance: i128 = ttl::get_persistent(&env, &rem_key).unwrap_or(0);
                     let new_rem = rem_balance.saturating_sub(deposit_amount);
-                    Self::set_persistent(&env, &rem_key, &new_rem);
+                    ttl::set_persistent(&env, &rem_key, &new_rem);
 
                     let token_client = token::Client::new(&env, &token);
                     token_client.transfer(
@@ -765,7 +745,7 @@ impl SponsorshipEscrowContract {
 
     /// Get tournament details.
     pub fn get_tournament(env: Env, tournament_id: u64) -> Option<Tournament> {
-        Self::get_persistent(&env, &DataKey::Tournament(tournament_id))
+        ttl::get_persistent(&env, &DataKey::Tournament(tournament_id))
     }
 
     /// Get milestone configuration for a stage index.
@@ -774,7 +754,7 @@ impl SponsorshipEscrowContract {
         tournament_id: u64,
         stage_index: u32,
     ) -> Option<MilestoneInput> {
-        Self::get_persistent(&env, &DataKey::MilestoneInput(tournament_id, stage_index))
+        ttl::get_persistent(&env, &DataKey::MilestoneInput(tournament_id, stage_index))
     }
 
     /// Get milestone runtime state for a stage index.
@@ -783,7 +763,7 @@ impl SponsorshipEscrowContract {
         tournament_id: u64,
         stage_index: u32,
     ) -> Option<MilestoneState> {
-        Self::get_persistent(&env, &DataKey::MilestoneState(tournament_id, stage_index))
+        ttl::get_persistent(&env, &DataKey::MilestoneState(tournament_id, stage_index))
     }
 
     /// Get all milestone states for a tournament.
@@ -802,17 +782,17 @@ impl SponsorshipEscrowContract {
 
     /// Get total deposited amount for a tournament in a specific token.
     pub fn get_total_deposited(env: Env, tournament_id: u64, token: Address) -> i128 {
-        Self::get_persistent(&env, &DataKey::TotalDeposited(tournament_id, token)).unwrap_or(0)
+        ttl::get_persistent(&env, &DataKey::TotalDeposited(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get remaining undistributed balance for a tournament in a specific token.
     pub fn get_remaining_balance(env: Env, tournament_id: u64, token: Address) -> i128 {
-        Self::get_persistent(&env, &DataKey::RemainingBalance(tournament_id, token)).unwrap_or(0)
+        ttl::get_persistent(&env, &DataKey::RemainingBalance(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get total disbursed amount for a tournament in a specific token.
     pub fn get_total_disbursed(env: Env, tournament_id: u64, token: Address) -> i128 {
-        Self::get_persistent(&env, &DataKey::TotalDisbursed(tournament_id, token)).unwrap_or(0)
+        ttl::get_persistent(&env, &DataKey::TotalDisbursed(tournament_id, token)).unwrap_or(0)
     }
 
     /// Get a sponsor's recorded deposit for a tournament in a specific token.
@@ -822,7 +802,7 @@ impl SponsorshipEscrowContract {
         sponsor: Address,
         token: Address,
     ) -> i128 {
-        Self::get_persistent(
+        ttl::get_persistent(
             &env,
             &DataKey::SponsorDeposit(tournament_id, sponsor, token),
         )
@@ -831,101 +811,75 @@ impl SponsorshipEscrowContract {
 
     /// Get all distinct token addresses deposited into a tournament.
     pub fn get_tournament_tokens(env: Env, tournament_id: u64) -> Vec<Address> {
-        Self::get_persistent(&env, &DataKey::TournamentTokens(tournament_id))
+        ttl::get_persistent(&env, &DataKey::TournamentTokens(tournament_id))
             .unwrap_or(Vec::new(&env))
     }
 
     /// Get all distinct sponsors who deposited into a tournament.
     pub fn get_tournament_sponsors(env: Env, tournament_id: u64) -> Vec<Address> {
-        Self::get_persistent(&env, &DataKey::TournamentSponsors(tournament_id))
+        ttl::get_persistent(&env, &DataKey::TournamentSponsors(tournament_id))
             .unwrap_or(Vec::new(&env))
     }
 
     /// Get the contract admin address.
     pub fn get_admin(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Contract not initialized")
+        admin::get(&env).expect("Contract not initialized")
     }
 
     /// Get current paused status.
     pub fn is_contract_paused(env: Env) -> bool {
-        Self::is_paused(&env)
+        pause::is_paused(&env)
     }
 
     // =========================================================================
     // INTERNAL HELPERS
     // =========================================================================
 
-    fn is_paused(env: &Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false)
-    }
-
-    fn check_not_paused(env: &Env) {
-        if Self::is_paused(env) {
-            panic_with_error!(env, EscrowError::ContractPaused);
-        }
-    }
-
-    fn check_admin(env: &Env, caller: &Address) {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Contract not initialized");
-        if admin != *caller {
-            panic_with_error!(env, EscrowError::Unauthorized);
-        }
-    }
-
     fn get_tournament_internal(env: &Env, tournament_id: u64) -> Tournament {
-        Self::get_persistent(env, &DataKey::Tournament(tournament_id))
+        ttl::get_persistent(env, &DataKey::Tournament(tournament_id))
             .unwrap_or_else(|| panic_with_error!(env, EscrowError::TournamentNotFound))
-    }
-
-    fn get_persistent<T>(env: &Env, key: &DataKey) -> Option<T>
-    where
-        T: TryFromVal<Env, Val>,
-    {
-        let value = env.storage().persistent().get(key);
-        if value.is_some() {
-            env.storage().persistent().extend_ttl(
-                key,
-                PERSISTENT_TTL_THRESHOLD,
-                PERSISTENT_TTL_EXTEND_TO,
-            );
-        }
-        value
-    }
-
-    fn has_persistent(env: &Env, key: &DataKey) -> bool {
-        let exists = env.storage().persistent().has(key);
-        if exists {
-            env.storage().persistent().extend_ttl(
-                key,
-                PERSISTENT_TTL_THRESHOLD,
-                PERSISTENT_TTL_EXTEND_TO,
-            );
-        }
-        exists
-    }
-
-    fn set_persistent<T>(env: &Env, key: &DataKey, value: &T)
-    where
-        T: IntoVal<Env, Val>,
-    {
-        env.storage().persistent().set(key, value);
-        env.storage().persistent().extend_ttl(
-            key,
-            PERSISTENT_TTL_THRESHOLD,
-            PERSISTENT_TTL_EXTEND_TO,
-        );
     }
 }
 
 #[cfg(test)]
 mod test;
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl SponsorshipEscrowContract {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    admin::get(env).expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

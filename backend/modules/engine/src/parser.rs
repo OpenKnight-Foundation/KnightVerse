@@ -115,7 +115,7 @@ impl From<UciMessage> for Option<EngineResult> {
     fn from(msg: UciMessage) -> Self {
         match msg {
             UciMessage::BestMove { best_move, .. } => Some(EngineResult {
-                best_move,
+                best_move: Some(best_move).filter(|m| m != "(none)"),
                 evaluation: None,
                 depth: None,
                 principal_variation: Vec::new(),

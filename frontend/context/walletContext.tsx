@@ -30,11 +30,34 @@ import {
   KnownContractType,
   createTypedContractClient,
 } from "@/lib/contracts";
+import {
+  isNetworkMismatch,
+  networkMismatchMessage,
+  passphraseFromWalletResponse,
+} from "@/lib/walletNetwork";
 
-type AppContextType = {
+/** The subset of the injected Freighter API the network check reads. */
+interface FreighterWindowApi {
+  getNetworkDetails?: () => Promise<unknown>;
+  getNetwork?: () => Promise<unknown>;
+  [key: string]: unknown;
+}
+
+export type AppContextType = {
   address?: string;
   status: "connected" | "disconnected" | "connecting" | "error";
   balance?: string | React.ReactNode;
+  /**
+   * Passphrase of the network Freighter is currently on (FE-164), or
+   * `undefined` when it could not be read.
+   */
+  walletNetwork?: string;
+  /** True when the wallet's network differs from `NETWORK_PASSPHRASE`. */
+  networkMismatch: boolean;
+  /** Message explaining a network mismatch, for banners and errors. */
+  networkMismatchMessage?: string;
+  /** Re-reads the wallet's network; resolves to the passphrase, if known. */
+  refreshWalletNetwork: () => Promise<string | undefined>;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
   /**
@@ -86,7 +109,7 @@ type AppContextType = {
   ) => T;
 };
 
-const AppContext = createContext<AppContextType | undefined>(undefined);
+export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 function toScVal(arg: any): xdr.ScVal {
   if (
@@ -134,7 +157,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | undefined>(undefined);
   const [status, setStatus] =
     useState<AppContextType["status"]>("disconnected");
+  const [walletNetwork, setWalletNetwork] = useState<string | undefined>(
+    undefined,
+  );
   const server = new Horizon.Server(HORIZON_URL);
+
+  /**
+   * Reads the network Freighter is on. `getNetworkDetails()` gives the
+   * passphrase directly; older builds only expose `getNetwork()`, whose name is
+   * mapped to a passphrase. Never throws — an unreadable network stays
+   * `undefined` and callers treat it as "unknown" rather than "mismatched".
+   */
+  const readWalletNetwork = async (): Promise<string | undefined> => {
+    if (typeof window === "undefined") return undefined;
+    const injected = window as unknown as {
+      freighterApi?: FreighterWindowApi;
+      freighter?: FreighterWindowApi;
+    };
+    const freighter = injected.freighterApi ?? injected.freighter;
+    if (!freighter) return undefined;
+
+    try {
+      if (typeof freighter.getNetworkDetails === "function") {
+        return passphraseFromWalletResponse(await freighter.getNetworkDetails());
+      }
+      if (typeof freighter.getNetwork === "function") {
+        return passphraseFromWalletResponse(await freighter.getNetwork());
+      }
+    } catch {
+      // The extension refused or is unavailable; leave the network unknown.
+    }
+    return undefined;
+  };
+
+  const refreshWalletNetwork = async (): Promise<string | undefined> => {
+    const passphrase = await readWalletNetwork();
+    setWalletNetwork(passphrase);
+    return passphrase;
+  };
+
+  /**
+   * Refuses to sign while Freighter is on another network: the signed
+   * envelope would be rejected by the network the app builds for (FE-164).
+   */
+  const assertWalletNetwork = async (): Promise<void> => {
+    const passphrase = await refreshWalletNetwork();
+    if (isNetworkMismatch(passphrase, NETWORK_PASSPHRASE)) {
+      throw new Error(
+        networkMismatchMessage(passphrase as string, NETWORK_PASSPHRASE),
+      );
+    }
+  };
 
   useEffect(() => {
     // Auto-detect previously connected Freighter account safely across environments
@@ -175,6 +248,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!publicKey)
         throw new Error("Unable to read public key from Freighter");
       setAddress(publicKey);
+      // FE-164: record the wallet's network so a mismatch is visible before
+      // the user tries to sign anything.
+      await refreshWalletNetwork();
       try {
         if (typeof window !== "undefined" && window.localStorage) {
           window.localStorage.setItem("freighter_address", publicKey);
@@ -192,6 +268,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const disconnectWallet = async () => {
     setAddress(undefined);
+    setWalletNetwork(undefined);
     try {
       if (typeof window !== "undefined" && window.localStorage) {
         window.localStorage.removeItem("freighter_address");
@@ -203,6 +280,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   async function signWithFreighter(txXDR: string): Promise<string> {
+    // FE-164: check the wallet network immediately before signing, so a user
+    // who switched networks in Freighter since connecting is caught here.
+    await assertWalletNetwork();
+
     // 1) Try official @stellar/freighter-api package if available
     try {
       const freighterApi = await import("@stellar/freighter-api");
@@ -486,6 +567,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         address,
         status,
         balance: undefined,
+        walletNetwork,
+        networkMismatch: isNetworkMismatch(walletNetwork, NETWORK_PASSPHRASE),
+        networkMismatchMessage: isNetworkMismatch(
+          walletNetwork,
+          NETWORK_PASSPHRASE,
+        )
+          ? networkMismatchMessage(walletNetwork as string, NETWORK_PASSPHRASE)
+          : undefined,
+        refreshWalletNetwork,
         connectWallet,
         disconnectWallet,
         sendPayment,

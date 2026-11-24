@@ -5,6 +5,7 @@ use actix_web::{Error, HttpMessage};
 use futures_util::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
 use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 const REQUEST_ID_HEADER: &str = "X-Request-ID";
@@ -63,6 +64,9 @@ where
             path = %req.path(),
         );
 
+        // BE-183: parent the request span under a trace derived from the request id
+        // so request id and trace id are the same value for UUID ids.
+        let _ = span.set_parent(crate::telemetry::request_parent_context(&request_id));
         req.extensions_mut().insert(request_id.clone());
 
         let fut = self.service.call(req);

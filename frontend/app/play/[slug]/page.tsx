@@ -4,6 +4,7 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
+import { parseSeriesLength } from "@/lib/series";
 
 /**
  * Play Online Page
@@ -26,7 +27,7 @@ const PlayGameEngine = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="min-h-screen p-4 md:p-8">
+      <div className="min-h-screen p-2 sm:p-4 md:p-8">
         <div className="mx-auto max-w-7xl">
           {/* Placeholder for the game header and controls. */}
           <div className="mb-4 flex items-center justify-between">
@@ -36,9 +37,9 @@ const PlayGameEngine = dynamic(
 
           <div className="flex flex-col items-start justify-center gap-6 lg:flex-row">
             {/* Chessboard loading placeholder. */}
-            <div className="w-full min-w-0 max-w-[600px] px-2 sm:px-0">
+            <div className="mx-auto w-full min-w-0 max-w-[600px] lg:mx-0">
               {/* Placeholder for player information and clock. */}
-              <div className="mb-3 flex items-center justify-between px-1">
+              <div className="sticky top-0 z-20 -mx-2 mb-3 flex items-center justify-between border-b border-gray-800/60 bg-gray-950/95 px-2 py-2 backdrop-blur sm:mx-0 sm:px-1">
                 <div className="flex items-center gap-3">
                   <div className="h-8 w-8 animate-pulse rounded-full bg-gradient-to-br from-red-400 to-red-600" />
 
@@ -54,7 +55,7 @@ const PlayGameEngine = dynamic(
               </div>
 
               {/* Render 64 placeholder squares to match the chessboard layout. */}
-              <div className="aspect-square w-full min-w-[320px] max-w-[560px] rounded-md border-2 border-gray-700/50 p-1">
+              <div className="aspect-square w-full max-w-[560px] rounded-md border-2 border-gray-700/50 p-1">
                 <div className="grid h-full w-full grid-cols-8 grid-rows-8 gap-0">
                   {Array.from({ length: 64 }).map((_, index) => (
                     <div
@@ -108,11 +109,20 @@ export default function PlayOnlinePage() {
   const playerColor =
     searchParams.get("color") === "black" ? "black" : "white";
 
+  const seriesLength = parseSeriesLength(searchParams.get("series"));
+  const stakeValue = Number(searchParams.get("stake"));
+  const stake = Number.isFinite(stakeValue) && stakeValue > 0 ? stakeValue : null;
+  const payoutValue = Number(searchParams.get("payout"));
+  const payout = Number.isFinite(payoutValue) && payoutValue > 0 ? payoutValue : null;
+
   return (
     <PlayGameEngine
       fen={fen}
       initialMinutes={initialMinutes}
       playerColor={playerColor}
+      seriesLength={seriesLength}
+      stake={stake}
+      payout={payout}
     />
   );
 }

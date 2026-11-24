@@ -19,13 +19,9 @@
 //       try {
 //         if (status === "disconnected") {
 //           await connectAsync({ connector });
-//           console.log("Connected successfully!");
 //         }
 //       } catch (err) {
-//         console.error("Connection error:", err);
 //       }
-  
-//       console.log("Status:", status, "Address:", address);
 //     };
   
 //     tryReconnect();

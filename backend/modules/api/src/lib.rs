@@ -7,6 +7,7 @@ pub mod chess960;
 mod auth_tests;
 pub mod config;
 pub mod games;
+pub mod leaderboard;
 // pub mod player_stats;
 // ^ #1539's rating-history/online-count module is not compiled yet: it uses
 //   sqlx with a PgPool and table names that don't exist in this schema. Port
@@ -20,10 +21,12 @@ pub mod openapi;
 pub mod pairings;
 pub mod tournaments;
 pub mod players;
+pub mod password_reset;
 pub mod rate_limiter;
 pub mod redis_broadcast;
 pub mod request_id;
 pub mod server;
+pub mod telemetry;
 mod test;
 pub mod wallet_link;
 pub mod ws;

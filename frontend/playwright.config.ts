@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 /**
  * Playwright configuration for KnightVerse frontend E2E (#1438).
@@ -33,5 +33,17 @@ export default defineConfig({
         "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA",
     },
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" } },
+    {
+      name: "pixel-7",
+      use: { ...devices["Pixel 7"] },
+      testMatch: [
+        "**/app.spec.ts",
+        "**/sign-in.spec.ts",
+        "**/wallet-link.spec.ts",
+        "**/puzzle.spec.ts",
+      ],
+    },
+  ],
 });

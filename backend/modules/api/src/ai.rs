@@ -71,9 +71,13 @@ pub async fn get_ai_suggestion(
 
     match result {
         Ok(result) => HttpResponse::Ok().json(AiSuggestionResponse {
-            best_move: result.best_move,
+            // Keep the wire format: UCI's `(none)` when there is no legal move.
+            best_move: result.best_move.unwrap_or_else(|| "(none)".to_string()),
             evaluation: result.evaluation.unwrap_or(0.0),
-            depth: result.depth.unwrap_or(payload.0.depth.unwrap_or(10)),
+            depth: result
+                .depth
+                .and_then(|d| u8::try_from(d).ok())
+                .unwrap_or(payload.0.depth.unwrap_or(10)),
             principal_variation: result.principal_variation,
             computation_time_ms: elapsed,
         }),

@@ -118,6 +118,7 @@ interface ChessboardComponentProps {
   /** FE-52: when true, piece graphics are hidden (opacity 0) while hitboxes,
    *  drag/click coordinates and legal-move dots keep working. */
   blindfoldMode?: boolean;
+  premovesEnabled?: boolean;
 }
 
 const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
@@ -129,6 +130,8 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   legalMoves,
   onSquareClick,
   blindfoldMode: blindfoldModeProp,
+  isMyTurn = true,
+  premovesEnabled = false,
 }) => {
   const { preferences } = useGamePreferences();
   // Prop wins when provided (e.g. PlayGameEngine), otherwise fall back to persisted preference.
@@ -136,11 +139,35 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
   const [premoves, setPremoves] = useState<PreMove[]>([]);
   const premoveService = useRef(new PremoveService());
 
-  const clearPremoves = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const clearPremove = useCallback(() => {
     premoveService.current.clearPremoves();
     setPremoves([]);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!premovesEnabled) clearPremove();
+  }, [premovesEnabled, clearPremove]);
+
+  const [highlightedSquares, setHighlightedSquares] = useState<
+    { square: string; color: string }[]
+  >([]);
+  const [arrows, setArrows] = useState<
+    { id: number; from: string; to: string; color: string }[]
+  >([]);
+  const [draftArrow, setDraftArrow] = useState<{
+    id: number;
+    from: string;
+    to: string;
+    color: string;
+  } | null>(null);
+  const rightDragRef = useRef<{
+    row: number;
+    col: number;
+    color: string;
+    moved: boolean;
+  } | null>(null);
+  const arrowAnchorRef = useRef<string | null>(null);
+  const arrowIdRef = useRef(0);
 
   const [mounted, setMounted] = useState(typeof window !== "undefined");
   const [boardWidth] = useState(560);
@@ -163,17 +190,27 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     return boardState;
   }, [boardState, orientation]);
 
+  const squareName = useCallback(
+    (row: number, col: number) => {
+      const actualRow = orientation === "black" ? 7 - row : row;
+      const actualCol = orientation === "black" ? 7 - col : col;
+      return `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+    },
+    [orientation],
+  );
+
   useEffect(() => {
+    if (!premovesEnabled) return;
     const { executedMove } =
       premoveService.current.handleOpponentMove(position);
+    setPremoves(premoveService.current.getPremoves());
     if (executedMove) {
       onDrop({
         sourceSquare: executedMove.from,
         targetSquare: executedMove.to,
       });
     }
-    setPremoves(premoveService.current.getPremoves());
-  }, [position, onDrop]);
+  }, [position, onDrop, premovesEnabled]);
 
   useEffect(() => {
     setMounted(true);
@@ -326,12 +363,21 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
       const targetSquare = `${String.fromCharCode(97 + actualTgtCol)}${
         8 - actualTgtRow
       }`;
+      const piece = boardState[actualSrcRow][actualSrcCol];
       const moveSuccess = onDrop({ sourceSquare, targetSquare });
-      if (moveSuccess) {
-        setSelectedSquare(null);
-      }
+      const resolve = (accepted: boolean) => {
+        const canPremove = !accepted && premovesEnabled && !isMyTurn && !!piece;
+        if (accepted || canPremove) setSelectedSquare(null);
+        if (canPremove) {
+          premoveService.current.clearPremoves();
+          premoveService.current.addPremove(sourceSquare, targetSquare, piece!);
+          setPremoves(premoveService.current.getPremoves());
+        }
+      };
+      if (typeof moveSuccess === "boolean") resolve(moveSuccess);
+      else moveSuccess.then(resolve);
     },
-    [onDrop, orientation],
+    [boardState, isMyTurn, onDrop, orientation, premovesEnabled],
   );
 
   const handleSquareClick = useCallback(
@@ -374,27 +420,103 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     [selectedSquare, boardState, displayRows, attemptMove],
   );
 
-  const [highlightedSquares, setHighlightedSquares] = useState<
-    { square: string; color: string }[]
-  >([]);
+  const arrowColor = useCallback(
+    (e: {
+      shiftKey: boolean;
+      altKey: boolean;
+      ctrlKey: boolean;
+      metaKey: boolean;
+    }) =>
+      e.shiftKey
+        ? "rgba(239, 68, 68, 0.9)"
+        : e.ctrlKey || e.metaKey
+          ? "rgba(234, 179, 8, 0.9)"
+          : e.altKey
+            ? "rgba(59, 130, 246, 0.9)"
+            : "rgba(34, 197, 94, 0.9)",
+    [],
+  );
 
-  const handleRightClick = (e: React.MouseEvent, row: number, col: number) => {
-    e.preventDefault();
-    const square = `${row},${col}`;
-    const color = e.shiftKey
-      ? "rgba(239, 68, 68, 0.6)"
-      : e.altKey
-        ? "rgba(59, 130, 246, 0.6)"
-        : e.ctrlKey
-          ? "rgba(234, 179, 8, 0.6)"
-          : "rgba(34, 197, 94, 0.6)";
+  const handleMarkSquare = useCallback(
+    (square: string, color: string) => {
+      if (premoves.length > 0) {
+        clearPremove();
+        return;
+      }
+      setHighlightedSquares((prev) =>
+        prev.some((s) => s.square === square)
+          ? prev.filter((s) => s.square !== square)
+          : [...prev, { square, color }],
+      );
+    },
+    [clearPremove, premoves.length],
+  );
 
-    setHighlightedSquares((prev) =>
-      prev.some((s) => s.square === square)
-        ? prev.filter((s) => s.square !== square)
-        : [...prev, { square, color }],
+  const commitArrow = useCallback(
+    (target: string) => {
+      const drag = rightDragRef.current;
+      if (!drag) return;
+      rightDragRef.current = null;
+      setDraftArrow(null);
+      const from = squareName(drag.row, drag.col);
+      if (from === target) {
+        handleMarkSquare(`${drag.row},${drag.col}`, drag.color);
+        return;
+      }
+      arrowIdRef.current += 1;
+      setArrows((prev) => [
+        ...prev,
+        { id: arrowIdRef.current, from, to: target, color: drag.color },
+      ]);
+    },
+    [handleMarkSquare, squareName],
+  );
+
+  const handleBoardMouseDown = useCallback(
+    (e: React.MouseEvent, row: number, col: number) => {
+      if (e.button !== 2 && !(e.button === 0 && e.altKey)) return;
+      e.preventDefault();
+      const color = arrowColor(e);
+      const from = squareName(row, col);
+      rightDragRef.current = { row, col, color, moved: false };
+      setDraftArrow({ id: -1, from, to: from, color });
+    },
+    [arrowColor, squareName],
+  );
+
+  const handleSquareMouseEnter = useCallback(
+    (row: number, col: number) => {
+      const drag = rightDragRef.current;
+      if (!drag || (drag.row === row && drag.col === col)) return;
+      drag.moved = true;
+      setDraftArrow((prev) =>
+        prev ? { ...prev, to: squareName(row, col) } : prev,
+      );
+    },
+    [squareName],
+  );
+
+  const handleSquareMouseUp = useCallback(
+    (e: React.MouseEvent, row: number, col: number) => {
+      if (!rightDragRef.current) return;
+      e.preventDefault();
+      commitArrow(squareName(row, col));
+    },
+    [commitArrow, squareName],
+  );
+
+  const handleBoardMouseUp = useCallback(() => {
+    if (!rightDragRef.current) return;
+    commitArrow(
+      draftArrow?.to ??
+        squareName(rightDragRef.current.row, rightDragRef.current.col),
     );
-  };
+  }, [commitArrow, draftArrow, squareName]);
+
+  const handleBoardMouseLeave = useCallback(() => {
+    rightDragRef.current = null;
+    setDraftArrow(null);
+  }, []);
 
   const handleDragStart = (e: React.DragEvent, row: number, col: number) => {
     e.dataTransfer.setData("text/plain", `${row},${col}`);
@@ -457,14 +579,55 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           e.preventDefault();
           setSelectedSquare(null);
           setFocusedSquare(null);
+          arrowAnchorRef.current = null;
+          setArrows([]);
+          setHighlightedSquares([]);
+          setDraftArrow(null);
           return;
         default:
-          return;
+          break;
       }
 
-      focusSquare(nextRow, nextCol);
+      const key = e.key.toLowerCase();
+      if (preferences.keyboardShortcutsEnabled && !e.ctrlKey && !e.metaKey && key === "h") {
+        e.preventDefault();
+        handleMarkSquare(`${row},${col}`, arrowColor(e));
+        return;
+      }
+      if (preferences.keyboardShortcutsEnabled && !e.ctrlKey && !e.metaKey && key === "a") {
+        e.preventDefault();
+        const square = squareName(row, col);
+        if (arrowAnchorRef.current === null) {
+          arrowAnchorRef.current = square;
+        } else {
+          const from = arrowAnchorRef.current;
+          arrowAnchorRef.current = null;
+          if (from !== square) {
+            arrowIdRef.current += 1;
+            setArrows((prev) => [
+              ...prev,
+              {
+                id: arrowIdRef.current,
+                from,
+                to: square,
+                color: arrowColor(e),
+              },
+            ]);
+          }
+        }
+        return;
+      }
+      if (e.key.startsWith("Arrow")) focusSquare(nextRow, nextCol);
     },
-    [focusedSquare, selectedSquare, focusSquare],
+    [
+      arrowColor,
+      focusedSquare,
+      handleMarkSquare,
+      preferences.keyboardShortcutsEnabled,
+      selectedSquare,
+      focusSquare,
+      squareName,
+    ],
   );
 
   const getSquareFromTouch = useCallback(
@@ -520,14 +683,18 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
     const pieceImage = getPieceImage(piece);
     if (!pieceImage) return null;
 
-    const [row, col] = [parseInt(square[1]) - 1, square.charCodeAt(0) - 97];
+    const row = 8 - parseInt(square[1], 10);
+    const col = square.charCodeAt(0) - 97;
+    const displayRow = orientation === "black" ? 7 - row : row;
+    const displayCol = orientation === "black" ? 7 - col : col;
 
     return (
       <div
+        aria-hidden="true"
         style={{
           position: "absolute",
-          top: `${row * 12.5}%`,
-          left: `${col * 12.5}%`,
+          top: `${displayRow * 12.5}%`,
+          left: `${displayCol * 12.5}%`,
           width: "12.5%",
           height: "12.5%",
           opacity: 0.5,
@@ -582,7 +749,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onKeyDown={handleKeyDown}
-        onContextMenu={clearPremoves}
+        onContextMenu={(e) => e.preventDefault()}
+        onMouseUp={handleBoardMouseUp}
+        onMouseLeave={handleBoardMouseLeave}
         style={{
           width: "100%",
           maxWidth: `${boardWidth}px`,
@@ -602,12 +771,27 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           transformOrigin: "center center",
         }}
       >
+        {[...arrows, ...(draftArrow && draftArrow.from !== draftArrow.to ? [draftArrow] : [])].map(
+          (arrow) => (
+            <PremoveArrow
+              key={`drawing-${arrow.id}`}
+              from={arrow.from}
+              to={arrow.to}
+              color={arrow.color}
+              id={`drawing-${arrow.id}`}
+              orientation={orientation}
+              dashed={arrow.id === -1}
+            />
+          ),
+        )}
         {premoves.map((premove, index) => (
           <PremoveArrow
-            key={`arrow-${index}-${premove.from}-${premove.to}`}
+            key={`premove-${index}-${premove.from}-${premove.to}`}
             from={premove.from}
             to={premove.to}
-            color={index === 0 ? "#3b82f6" : "#a855f7"}
+            color="#3b82f6"
+            id={`premove-${index}`}
+            orientation={orientation}
           />
         ))}
         {premoves.map((premove) => {
@@ -615,25 +799,11 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
           const piece = premove.piece;
           return renderGhostPiece(piece, toSquare);
         })}
-        {/* Screen reader live region for selection announcements */}
-        <div
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {selectedSquare &&
-            (() => {
-              const [r, c] = selectedSquare.split(",").map(Number);
-              const actualR = orientation === "black" ? 7 - r : r;
-              const actualC = orientation === "black" ? 7 - c : c;
-              const sq = `${String.fromCharCode(97 + actualC)}${8 - actualR}`;
-              const piece = displayRows[r][c];
-              return `Selected ${piece} on ${sq}. Use arrow keys to navigate, Space to move, Escape to deselect.`;
-            })()}
-        </div>
-        {displayRows.map((row, rowIndex) =>
-          row.map((piece, colIndex) => {
+        {/* Selection is announced by the live region above, outside the grid.
+            Each rank is an ARIA row; `display: contents` keeps the CSS grid. */}
+        {displayRows.map((row, rowIndex) => (
+          <div key={`rank-${rowIndex}`} role="row" style={{ display: "contents" }}>
+          {row.map((piece, colIndex) => {
             const isLight = (rowIndex + colIndex) % 2 === 1;
             const squareKey = `${rowIndex},${colIndex}`;
             const isSelected = selectedSquare === squareKey;
@@ -648,6 +818,9 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
             const actualRow = orientation === "black" ? 7 - rowIndex : rowIndex;
             const actualCol = orientation === "black" ? 7 - colIndex : colIndex;
             const squareLabel = `${String.fromCharCode(97 + actualCol)}${8 - actualRow}`;
+            const isPremoveTarget = premoves.some(
+              (premove) => premove.to === squareLabel,
+            );
             const isLastMoveSquare = Boolean(
               lastMove &&
               (Array.isArray(lastMove)
@@ -708,20 +881,34 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                   cursor: piece ? "grab" : "default",
                   position: "relative",
                   outline: "none",
-                  boxShadow: isSelected
-                    ? selectedShadow
-                    : isFocused
-                      ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
-                      : isLastMoveSquare
-                        ? lastMoveShadow
-                        : isHovered
-                          ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
-                          : "none",
+                  boxShadow: isPremoveTarget
+                    ? "inset 0 0 0 4px rgba(59, 130, 246, 0.9)"
+                    : isSelected
+                      ? selectedShadow
+                      : isFocused
+                        ? "inset 0 0 0 2px rgba(0, 200, 170, 0.7)"
+                        : isLastMoveSquare
+                          ? lastMoveShadow
+                          : isHovered
+                            ? "inset 0 0 0 2px rgba(0, 200, 170, 0.4)"
+                            : "none",
                   transition:
                     "background-color 0.2s ease, box-shadow 0.1s ease",
                 }}
-                onContextMenu={(e) => handleRightClick(e, rowIndex, colIndex)}
-                onClick={() => {
+                onContextMenu={(e) => e.preventDefault()}
+                onMouseDown={(e) =>
+                  handleBoardMouseDown(e, rowIndex, colIndex)
+                }
+                onMouseEnter={() =>
+                  handleSquareMouseEnter(rowIndex, colIndex)
+                }
+                onMouseUp={(e) => handleSquareMouseUp(e, rowIndex, colIndex)}
+                onClick={(e) => {
+                  if (e.altKey) return;
+                  if (arrows.length > 0 || highlightedSquares.length > 0) {
+                    setArrows([]);
+                    setHighlightedSquares([]);
+                  }
                   handleSquareClick(rowIndex, colIndex);
                   if (onSquareClick) onSquareClick(squareLabel);
                 }}
@@ -774,10 +961,26 @@ const ChessboardComponent: React.FC<ChessboardComponentProps> = ({
                     }}
                   />
                 )}
+                {isPremoveTarget && (
+                  <div
+                    data-testid="premove-target"
+                    aria-hidden="true"
+                    style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+                  />
+                )}
+                {highlightedSquare && (
+                  <div
+                    data-testid="square-highlight"
+                    aria-hidden="true"
+                    style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+                  />
+                )}
+
               </div>
             );
-          }),
-        )}
+          })}
+          </div>
+        ))}
       </div>
     </div>
   );

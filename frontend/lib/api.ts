@@ -7,6 +7,8 @@
  * `process.env` directly.
  */
 
+import { getSessionAccessToken } from "@/lib/sessionToken";
+
 /**
  * Returns `value` unless it is unset or empty.
  *
@@ -72,6 +74,10 @@ export const CONTRACT_TOURNAMENT = withDefault(
 );
 export const CONTRACT_AI_NFT = withDefault(
   process.env.NEXT_PUBLIC_CONTRACT_AI_NFT,
+  "",
+);
+export const CONTRACT_TITLE_BADGE = withDefault(
+  process.env.NEXT_PUBLIC_CONTRACT_TITLE_BADGE,
   "",
 );
 
@@ -226,6 +232,13 @@ export const endpoints = {
     spectate: (gameId: string) =>
       `${WS_BASE}/v1/ws/game/${encodeURIComponent(gameId)}?role=spectator`,
     archivePgn: () => `${API_BASE}/v1/games/archive-pgn`,
+    /**
+     * Backend-signed `claim_win` payload for a finished staked game (FE-163).
+     * The signing service itself is BE-151; until it is deployed this returns
+     * 404/501 and the claim UI hides itself.
+     */
+    winClaim: (gameId: string) =>
+      `${API_BASE}/v1/games/${encodeURIComponent(gameId)}/win-claim`,
     /** Per-move engine evaluations for a finished game (BE-179). */
     analysis: (gameId: string) =>
       `${API_BASE}/v1/games/${encodeURIComponent(gameId)}/analysis`,
@@ -317,10 +330,22 @@ export const endpoints = {
     ws: () => `${WS_BASE}/v1/ws/notifications`,
   },
 
+  /** Guilds (#FE-108 / #1349) */
+  guilds: {
+    detail: (id: string) => `${API_BASE}/v1/guilds/${encodeURIComponent(id)}`,
+  },
+
   /** Puzzles (#FE-68) */
   puzzles: {
     list: () => `${API_BASE}/v1/puzzles`,
     submit: () => `${API_BASE}/v1/puzzles/submit`,
+  },
+
+  season: {
+    status: () => `${API_BASE}/v1/season`,
+    standings: () => `${API_BASE}/v1/season/standings`,
+    claimable: () => `${API_BASE}/v1/season/claimable`,
+    claim: () => `${API_BASE}/v1/season/claim`,
   },
 } as const;
 
@@ -329,9 +354,7 @@ export const endpoints = {
  * WebSocket (which cannot set an Authorization header).
  */
 export async function requestWebSocketTicket(accessToken?: string | null): Promise<string> {
-  const token =
-    accessToken ??
-    (typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null);
+  const token = accessToken ?? getSessionAccessToken();
   if (!token) {
     throw new Error("Sign in before connecting to a game socket");
   }

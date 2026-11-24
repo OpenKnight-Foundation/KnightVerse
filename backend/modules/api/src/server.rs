@@ -2,7 +2,10 @@
 
 use crate::admin::{list_actions, record_action};
 use crate::ai::{ai_health, analyze_position, get_ai_suggestion};
-use crate::auth::{issue_ws_ticket, login, logout, logout_all, refresh, register};
+use crate::auth::{
+    issue_ws_ticket, login, logout, logout_all, refresh, register, resend_verification,
+    verify_email,
+};
 use crate::config::AppConfig;
 use service::engine_pool::EnginePool;
 use crate::games::{
@@ -12,10 +15,12 @@ use crate::games::{
 use crate::chess960::configure_routes as configure_chess960_routes;
 use crate::idempotency::IdempotencyMiddleware;
 use crate::lc0::{lc0_analyze, lc0_health};
+use crate::leaderboard::get_leaderboard;
 use crate::players::{
     add_player, delete_player, export_player_data, find_player_by_id, get_preferences,
     put_preferences, update_player,
 };
+use crate::password_reset::{forgot_password, reset_password};
 use crate::rate_limiter::RedisRateLimiter;
 use crate::request_id::RequestIdMiddleware;
 use crate::ws::{ws_route, ConnectionStateTracker, LobbyState};
@@ -74,7 +79,7 @@ async fn check_redis(
     let probe = async {
         let mut conn = pool.get().await.map_err(|e| e.to_string())?;
         redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -170,23 +175,8 @@ pub async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenv().ok();
 
-    // Initialize structured logger with JSON output in release builds
-    {
-        use tracing_subscriber::EnvFilter;
-
-        let env_filter =
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-        let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter);
-
-        #[cfg(debug_assertions)]
-        let subscriber = subscriber.pretty();
-
-        #[cfg(not(debug_assertions))]
-        let subscriber = subscriber.json();
-
-        subscriber.init();
-    }
+    // BE-183: tracing + optional OpenTelemetry OTLP export.
+    let _telemetry_guard = crate::telemetry::init_tracing();
 
     // Load configuration from environment — critical secrets have no fallbacks (BE-27)
     let server_addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
@@ -384,6 +374,7 @@ pub async fn main() -> std::io::Result<()> {
                     .service(put_preferences)
                     .service(crate::wallet_link::wallet_challenge)
                     .service(crate::wallet_link::wallet_verify)
+                    .service(crate::wallet_link::wallet_get)
                     .service(crate::wallet_link::wallet_unlink)
                     .service(add_player)
                     .service(find_player_by_id)
@@ -420,6 +411,8 @@ pub async fn main() -> std::io::Result<()> {
                     .service(import_game)
                     .service(complete_game),
             )
+            // BE-158: leaderboard (public read, Redis-cached)
+            .service(web::scope("/v1/leaderboard").service(get_leaderboard))
             // Auth routes
             .service(
                 web::scope("/v1/auth")
@@ -427,10 +420,14 @@ pub async fn main() -> std::io::Result<()> {
                     .wrap(auth_redis_limiter.clone())
                     .service(login)
                     .service(register)
+                    .service(verify_email)
+                    .service(resend_verification)
                     .service(refresh)
                     .service(issue_ws_ticket)
                     .service(logout)
-                    .service(logout_all),
+                    .service(logout_all)
+                    .service(forgot_password)
+                    .service(reset_password),
             )
             // Tournament routes (with Idempotency protection)
             .service(
@@ -510,8 +507,6 @@ pub async fn main() -> std::io::Result<()> {
             )
             // WebSocket routes
             .service(web::scope("/v1/ws").route("/game/{game_id}", web::get().to(ws_route)))
-            // Matchmaking routes
-            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // AI routes
             .service(
                 web::scope("/v1/ai")
@@ -527,12 +522,22 @@ pub async fn main() -> std::io::Result<()> {
                     .service(lc0_analyze)
                     .service(lc0_health),
             )
+            // Matchmaking routes (registered after other /v1 scopes to avoid shadowing)
+            .service(web::scope("/v1").configure(matchmaking::routes::config))
             // Engine-pool saturation is exactly what an operator needs to see
             // during an incident, so this one route stays outside the auth
             // gate and the limiters.
             .route("/health/engine", web::get().to(ai_health))
-            // NFT routes (placeholder — not yet implemented)
-            // .service(web::scope("/v1").configure(configure_nft_routes))
+            // BE-154: NFT routes, mounted under /v1/nft behind JWT auth.
+            .service(
+                web::scope("/v1")
+                    .wrap(JwtAuthMiddleware::new_with_redis(
+                        jwt_secret.clone(),
+                        jwt_expiration,
+                        Some(redis_pool.clone()),
+                    ))
+                    .configure(st_core::endpoint::configure),
+            )
             // Swagger UI integration
             .service(
                 SwaggerUi::new("/api/docs/{_:.*}")

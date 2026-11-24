@@ -19,6 +19,10 @@ import { NETWORK_PASSPHRASE, SOROBAN_RPC } from "@/lib/api";
 import {
   GameContractClient,
   YieldStakingClient,
+  TitleBadgeClient,
+  AiNftClient,
+  displayNameForMetadata,
+  type ContractMethodInvoker,
   type PuzzleRewardProof,
 } from "./index";
 
@@ -111,6 +115,18 @@ export interface ContractCallResult {
   hash?: string;
 }
 
+/**
+ * A backend-signed win claim for `game_contract.claim_win` (FE-163).
+ *
+ * The signature is the result-signing service's ED25519 signature over
+ * `SHA256(game_id_le8 || winner_address_bytes)`.
+ */
+export interface WinClaim {
+  game_id: bigint;
+  winner: string;
+  signature: Buffer;
+}
+
 /** Soroban token amounts are 128-bit integers with 7 decimals. */
 export function toTokenAmount(units: number, decimals = 7): bigint {
   if (!Number.isFinite(units)) {
@@ -168,6 +184,53 @@ export function parsePuzzleRewardProof(value: unknown): PuzzleRewardProof | null
   }
 }
 
+/**
+ * Normalise a win-claim payload as received from the backend into the shape
+ * the generated `game_contract` client expects. Accepts the game id as a
+ * string/number/bigint and the signature as base64/hex string or byte array.
+ */
+export function normalizeWinClaim(value: unknown): WinClaim {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Win claim must be an object");
+  }
+  const raw = value as {
+    game_id?: unknown;
+    winner?: unknown;
+    signature?: unknown;
+  };
+  if (raw.game_id === undefined || raw.game_id === null || raw.game_id === "") {
+    throw new TypeError("Win claim is missing `game_id`");
+  }
+  if (typeof raw.winner !== "string" || !raw.winner) {
+    throw new TypeError("Win claim is missing `winner`");
+  }
+  const signature = toBytes(raw.signature);
+  if (signature.length !== 64) {
+    throw new TypeError(
+      `Win claim signature must be 64 bytes, received ${signature.length}`,
+    );
+  }
+  return {
+    game_id: BigInt(raw.game_id as string | number | bigint),
+    winner: raw.winner,
+    signature,
+  };
+}
+
+/**
+ * Best-effort variant of {@link normalizeWinClaim}: returns `null` (and warns)
+ * instead of throwing, for payloads straight off the wire.
+ */
+export function parseWinClaim(value: unknown): WinClaim | null {
+  if (!value) return null;
+  try {
+    return normalizeWinClaim(value);
+  } catch (err) {
+    console.warn("Ignoring malformed win claim", err);
+    return null;
+  }
+}
+
 function toBytes(value: unknown): Buffer {
   if (Buffer.isBuffer(value)) return value;
   if (value instanceof Uint8Array) return Buffer.from(value);
@@ -176,7 +239,7 @@ function toBytes(value: unknown): Buffer {
     if (value.startsWith("0x")) return Buffer.from(value.slice(2), "hex");
     return Buffer.from(value, "base64");
   }
-  throw new TypeError("Puzzle reward proof has an invalid `signature`");
+  throw new TypeError("Contract signature must be a byte array, hex or base64 string");
 }
 
 /**
@@ -205,6 +268,29 @@ export async function claimPuzzleReward(params: {
 }
 
 /**
+ * Claim a staked game's winnings on-chain via the generated game-contract
+ * client (`claim_win`, FE-163). The claim must carry the result-signing
+ * service's ED25519 signature — the contract verifies it before paying out.
+ */
+export async function claimGameWin(params: {
+  claim: WinClaim;
+  signer: ContractSigner;
+}): Promise<ContractCallResult> {
+  const { claim, signer } = params;
+  const client = createGameContractClient({
+    publicKey: signer.address,
+    signTransaction: toSdkSigner(signer),
+  });
+  const tx = await client.claim_win({
+    game_id: BigInt(claim.game_id),
+    winner: claim.winner,
+    signature: Buffer.from(claim.signature),
+  });
+  const sent = await tx.signAndSend();
+  return { hash: hashOf(sent) };
+}
+
+/**
  * Stake into a whitelisted liquidity pool via the generated
  * `yield_staking` client (`stake`). `amount` is in the staking contract's
  * token base units (7 decimals); use {@link toTokenAmount}.
@@ -223,6 +309,160 @@ export async function stakeInPool(params: {
   const tx = await client.stake({ caller, pool, amount });
   const sent = await tx.signAndSend();
   return { hash: hashOf(sent) };
+}
+
+export function getTitleBadgeContractId(): string | undefined {
+  return process.env.NEXT_PUBLIC_CONTRACT_TITLE_BADGE?.trim() || undefined;
+}
+
+export function getAiNftContractId(): string | undefined {
+  return process.env.NEXT_PUBLIC_CONTRACT_AI_NFT?.trim() || undefined;
+}
+
+export interface OnChainTitle {
+  title: string;
+  grantedAt: bigint;
+}
+
+const TITLE_BADGE_CACHE_TTL_MS = 5 * 60 * 1000;
+const titleBadgeCache = new Map<
+  string,
+  { value: OnChainTitle | null; expiresAt: number }
+>();
+
+export function clearTitleBadgeCache(owner?: string): void {
+  if (!owner) {
+    titleBadgeCache.clear();
+    return;
+  }
+  const suffix = `:${owner.toLowerCase()}`;
+  for (const key of titleBadgeCache.keys()) {
+    if (key.endsWith(suffix)) titleBadgeCache.delete(key);
+  }
+}
+
+function isMissingTitleError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /BadgeNotFound|AlreadyRevoked|revoked|not found|no badge/i.test(message);
+}
+
+export async function fetchOnChainTitle(params: {
+  owner: string;
+  invoke: ContractMethodInvoker;
+  contractId?: string;
+  forceRefresh?: boolean;
+}): Promise<OnChainTitle | null> {
+  const contractId = params.contractId ?? getTitleBadgeContractId();
+  if (!contractId || !params.owner) return null;
+
+  const key = `${contractId}:${params.owner.toLowerCase()}`;
+  const cached = titleBadgeCache.get(key);
+  if (!params.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  try {
+    const badge = await new TitleBadgeClient(params.invoke).get(params.owner);
+    const value =
+      badge && badge.active && badge.title.trim()
+        ? { title: badge.title.trim(), grantedAt: badge.granted_at }
+        : null;
+    titleBadgeCache.set(key, {
+      value,
+      expiresAt: Date.now() + TITLE_BADGE_CACHE_TTL_MS,
+    });
+    return value;
+  } catch (error) {
+    if (!isMissingTitleError(error)) throw error;
+    titleBadgeCache.set(key, {
+      value: null,
+      expiresAt: Date.now() + TITLE_BADGE_CACHE_TTL_MS,
+    });
+    return null;
+  }
+}
+
+export interface AiNftCollectionItem {
+  tokenId: bigint;
+  nftId: bigint;
+  owner: string;
+  metadataHash: string;
+  personalityTraits: string;
+  createdAt: bigint;
+  minter: string;
+  displayName: string;
+}
+
+const AI_NFT_CACHE_TTL_MS = 30 * 1000;
+const aiNftCache = new Map<
+  string,
+  { items: AiNftCollectionItem[]; expiresAt: number }
+>();
+
+export function clearAiNftCache(owner?: string): void {
+  if (!owner) {
+    aiNftCache.clear();
+    return;
+  }
+  const suffix = `:${owner.toLowerCase()}`;
+  for (const key of aiNftCache.keys()) {
+    if (key.endsWith(suffix)) aiNftCache.delete(key);
+  }
+}
+
+export async function fetchOwnedAiNfts(params: {
+  owner: string;
+  invoke: ContractMethodInvoker;
+  contractId?: string;
+  forceRefresh?: boolean;
+}): Promise<AiNftCollectionItem[]> {
+  const contractId = params.contractId ?? getAiNftContractId();
+  if (!contractId || !params.owner) return [];
+
+  const key = `${contractId}:${params.owner.toLowerCase()}`;
+  const cached = aiNftCache.get(key);
+  if (!params.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.items;
+  }
+
+  const client = new AiNftClient(params.invoke);
+  const tokenIds = await client.tokensOf(params.owner);
+  const settled = await Promise.all(
+    tokenIds.map(async (tokenId) => {
+      const metadata = await client.metadata(tokenId);
+      if (!metadata) return null;
+      const item: AiNftCollectionItem = {
+        tokenId,
+        nftId: metadata.nft_id,
+        owner: metadata.owner,
+        metadataHash: metadata.metadata_hash,
+        personalityTraits: metadata.personality_traits,
+        createdAt: metadata.created_at,
+        minter: metadata.minter,
+        displayName: displayNameForMetadata(metadata),
+      };
+      return item;
+    }),
+  );
+  const items = settled.filter(
+    (item): item is AiNftCollectionItem => item !== null,
+  );
+  aiNftCache.set(key, { items, expiresAt: Date.now() + AI_NFT_CACHE_TTL_MS });
+  return items;
+}
+
+export async function transferOwnedAiNft(params: {
+  tokenId: bigint;
+  to: string;
+  invoke: ContractMethodInvoker;
+  owner?: string;
+}): Promise<unknown> {
+  const result = await new AiNftClient(params.invoke).transfer(
+    params.tokenId,
+    params.to,
+  );
+  if (params.owner) clearAiNftCache(params.owner);
+  return result;
 }
 
 interface BoundContract {

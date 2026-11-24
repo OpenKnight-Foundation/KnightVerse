@@ -5,6 +5,7 @@ import { GameSidebar } from "@/components/GameSidebar";
 import { TransactionStatusIndicator } from "@/components/TransactionStatusIndicator";
 import { AuthButton } from "@/components/AuthButton";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { NotificationsProvider } from "@/context/NotificationsContext";
 import Image from "next/image";
 import clsx from "clsx";
@@ -17,7 +18,7 @@ export default function ClientRoot({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   return (
     <NotificationsProvider>
-    <div className="flex h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 text-white">
+    <div className="flex h-screen bg-background text-foreground">
       <GameSidebar
         collapsed={isSidebarCollapsed}
         setCollapsed={setIsSidebarCollapsed}
@@ -30,7 +31,7 @@ export default function ClientRoot({
           isSidebarCollapsed ? "md:ml-16" : "md:ml-64"
         )}
       >
-        <div className="md:hidden flex items-center p-4 border-b border-gray-800">
+        <div className="md:hidden flex items-center p-4 border-b border-border">
           <GameSidebar
             isMobileView={true}
             collapsed={false}
@@ -54,6 +55,7 @@ export default function ClientRoot({
             <NotificationBell />
             <AuthButton />
           </div>
+          <NetworkMismatchBanner />
           {children}
         </div>
       </main>

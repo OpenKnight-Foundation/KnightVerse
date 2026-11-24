@@ -9,6 +9,7 @@ the root [README.md](../README.md).
 | Document | Description |
 | --- | --- |
 | [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) | Commands and environment cheat-sheet |
+| [BE-163-notifications-service.md](./BE-163-notifications-service.md) | Notifications service scope and acceptance criteria |
 
 ## Archive
 

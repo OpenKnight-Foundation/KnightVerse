@@ -293,6 +293,8 @@ fn build_test_player(payload: NewPlayer) -> player::Model {
         is_enabled: true,
         wallet_address: None,
         preferences: serde_json::json!({}),
+        email_verified_at: None,
+        glicko_ratings: serde_json::json!({}),
     }
 }
 
@@ -323,6 +325,8 @@ mod tests {
             is_enabled: true,
             wallet_address: None,
             preferences: serde_json::json!({}),
+            email_verified_at: None,
+            glicko_ratings: serde_json::json!({}),
         }
     }
 

@@ -6,7 +6,7 @@ import pytest
 
 from gpu_worker.config import WorkerConfig
 from gpu_worker.decentralized_orchestrator import DecentralizedOrchestrator
-from gpu_worker.models import FullGameAnalysisRequest
+from gpu_worker.models import AnalysisResult, FullGameAnalysisRequest
 from gpu_worker.pool import WorkerPool
 from gpu_worker.worker import GPUAnalysisWorker
 
@@ -27,16 +27,16 @@ async def test_full_game_analysis():
         async def analyze(self, request):
             # Simulate analysis
             await asyncio.sleep(0.1)
-            return {
-                "request_id": request.id,
-                "best_move": "e2e4",
-                "evaluation": 0.5,
-                "depth": 20,
-                "principal_variation": ["e2e4"],
-                "nodes_searched": 1000,
-                "time_ms": 100,
-                "gpu_utilization": 0.5,
-            }
+            return AnalysisResult(
+                request_id=request.id,
+                best_move="e2e4",
+                evaluation=0.5,
+                depth=20,
+                principal_variation=["e2e4"],
+                nodes_searched=1000,
+                time_ms=100,
+                gpu_utilization=0.5,
+            )
 
     pool = WorkerPool(
         configs=[WorkerConfig(engine_backend="stockfish", engine_path="/usr/local/bin/stockfish")] * 2,
@@ -44,7 +44,9 @@ async def test_full_game_analysis():
         worker_factory=lambda config, book: MockAnalysisWorker(config),
     )
     await pool.start_all()
-    orchestrator = DecentralizedOrchestrator(pool)
+    # No PoI challenges: this test covers splitting and reassembly only, and a
+    # randomly inserted challenge made it flaky.
+    orchestrator = DecentralizedOrchestrator(pool, challenge_rate=0.0)
 
     fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * 5
     request = FullGameAnalysisRequest(fens=fens)

@@ -1,19 +1,20 @@
 #![no_std]
 
+use common::{admin, pause, two_step};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env,
+};
+
+pub use common::two_step::{
+    PendingAdmin, DEFAULT_ADMIN_TRANSFER_TIMELOCK_SECS as ADMIN_TRANSFER_TIMELOCK_SECS,
 };
 
 // Storage keys
 #[contracttype]
 pub enum DataKey {
-    Paused,
-    Admin,
     Balance(Address),
     TotalSupply,
     MatchEscrow(u64),
-    /// SC-66: the pending admin-transfer proposal, if any.
-    PendingAdmin,
 }
 
 #[contracttype]
@@ -21,19 +22,6 @@ pub struct MatchEscrowData {
     pub player: Address,
     pub amount: i128,
 }
-
-/// SC-66: a proposed admin handoff, timelocked so a compromised or
-/// fat-fingered `transfer_admin` call can be noticed and cancelled before
-/// it takes effect.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PendingAdmin {
-    pub candidate: Address,
-    pub effective_at: u64,
-}
-
-/// Delay between proposing an admin transfer and it taking effect.
-pub const ADMIN_TRANSFER_TIMELOCK_SECS: u64 = 48 * 60 * 60;
 
 /// Structured error codes for the PausableContract.
 #[contracterror]
@@ -68,16 +56,8 @@ pub struct PausableContract;
 impl PausableContract {
     /// Initialize the contract with an admin address
     pub fn initialize(env: Env, admin: Address) {
-        // Ensure contract hasn't been initialized
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic_with_error!(&env, ContractError::AlreadyInitialized);
-        }
-
-        // Set admin
-        env.storage().instance().set(&DataKey::Admin, &admin);
-
-        // Set initial paused state to false
-        env.storage().instance().set(&DataKey::Paused, &false);
+        common::admin::initialize(&env, &admin, ContractError::AlreadyInitialized);
+        pause::initialize(&env);
 
         // Initialize total supply
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
@@ -90,53 +70,28 @@ impl PausableContract {
     /// Pause the contract - blocks all state-changing operations
     /// Only callable by admin
     pub fn pause(env: Env, caller: Address) {
-        caller.require_auth();
-
-        // Check if caller is admin
-        Self::check_admin(&env, &caller);
-
-        // Check if already paused
-        let is_paused = Self::is_paused(&env);
-        if is_paused {
-            panic_with_error!(&env, ContractError::AlreadyPaused);
-        }
-
-        // Set paused state to true
-        env.storage().instance().set(&DataKey::Paused, &true);
-
-        // Emit event
-        env.events()
-            .publish((soroban_sdk::symbol_short!("paused"),), caller);
+        pause::pause(
+            &env,
+            &caller,
+            ContractError::NotAdmin,
+            ContractError::AlreadyPaused,
+        );
     }
 
     /// Unpause the contract - resumes normal operations
     /// Only callable by admin
     pub fn unpause(env: Env, caller: Address) {
-        caller.require_auth();
-
-        // Check if caller is admin
-        Self::check_admin(&env, &caller);
-
-        // Check if not paused
-        let is_paused = Self::is_paused(&env);
-        if !is_paused {
-            panic_with_error!(&env, ContractError::NotPaused);
-        }
-
-        // Set paused state to false
-        env.storage().instance().set(&DataKey::Paused, &false);
-
-        // Emit event
-        env.events()
-            .publish((soroban_sdk::symbol_short!("unpaused"),), caller);
+        pause::unpause(
+            &env,
+            &caller,
+            ContractError::NotAdmin,
+            ContractError::NotPaused,
+        );
     }
 
     /// Check if contract is currently paused
     pub fn is_paused(env: &Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false)
+        pause::is_paused(env)
     }
 
     // ============================================
@@ -148,7 +103,7 @@ impl PausableContract {
         from.require_auth();
 
         // CHECK PAUSED - This is the circuit breaker in action!
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, ContractError::ContractPaused);
 
         if amount <= 0 {
             panic_with_error!(&env, ContractError::InvalidAmount);
@@ -184,7 +139,7 @@ impl PausableContract {
         to.require_auth();
 
         // CHECK PAUSED - Circuit breaker!
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, ContractError::ContractPaused);
 
         if amount <= 0 {
             panic_with_error!(&env, ContractError::InvalidAmount);
@@ -220,13 +175,11 @@ impl PausableContract {
 
     /// Mint new tokens (guarded by pause check)
     pub fn mint(env: Env, caller: Address, to: Address, amount: i128) {
-        caller.require_auth();
-
         // Only admin can mint
-        Self::check_admin(&env, &caller);
+        admin::require_admin(&env, &caller, ContractError::NotAdmin);
 
         // CHECK PAUSED - Circuit breaker!
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, ContractError::ContractPaused);
 
         if amount <= 0 {
             panic_with_error!(&env, ContractError::InvalidAmount);
@@ -260,7 +213,7 @@ impl PausableContract {
         player.require_auth();
 
         // CHECK PAUSED - Circuit breaker!
-        Self::check_not_paused(&env);
+        pause::check_not_paused(&env, ContractError::ContractPaused);
 
         if amount <= 0 {
             panic_with_error!(&env, ContractError::InvalidAmount);
@@ -320,10 +273,8 @@ impl PausableContract {
     /// Emergency rescue function - Admin can rescue funds even when paused
     /// This is crucial for recovering from critical bugs
     pub fn emergency_rescue(env: Env, admin: Address, to: Address, amount: i128) {
-        admin.require_auth();
-
         // Check if caller is admin
-        Self::check_admin(&env, &admin);
+        common::admin::require_admin(&env, &admin, ContractError::NotAdmin);
 
         // NOTE: No pause check here! This works even when paused.
 
@@ -347,10 +298,8 @@ impl PausableContract {
     /// Admin refund match escrow - Manually unlock escrow and return funds
     /// Only callable by admin, works even when paused
     pub fn admin_refund_match(env: Env, admin: Address, match_id: u64) {
-        admin.require_auth();
-
         // Check if caller is admin
-        Self::check_admin(&env, &admin);
+        common::admin::require_admin(&env, &admin, ContractError::NotAdmin);
 
         // NOTE: No pause check here! This works even when paused.
 
@@ -403,54 +352,21 @@ impl PausableContract {
     /// is already pending overwrites it with a new candidate and resets
     /// the timelock.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
-        current_admin.require_auth();
-
-        // Check if caller is current admin
-        Self::check_admin(&env, &current_admin);
-
         // NOTE: No pause check - admin transfer should work even when paused
-
-        let effective_at = env.ledger().timestamp() + ADMIN_TRANSFER_TIMELOCK_SECS;
-        env.storage().instance().set(
-            &DataKey::PendingAdmin,
-            &PendingAdmin {
-                candidate: new_admin.clone(),
-                effective_at,
-            },
-        );
-
-        // Emit event
-        env.events().publish(
-            (soroban_sdk::symbol_short!("adminprop"),),
-            (new_admin, effective_at),
-        );
+        two_step::propose(&env, &current_admin, &new_admin, ContractError::NotAdmin);
     }
 
     /// Finalizes a pending admin transfer once the timelock has elapsed.
     /// Requires the candidate's own auth, so a bad/unreachable address
     /// can't be force-finalized by anyone else (SC-66).
     pub fn accept_admin_transfer(env: Env, candidate: Address) -> Result<(), ContractError> {
-        candidate.require_auth();
-
-        let pending: PendingAdmin = env
-            .storage()
-            .instance()
-            .get(&DataKey::PendingAdmin)
-            .ok_or(ContractError::NoPendingAdminTransfer)?;
-
-        if pending.candidate != candidate {
-            panic_with_error!(&env, ContractError::NotAdmin);
-        }
-        if env.ledger().timestamp() < pending.effective_at {
-            return Err(ContractError::TimelockNotElapsed);
-        }
-
-        env.storage().instance().set(&DataKey::Admin, &candidate);
-        env.storage().instance().remove(&DataKey::PendingAdmin);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("adminxfer"),), candidate);
-        Ok(())
+        two_step::accept(
+            &env,
+            &candidate,
+            ContractError::NoPendingAdminTransfer,
+            ContractError::NotAdmin,
+            ContractError::TimelockNotElapsed,
+        )
     }
 
     /// The current admin cancels a pending admin transfer before it takes
@@ -458,22 +374,17 @@ impl PausableContract {
     /// wrong address, or the current admin key recovers control before a
     /// compromised-key handoff finalizes.
     pub fn cancel_admin_transfer(env: Env, current_admin: Address) -> Result<(), ContractError> {
-        current_admin.require_auth();
-        Self::check_admin(&env, &current_admin);
-
-        if !env.storage().instance().has(&DataKey::PendingAdmin) {
-            return Err(ContractError::NoPendingAdminTransfer);
-        }
-        env.storage().instance().remove(&DataKey::PendingAdmin);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("admincncl"),), current_admin);
-        Ok(())
+        two_step::cancel(
+            &env,
+            &current_admin,
+            ContractError::NotAdmin,
+            ContractError::NoPendingAdminTransfer,
+        )
     }
 
     /// Returns the pending admin-transfer proposal, if any.
     pub fn get_pending_admin_transfer(env: Env) -> Option<PendingAdmin> {
-        env.storage().instance().get(&DataKey::PendingAdmin)
+        two_step::pending(&env)
     }
 
     // ============================================
@@ -496,10 +407,7 @@ impl PausableContract {
 
     /// Get admin address
     pub fn get_admin(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Admin not set")
+        common::admin::get(&env).expect("Admin not set")
     }
 
     /// Get match escrow data
@@ -511,31 +419,6 @@ impl PausableContract {
     /// Get paused status
     pub fn paused(env: Env) -> bool {
         Self::is_paused(&env)
-    }
-
-    // ============================================
-    // HELPER FUNCTIONS (INTERNAL)
-    // ============================================
-
-    /// Check if contract is paused, panic with `ContractError::ContractPaused` if it is.
-    /// This is the core circuit breaker check.
-    fn check_not_paused(env: &Env) {
-        if Self::is_paused(env) {
-            panic_with_error!(env, ContractError::ContractPaused);
-        }
-    }
-
-    /// Check if caller is admin, panic with `ContractError::NotAdmin` if not.
-    fn check_admin(env: &Env, caller: &Address) {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Admin not set");
-
-        if admin != *caller {
-            panic_with_error!(env, ContractError::NotAdmin);
-        }
     }
 }
 
@@ -914,3 +797,43 @@ mod test {
         client.admin_refund_match(&admin, &999);
     }
 }
+
+// SC-105: timelocked upgrade path. The admin proposes new code with
+// `propose_upgrade`; it can only be installed with `apply_upgrade` after
+// `upgrade_timelock::UPGRADE_DELAY_SECS` (48 hours). Storage, timelock and
+// events live in the shared `upgrade_timelock` crate.
+#[contractimpl]
+impl PausableContract {
+    /// Admin only. Records `wasm_hash` as the pending upgrade (restarting the
+    /// timelock if one was already pending) and returns the timestamp from
+    /// which it can be applied. Emits `("upg_prop", wasm_hash) -> eta`.
+    pub fn propose_upgrade(env: Env, wasm_hash: soroban_sdk::BytesN<32>) -> u64 {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::propose(&env, wasm_hash)
+    }
+
+    /// Admin only. Installs the pending code once the timelock has expired.
+    /// Emits `("upgraded", wasm_hash)`.
+    pub fn apply_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::apply(&env);
+    }
+
+    /// Admin only. Withdraws the pending upgrade. Emits `("upg_cncl", wasm_hash)`.
+    pub fn cancel_upgrade(env: Env) {
+        sc105_admin(&env).require_auth();
+        upgrade_timelock::cancel(&env);
+    }
+
+    /// The pending upgrade and the time it becomes applicable, if any.
+    pub fn pending_upgrade(env: Env) -> Option<upgrade_timelock::PendingUpgrade> {
+        upgrade_timelock::pending(&env)
+    }
+}
+
+fn sc105_admin(env: &Env) -> Address {
+    admin::get(env).expect("admin not set")
+}
+
+#[cfg(test)]
+mod upgrade_test;

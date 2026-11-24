@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const generated = vi.hoisted(() => ({
   claimPuzzleReward: vi.fn(),
+  claimWin: vi.fn(),
   stake: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("@/contracts/game_contract/src/index", () => ({
   Client: class {
     options: unknown;
     claim_puzzle_reward = generated.claimPuzzleReward;
+    claim_win = generated.claimWin;
     constructor(options: unknown) {
       this.options = options;
     }
@@ -36,6 +38,7 @@ vi.mock("@/contracts/yield_staking/src/index", () => ({
 }));
 
 import {
+  claimGameWin,
   claimPuzzleReward,
   createGameContractClient,
   createYieldStakingClient,
@@ -43,7 +46,9 @@ import {
   getYieldStakingConfig,
   invokeBoundContract,
   normalizePuzzleRewardProof,
+  normalizeWinClaim,
   parsePuzzleRewardProof,
+  parseWinClaim,
   resolveBoundContract,
   stakeInPool,
   toTokenAmount,
@@ -219,6 +224,68 @@ describe("claimPuzzleReward", () => {
       signature: Buffer.from([4, 5, 6]),
     });
     expect(signer.sign).not.toHaveBeenCalled();
+  });
+});
+
+describe("win claims (#FE-163)", () => {
+  const signature = Buffer.alloc(64, 9);
+
+  it("normalises a claim straight off the wire", () => {
+    expect(
+      normalizeWinClaim({
+        game_id: "42",
+        winner: PLAYER,
+        signature: signature.toString("base64"),
+      }),
+    ).toEqual({ game_id: bn("42"), winner: PLAYER, signature });
+  });
+
+  it("accepts hex and byte-array signatures", () => {
+    expect(
+      normalizeWinClaim({
+        game_id: 42,
+        winner: PLAYER,
+        signature: `0x${signature.toString("hex")}`,
+      }).signature,
+    ).toEqual(signature);
+    expect(
+      normalizeWinClaim({
+        game_id: bn("42"),
+        winner: PLAYER,
+        signature: Array.from(signature),
+      }).signature,
+    ).toEqual(signature);
+  });
+
+  it("rejects claims that the contract would reject anyway", () => {
+    expect(() => normalizeWinClaim({ winner: PLAYER, signature })).toThrow(
+      /game_id/,
+    );
+    expect(() => normalizeWinClaim({ game_id: 1, signature })).toThrow(
+      /winner/,
+    );
+    expect(() =>
+      normalizeWinClaim({ game_id: 1, winner: PLAYER, signature: Buffer.alloc(63) }),
+    ).toThrow(/64 bytes/);
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parseWinClaim(undefined)).toBeNull();
+    expect(parseWinClaim({ game_id: 1 })).toBeNull();
+    vi.mocked(console.warn).mockRestore();
+  });
+
+  it("submits claim_win through the generated client", async () => {
+    generated.claimWin.mockResolvedValue(fakeCall({ hash: "winhash" }));
+
+    await expect(
+      claimGameWin({ claim: { game_id: bn("42"), winner: PLAYER, signature }, signer }),
+    ).resolves.toEqual({ hash: "winhash" });
+
+    expect(generated.claimWin).toHaveBeenCalledWith({
+      game_id: bn("42"),
+      winner: PLAYER,
+      signature,
+    });
   });
 });
 

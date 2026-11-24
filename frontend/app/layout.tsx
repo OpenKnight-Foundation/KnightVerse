@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { I18nProvider } from "@/i18n/provider";
 import ClientRoot from "@/components/ClientRoot";
@@ -12,10 +12,30 @@ import { SoundProvider } from "@/context/SoundContext";
 import { GamePreferencesProvider } from "@/context/GamePreferencesContext";
 import { AuthProvider } from "@/context/authContext";
 import FeatureFlagBootstrap from "@/components/FeatureFlagBootstrap";
+import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 
 export const metadata: Metadata = {
   title: "KnightVerse",
   description: "KnightVerse — Chess on Stellar",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    title: "KnightVerse",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0d9488",
 };
 
 export default function RootLayout({
@@ -43,6 +63,7 @@ export default function RootLayout({
                       <SoundProvider>
                         <GamePreferencesProvider>
                           <FeatureFlagBootstrap>
+                            <ServiceWorkerRegistrar />
                             <ClientRoot>{children}</ClientRoot>
                           </FeatureFlagBootstrap>
                         </GamePreferencesProvider>

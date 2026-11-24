@@ -808,6 +808,37 @@ fn test_submit_move_game_not_in_progress() {
 }
 
 #[test]
+fn test_submit_move_status_cannot_settle_or_pay_out() {
+    // #1551: a client-supplied `game_status` used to declare the mover the
+    // winner (1) or force a draw (2) and pay out the escrow.
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, GameContract);
+    let (client, player1, player2, game_id) = setup_in_progress_game(&env, &contract_id);
+
+    client.submit_move(
+        &game_id,
+        &player1,
+        &Vec::from_array(&env, [1u32]),
+        &Bytes::new(&env),
+        &1u32,
+    );
+    client.submit_move(
+        &game_id,
+        &player2,
+        &Vec::from_array(&env, [2u32]),
+        &Bytes::new(&env),
+        &2u32,
+    );
+
+    let game = client.get_game(&game_id);
+    assert_eq!(game.state, GameState::InProgress);
+    assert_eq!(game.winner, None);
+    assert_eq!(game.moves.len(), 2);
+    assert!(client.try_payout(&game_id, &player1).is_err());
+}
+
+#[test]
 fn test_submit_move_sequence_alternation() {
     let env = Env::default();
     env.mock_all_auths();

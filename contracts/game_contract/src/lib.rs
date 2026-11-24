@@ -965,6 +965,8 @@ impl GameContract {
     ///                  and must authorise the call.
     /// - `move_data`  — Encoded move payload (e.g. from/to squares as `u32`s);
     ///                  must be non-empty.
+    /// - `game_status` — Ignored. Moves never end a game or pay out (#1551);
+    ///                  settle through `claim_win` / `claim_draw`.
     ///
     /// # Returns
     /// `Ok(())` on success.
@@ -1037,17 +1039,11 @@ impl GameContract {
         game.last_activity_ts = env.ledger().timestamp();
         game.board_fen = new_board;
 
-        // Auto settlement logic based on status flag
-        if game_status == 1 {
-            // Checkmate: submitting player wins
-            game.winner = Some(player.clone());
-            Self::process_payout(&env, &game, &player)?;
-            game.state = GameState::Settled;
-        } else if game_status == 2 {
-            // Draw
-            game.state = GameState::Drawn;
-            Self::process_draw_payout(&env, &game)?;
-        }
+        // #1551: a client-supplied status must never settle a game or move
+        // escrow. Results are settled only through the backend-signed
+        // `claim_win` / `claim_draw` paths; `game_status` is kept in the
+        // signature for client compatibility and ignored.
+        let _ = game_status;
 
         // #1571: indexers and spectators can follow a game without polling.
         env.events().publish(

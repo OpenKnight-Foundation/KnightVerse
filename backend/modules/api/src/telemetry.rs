@@ -193,7 +193,8 @@ pub fn redis_span(command: &'static str) -> tracing::Span {
 mod tests {
     use super::*;
     use crate::request_id::RequestIdMiddleware;
-    use actix_web::{test, web, App, HttpResponse};
+    // Renamed so it doesn't shadow the built-in #[test] used by the sync tests.
+    use actix_web::{test as actix_test, web, App, HttpResponse};
     use opentelemetry::trace::SpanKind;
     use opentelemetry_sdk::trace::InMemorySpanExporter;
     use tracing::Instrument;
@@ -254,7 +255,7 @@ mod tests {
             .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")));
         let _default = tracing::subscriber::set_default(subscriber);
 
-        let app = test::init_service(App::new().wrap(RequestIdMiddleware).route(
+        let app = actix_test::init_service(App::new().wrap(RequestIdMiddleware).route(
             "/",
             web::get().to(|| async {
                 async {}.instrument(redis_span("GET")).await;
@@ -264,11 +265,11 @@ mod tests {
         .await;
 
         let request_id = "3f2a6c1e-9b4d-4e2a-8c7f-0123456789ab";
-        let req = test::TestRequest::get()
+        let req = actix_test::TestRequest::get()
             .uri("/")
             .insert_header(("X-Request-ID", request_id))
             .to_request();
-        let resp = test::call_service(&app, req).await;
+        let resp = actix_test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         provider.force_flush().expect("flush spans");

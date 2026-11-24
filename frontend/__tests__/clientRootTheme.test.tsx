@@ -15,6 +15,10 @@ vi.mock("@/components/AuthButton", () => ({
 vi.mock("@/components/notifications/NotificationBell", () => ({
   NotificationBell: () => null,
 }));
+// Reads the wallet context, which the app provides above ClientRoot.
+vi.mock("@/components/NetworkMismatchBanner", () => ({
+  NetworkMismatchBanner: () => null,
+}));
 vi.mock("@/context/NotificationsContext", () => ({
   NotificationsProvider: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>

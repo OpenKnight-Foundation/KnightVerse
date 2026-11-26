@@ -22,6 +22,11 @@ on:
         required: false
         type: string
 
+env:
+  # The deprecated `soroban-cli` crate no longer has the commands this workflow
+  # used; use the pinned stellar CLI release, same as contract-bindings.yml.
+  STELLAR_CLI_VERSION: '28.1.0'
+
 jobs:
   validate:
     name: Validate Contracts
@@ -47,13 +52,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-soroban-
 
-      - name: Install system dependencies for soroban-cli
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
-
-      - name: Install Soroban CLI
+      - name: Install stellar CLI
         run: |
-          cargo install --locked soroban-cli 2>&1 || cargo install soroban-cli
-          soroban --version
+          curl -sSL -o /tmp/stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/stellar /usr/local/bin/stellar
+          stellar --version
 
       - name: Run contract tests
         working-directory: contracts
@@ -66,29 +71,45 @@ jobs:
       - name: Validate WASM files
         run: |
           for wasm_file in contracts/target/wasm32-unknown-unknown/release/*.wasm; do
-            if [ -f "$wasm_file" ]; then
-              echo "Validating: $wasm_file"
-              soroban contract inspect --wasm "$wasm_file" || echo "Warning: inspect failed for $wasm_file"
-            fi
+            echo "Validating: $wasm_file"
+            stellar contract info interface --wasm "$wasm_file" > /dev/null
           done
 
-  deploy-testnet:
-    name: Deploy to Testnet
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'testnet' }}
     runs-on: ubuntu-latest
     needs: validate
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    environment: testnet
+    environment: ${{ github.event.inputs.environment || 'testnet' }}
+    env:
+      # Read by the stellar CLI for every deploy/invoke below, so the key is
+      # never echoed or written to disk.
+      STELLAR_NETWORK: ${{ github.event.inputs.environment || 'testnet' }}
+      STELLAR_ACCOUNT: ${{ (github.event.inputs.environment == 'futurenet' && secrets.SOROBAN_FUTURENET_SECRET_KEY) || secrets.SOROBAN_SECRET_KEY }}
 
     steps:
+      - name: Check deployment key
+        id: key
+        run: |
+          if [ -z "$STELLAR_ACCOUNT" ]; then
+            echo "::notice::No deployer secret key for $STELLAR_NETWORK; skipping deployment."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
+        if: steps.key.outputs.present == 'true'
         uses: actions/checkout@v4
 
       - name: Install Rust
+        if: steps.key.outputs.present == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo
+        if: steps.key.outputs.present == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -99,36 +120,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-soroban-
 
-      - name: Install system dependencies for soroban-cli
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
-
-      - name: Install Soroban CLI
+      - name: Install stellar CLI
+        if: steps.key.outputs.present == 'true'
         run: |
-          cargo install --locked soroban-cli 2>&1 || cargo install soroban-cli
-          soroban --version
-
-      - name: Configure Soroban CLI
-        run: |
-          soroban config network add testnet \
-            --rpc-url https://soroban-testnet.stellar.org:443 \
-            --network-passphrase "Test SDF Network ; September 2015"
-
-      - name: Setup deployment identity
-        run: |
-          if [ -z "${{ secrets.SOROBAN_SECRET_KEY }}" ]; then
-            echo "SOROBAN_SECRET_KEY is not set – skipping deployment"
-            exit 0
-          fi
-          echo "${{ secrets.SOROBAN_SECRET_KEY }}" > secret.key
-          soroban config identity add testnet-deployer \
-            --secret-key "$(cat secret.key)"
-          rm -f secret.key
+          curl -sSL -o /tmp/stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/stellar /usr/local/bin/stellar
+          stellar --version
 
       - name: Build contracts
+        if: steps.key.outputs.present == 'true'
         working-directory: contracts
         run: cargo build --release --target wasm32-unknown-unknown
 
       - name: Deploy contracts
+        if: steps.key.outputs.present == 'true'
         env:
           CONTRACT_NAME: ${{ github.event.inputs.contract_name }}
           DEPLOYER_ADDRESS: ${{ secrets.DEPLOYER_ADDRESS }}
@@ -137,163 +144,57 @@ jobs:
           ORACLE_3_ADDRESS: ${{ secrets.ORACLE_3_ADDRESS }}
           ORACLE_THRESHOLD: ${{ secrets.ORACLE_THRESHOLD || '2' }}
         run: |
+          set -euo pipefail
           cd contracts
+          release=target/wasm32-unknown-unknown/release
 
-          if [ -n "$CONTRACT_NAME" ]; then
-            echo "Deploying contract: $CONTRACT_NAME"
-            WASM_FILE="target/wasm32-unknown-unknown/release/${CONTRACT_NAME}.wasm"
-
-            if [ ! -f "$WASM_FILE" ]; then
-              echo "Error: WASM file not found: $WASM_FILE"
-              exit 1
-            fi
-
-            CONTRACT_ID=$(soroban contract deploy \
-              --wasm "$WASM_FILE" \
-              --source testnet-deployer \
-              --network testnet)
-            echo "Contract ID: $CONTRACT_ID"
-            echo "${CONTRACT_NAME}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
-            if [ "${CONTRACT_NAME}" = "title_badge" ]; then
-              soroban contract invoke \
-                --id "${CONTRACT_ID}" \
-                --source testnet-deployer \
-                --network testnet \
-                -- \
-                initialize \
-                --admin "${DEPLOYER_ADDRESS}" \
-                --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
-                --threshold "${ORACLE_THRESHOLD}"
-            fi
+          if [ -n "${CONTRACT_NAME:-}" ]; then
+            wasm_files="$release/${CONTRACT_NAME}.wasm"
+            [ -f "$wasm_files" ] || { echo "Error: WASM file not found: $wasm_files"; exit 1; }
           else
-            for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
-              if [ -f "$wasm_file" ]; then
-                contract_name=$(basename "$wasm_file" .wasm)
-                echo "Deploying $contract_name..."
-                CONTRACT_ID=$(soroban contract deploy \
-                  --wasm "$wasm_file" \
-                  --source testnet-deployer \
-                  --network testnet)
-                echo "$contract_name deployed: $CONTRACT_ID"
-                echo "${contract_name}=${CONTRACT_ID}" >> $GITHUB_OUTPUT
-                if [ "$contract_name" = "title_badge" ]; then
-                  soroban contract invoke \
-                    --id "${CONTRACT_ID}" \
-                    --source testnet-deployer \
-                    --network testnet \
-                    -- \
-                    initialize \
-                    --admin "${DEPLOYER_ADDRESS}" \
-                    --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
-                    --threshold "${ORACLE_THRESHOLD}"
-                fi
-              fi
-            done
+            wasm_files=$(ls "$release"/*.wasm)
           fi
 
+          for wasm_file in $wasm_files; do
+            contract_name=$(basename "$wasm_file" .wasm)
+            echo "Deploying $contract_name to $STELLAR_NETWORK..."
+            contract_id=$(stellar contract deploy --wasm "$wasm_file")
+            echo "$contract_name deployed: $contract_id"
+            echo "${contract_name}=${contract_id}" >> deployed-contracts.txt
+            if [ "$contract_name" = "title_badge" ]; then
+              stellar contract invoke --id "$contract_id" -- \
+                initialize \
+                --admin "$DEPLOYER_ADDRESS" \
+                --verifiers "[\"$ORACLE_1_ADDRESS\", \"$ORACLE_2_ADDRESS\", \"$ORACLE_3_ADDRESS\"]" \
+                --threshold "$ORACLE_THRESHOLD"
+            fi
+          done
+
       - name: Save deployment artifacts
+        if: steps.key.outputs.present == 'true'
         run: |
           mkdir -p deployment-artifacts
-          cp contracts/target/wasm32-unknown-unknown/release/*.wasm deployment-artifacts/ 2>/dev/null || true
-          echo "Deployment completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-artifacts/deployment-log.txt
-          echo "Commit: ${{ github.sha }}" >> deployment-artifacts/deployment-log.txt
-          echo "Branch: ${{ github.ref_name }}" >> deployment-artifacts/deployment-log.txt
+          cp contracts/target/wasm32-unknown-unknown/release/*.wasm deployment-artifacts/
+          cp contracts/deployed-contracts.txt deployment-artifacts/
+          {
+            echo "Network: $STELLAR_NETWORK"
+            echo "Deployment completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Commit: ${{ github.sha }}"
+            echo "Branch: ${{ github.ref_name }}"
+          } > deployment-artifacts/deployment-log.txt
 
       - name: Upload deployment artifacts
+        if: steps.key.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: soroban-deployment-artifacts
           path: deployment-artifacts/
           retention-days: 30
 
-  deploy-futurenet:
-    name: Deploy to Futurenet
-    runs-on: ubuntu-latest
-    needs: validate
-    if: github.event.inputs.environment == 'futurenet'
-    environment: futurenet
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            contracts/target
-          key: ${{ runner.os }}-soroban-${{ hashFiles('contracts/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-soroban-
-
-      - name: Install system dependencies for soroban-cli
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
-
-      - name: Install Soroban CLI
-        run: |
-          cargo install --locked soroban-cli 2>&1 || cargo install soroban-cli
-          soroban --version
-
-      - name: Configure Soroban CLI
-        run: |
-          soroban config network add futurenet \
-            --rpc-url https://rpc-futurenet.stellar.org:443 \
-            --network-passphrase "Test SDF Future Network ; October 2022"
-
-      - name: Setup deployment identity
-        run: |
-          echo "${{ secrets.SOROBAN_FUTURENET_SECRET_KEY }}" > secret.key
-          soroban config identity add futurenet-deployer \
-            --secret-key "$(cat secret.key)"
-          rm -f secret.key
-
-      - name: Build contracts
-        working-directory: contracts
-        run: cargo build --release --target wasm32-unknown-unknown
-
-      - name: Deploy contracts
-        env:
-          DEPLOYER_ADDRESS: ${{ secrets.DEPLOYER_ADDRESS }}
-          ORACLE_1_ADDRESS: ${{ secrets.ORACLE_1_ADDRESS }}
-          ORACLE_2_ADDRESS: ${{ secrets.ORACLE_2_ADDRESS }}
-          ORACLE_3_ADDRESS: ${{ secrets.ORACLE_3_ADDRESS }}
-          ORACLE_THRESHOLD: ${{ secrets.ORACLE_THRESHOLD || '2' }}
-        run: |
-          cd contracts
-          for wasm_file in target/wasm32-unknown-unknown/release/*.wasm; do
-            if [ -f "$wasm_file" ]; then
-              contract_name=$(basename "$wasm_file" .wasm)
-              echo "Deploying $contract_name to futurenet..."
-              CONTRACT_ID=$(soroban contract deploy \
-                --wasm "$wasm_file" \
-                --source futurenet-deployer \
-                --network futurenet)
-              echo "$contract_name deployed to futurenet: $CONTRACT_ID"
-              if [ "$contract_name" = "title_badge" ]; then
-                soroban contract invoke \
-                  --id "${CONTRACT_ID}" \
-                  --source futurenet-deployer \
-                  --network futurenet \
-                  -- \
-                  initialize \
-                  --admin "${DEPLOYER_ADDRESS}" \
-                  --verifiers "[${ORACLE_1_ADDRESS}, ${ORACLE_2_ADDRESS}, ${ORACLE_3_ADDRESS}]" \
-                  --threshold "${ORACLE_THRESHOLD}"
-              fi
-            fi
-          done
-
   notify:
     name: Deployment Summary
     runs-on: ubuntu-latest
-    needs: [validate, deploy-testnet]
+    needs: [validate, deploy]
     if: always()
 
     steps:
@@ -302,7 +203,7 @@ jobs:
           echo "## Soroban Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Validation**: ${{ needs.validate.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Testnet Deploy**: ${{ needs.deploy-testnet.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy (${{ github.event.inputs.environment || 'testnet' }})**: ${{ needs.deploy.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

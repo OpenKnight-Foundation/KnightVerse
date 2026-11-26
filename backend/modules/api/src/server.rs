@@ -639,84 +639,159 @@ mod tests {
         assert_eq!(body, serde_json::json!({"status": "ok"}));
     }
 
-    #[actix_web::test]
-    async fn check_db_ok_when_primary_responds() {
-        assert!(check_db(&mock_db(), TEST_TIMEOUT).await.is_ok());
-    }
+   
+#[actix_web::test]
+async fn check_db_ok_when_primary_responds() {
+    let result = check_db(&mock_db(), TEST_TIMEOUT).await;
 
-    #[actix_web::test]
-    async fn check_db_fails_when_primary_disconnected() {
-        assert!(check_db(&DatabaseConnection::Disconnected, TEST_TIMEOUT)
-            .await
-            .is_err());
-    }
+    assert!(
+        result.is_ok(),
+        "Expected database health check to succeed, got: {result:?}"
+    );
+}
 
-    #[actix_web::test]
-    async fn check_redis_fails_when_connection_refused() {
-        assert!(check_redis(&refused_redis_pool(), TEST_TIMEOUT)
-            .await
-            .is_err());
-    }
+#[actix_web::test]
+async fn check_db_fails_when_primary_disconnected() {
+    let result = check_db(&DatabaseConnection::Disconnected, TEST_TIMEOUT).await;
 
-    #[actix_web::test]
-    async fn check_redis_times_out_when_server_never_replies() {
-        // Accept connections but never write a byte back, so PING hangs.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let _accept = tokio::spawn(async move {
-            let mut held = Vec::new();
-            while let Ok((sock, _)) = listener.accept().await {
-                held.push(sock);
-            }
-        });
-        let pool = create_redis_pool(&format!("redis://127.0.0.1:{port}")).unwrap();
+    assert!(
+        result.is_err(),
+        "Expected database health check to fail when primary is disconnected"
+    );
+}
 
-        let start = std::time::Instant::now();
-        let err = check_redis(&pool, TEST_TIMEOUT).await.unwrap_err();
-        assert!(err.contains("timed out"), "unexpected error: {err}");
-        assert!(start.elapsed() < Duration::from_secs(2));
-    }
+#[actix_web::test]
+async fn check_redis_fails_when_connection_refused() {
+    let pool = refused_redis_pool();
+    let result = check_redis(&pool, TEST_TIMEOUT).await;
 
-    #[actix_web::test]
-    async fn readiness_returns_503_when_redis_down() {
-        let res = readiness_response(&pool_of(mock_db()), &refused_redis_pool(), TEST_TIMEOUT)
-            .await;
-        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["status"], "error");
-        assert_eq!(body["checks"]["database"]["status"], "ok");
-        assert_eq!(body["checks"]["redis"]["status"], "error");
-    }
+    assert!(
+        result.is_err(),
+        "Expected Redis health check to fail when the connection is refused"
+    );
+}
 
-    #[actix_web::test]
-    async fn readiness_returns_503_when_db_down() {
-        let res = readiness_response(
-            &pool_of(Arc::new(DatabaseConnection::Disconnected)),
-            &refused_redis_pool(),
-            TEST_TIMEOUT,
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let bytes = actix_web::body::to_bytes(res.into_body()).await.unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["checks"]["database"]["status"], "error");
-    }
+#[actix_web::test]
+async fn check_redis_times_out_when_server_never_replies() {
+    // Accept connections without responding, causing PING to hang.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind test TCP listener");
 
-    #[actix_web::test]
-    async fn readiness_route_is_registered_and_reports_unready() {
-        let app = test::init_service(
-            App::new()
-                .app_data(web::Data::new(pool_of(mock_db())))
-                .app_data(web::Data::new(refused_redis_pool()))
-                .route("/health/ready", web::get().to(readiness)),
-        )
-        .await;
-        let res = test::call_service(
-            &app,
-            test::TestRequest::get().uri("/health/ready").to_request(),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
-    }
+    let port = listener
+        .local_addr()
+        .expect("Failed to retrieve listener address")
+        .port();
+
+    let _server = tokio::spawn(async move {
+        let mut connections = Vec::new();
+
+        while let Ok((socket, _)) = listener.accept().await {
+            connections.push(socket);
+        }
+    });
+
+    let redis_url = format!("redis://127.0.0.1:{port}");
+    let pool = create_redis_pool(&redis_url)
+        .expect("Failed to create Redis test pool");
+
+    let start = std::time::Instant::now();
+    let result = check_redis(&pool, TEST_TIMEOUT).await;
+    let elapsed = start.elapsed();
+
+    let err = result.expect_err("Expected Redis health check to time out");
+
+    assert!(
+        err.contains("timed out"),
+        "Expected timeout error, got: {err}"
+    );
+
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "Redis health check took too long: {elapsed:?}"
+    );
+}
+
+async fn parse_response_body(
+    res: actix_web::dev::ServiceResponse,
+) -> (StatusCode, serde_json::Value) {
+    let status = res.status();
+
+    let body = actix_web::body::to_bytes(res.into_body())
+        .await
+        .expect("Failed to read response body");
+
+    let json = serde_json::from_slice(&body)
+        .expect("Response body should contain valid JSON");
+
+    (status, json)
+}
+
+fn assert_check_status(
+    body: &serde_json::Value,
+    check: &str,
+    expected: &str,
+) {
+    assert_eq!(
+        body["checks"][check]["status"],
+        expected,
+        "Unexpected status for {check} health check"
+    );
+}
+
+#[actix_web::test]
+async fn readiness_returns_503_when_redis_down() {
+    let res = readiness_response(
+        &pool_of(mock_db()),
+        &refused_redis_pool(),
+        TEST_TIMEOUT,
+    )
+    .await;
+
+    let (status, body) = parse_response_body(res).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["status"], "error");
+
+    assert_check_status(&body, "database", "ok");
+    assert_check_status(&body, "redis", "error");
+}
+
+#[actix_web::test]
+async fn readiness_returns_503_when_db_down() {
+    let disconnected_db = Arc::new(DatabaseConnection::Disconnected);
+
+    let res = readiness_response(
+        &pool_of(disconnected_db),
+        &refused_redis_pool(),
+        TEST_TIMEOUT,
+    )
+    .await;
+
+    let (status, body) = parse_response_body(res).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["status"], "error");
+
+    assert_check_status(&body, "database", "error");
+    assert_check_status(&body, "redis", "error");
+}
+
+#[actix_web::test]
+async fn readiness_route_is_registered_and_reports_unready() {
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(pool_of(mock_db())))
+            .app_data(web::Data::new(refused_redis_pool()))
+            .route("/health/ready", web::get().to(readiness)),
+    )
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/health/ready")
+        .to_request();
+
+    let res = test::call_service(&app, req).await;
+
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 }

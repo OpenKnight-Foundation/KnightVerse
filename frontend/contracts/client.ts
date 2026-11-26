@@ -37,13 +37,17 @@ export interface YieldStakingConfig {
   poolAddress: string;
 }
 
+/** `NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID` — yield-staking contract. */
+export function getYieldStakingContractId(): string | undefined {
+  return process.env.NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID?.trim() || undefined;
+}
+
 /**
  * `NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID` + `NEXT_PUBLIC_YIELD_STAKING_POOL_ADDRESS`.
  * Both are required — staking without a pool is not a valid on-chain call.
  */
 export function getYieldStakingConfig(): YieldStakingConfig | undefined {
-  const contractId =
-    process.env.NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID?.trim() || undefined;
+  const contractId = getYieldStakingContractId();
   const poolAddress =
     process.env.NEXT_PUBLIC_YIELD_STAKING_POOL_ADDRESS?.trim() || undefined;
   if (!contractId || !poolAddress) return undefined;

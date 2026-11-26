@@ -492,4 +492,26 @@ describe("Typed Contract Clients & Registry", () => {
     const found = findRegisteredClient("C_REGISTRY_TEST");
     expect(found).toBe(client);
   });
+
+  it("resolves NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID and NEXT_PUBLIC_GAME_CONTRACT_ID in getContractClient", () => {
+    const stakingId = "CSTAKINGCONTRACTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    const gameId = "CGAMECONTRACTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    vi.stubEnv("NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID", stakingId);
+    vi.stubEnv("NEXT_PUBLIC_GAME_CONTRACT_ID", gameId);
+
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(AppProvider, null, children);
+
+    const { result } = renderHook(() => useAppContext(), { wrapper });
+
+    const stakingClient = result.current.getContractClient<YieldStakingContractClient>("staking");
+    expect(stakingClient).toBeInstanceOf(YieldStakingContractClient);
+    expect(stakingClient.contractId).toBe(stakingId);
+
+    const puzzleClient = result.current.getContractClient<PuzzleRewardsContractClient>("puzzle");
+    expect(puzzleClient).toBeInstanceOf(PuzzleRewardsContractClient);
+    expect(puzzleClient.contractId).toBe(gameId);
+
+    vi.unstubAllEnvs();
+  });
 });

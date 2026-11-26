@@ -60,6 +60,14 @@ export const CONTRACT_STAKING = withDefault(
   process.env.NEXT_PUBLIC_STAKING_ESCROW_ADDRESS,
   "",
 );
+export const CONTRACT_YIELD_STAKING = withDefault(
+  process.env.NEXT_PUBLIC_YIELD_STAKING_CONTRACT_ID,
+  "",
+);
+export const CONTRACT_GAME = withDefault(
+  process.env.NEXT_PUBLIC_GAME_CONTRACT_ID,
+  "",
+);
 export const CONTRACT_GAME_ESCROW = withDefault(
   process.env.NEXT_PUBLIC_CONTRACT_GAME_ESCROW,
   "",
